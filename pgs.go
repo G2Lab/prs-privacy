@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -28,11 +30,13 @@ var ALL_FIELDS = []string{
 
 type Variant struct {
 	fields map[string]interface{}
+	priors map[int]float64
 }
 
 func NewVariant(fields map[string]interface{}) *Variant {
 	v := &Variant{
 		fields: make(map[string]interface{}),
+		priors: make(map[int]float64),
 	}
 
 	if weight, ok := fields["effect_weight"].(string); ok {
@@ -61,8 +65,8 @@ func (v *Variant) GetHmPos() string {
 	return v.fields["hm_pos"].(string)
 }
 
-func (v *Variant) GetID() string {
-	return v.fields["rsID"].(string)
+func (v *Variant) GetLocation() string {
+	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
 func (v *Variant) GetWeight() float64 {
@@ -139,7 +143,7 @@ func (p *PGS) Load(inputFile string) error {
 			fields[p.Fieldnames[i]] = value
 		}
 		variant := NewVariant(fields)
-		p.Variants[variant.GetID()] = variant
+		p.Variants[variant.GetLocation()] = variant
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -147,4 +151,106 @@ func (p *PGS) Load(inputFile string) error {
 	}
 
 	return nil
+}
+
+func (p *PGS) SortedLocations() []string {
+	sortedLoc := make([]string, 0, len(p.Variants))
+	for location := range p.Variants {
+		sortedLoc = append(sortedLoc, location)
+	}
+	for i := 0; i < len(sortedLoc)-1; i++ {
+		minIndex := i
+		for j := i + 1; j < len(sortedLoc); j++ {
+			if sortedLoc[j] < sortedLoc[minIndex] {
+				minIndex = j
+			}
+		}
+		if minIndex != i {
+			sortedLoc[i], sortedLoc[minIndex] = sortedLoc[minIndex], sortedLoc[i]
+		}
+	}
+	return sortedLoc
+}
+
+func (p *PGS) GetPriors() {
+	_, err := os.Stat(p.PgsID + ".priors")
+	if os.IsNotExist(err) {
+		priorsFile, error := os.Create(p.PgsID + ".priors")
+		if error != nil {
+			log.Printf("Error creating priors file: %s", error)
+			return
+		}
+		defer priorsFile.Close()
+		writer := csv.NewWriter(priorsFile)
+		writer.Write([]string{"chromosome", "position", "0", "1", "2"})
+		for _, variant := range p.Variants {
+			chr := variant.GetHmChr()
+			pos := variant.GetHmPos()
+			f, err := os.Open(fmt.Sprintf("data/prior/chr%s.csv", chr))
+			if err != nil {
+				log.Printf("Error opening file chr%s.csv: %s", chr, err)
+				continue
+			}
+			reader := csv.NewReader(f)
+			// Read header
+			_, err = reader.Read()
+			if err != nil {
+				fmt.Printf("Error reading priors file chr%s.csv: %v", chr, err)
+				continue
+			}
+
+			for {
+				row, err := reader.Read()
+				if err != nil {
+					break // Reached end of file or encountered an error
+				}
+				if row[0] != pos {
+					continue
+				}
+				fmt.Println(row)
+				zeroOneProb, err1 := strconv.ParseFloat(row[2], 64)
+				oneZeroProb, err2 := strconv.ParseFloat(row[3], 64)
+				if err1 != nil || err2 != nil {
+					log.Printf("Error converting probabilities from position %s in chr%s.csv: %s", pos, chr, err)
+					continue
+				}
+				writer.Write([]string{chr, pos, row[1], fmt.Sprintf("%.5f", zeroOneProb+oneZeroProb), row[4]})
+				break
+			}
+			f.Close()
+		}
+		writer.Flush()
+		priorsFile.Close()
+	}
+	priorsFile, err := os.Open(p.PgsID + ".priors")
+	if err != nil {
+		log.Printf("Error opening priors file: %v", err)
+		return
+	}
+	defer priorsFile.Close()
+	reader := csv.NewReader(priorsFile)
+	// Read header
+	header, err := reader.Read()
+	if err != nil {
+		log.Printf("Error reading header: %v", err)
+		return
+	}
+	for {
+		row, err := reader.Read()
+		if err != nil {
+			break // Reached end of file or encountered an error
+		}
+		chr := row[0]
+		pos := row[1]
+		location := fmt.Sprintf("%s:%s", chr, pos)
+		for i := 2; i < len(row); i++ {
+			key, err1 := strconv.Atoi(header[i])
+			value, err2 := strconv.ParseFloat(row[i], 64)
+			if err1 != nil || err2 != nil {
+				log.Printf("Error converting key %s or value %s to int: %v, %v", header[i], row[i], err1, err2)
+				continue
+			}
+			p.Variants[location].priors[key] = value
+		}
+	}
 }

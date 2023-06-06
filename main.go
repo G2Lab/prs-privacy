@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
-	"log"
-	"os/exec"
-	"strings"
-
 	"github.com/nikirill/prs/utils"
+	"log"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 )
+
+const SCORE = "score"
 
 func main() {
 	pgs := NewPGS()
@@ -16,8 +20,30 @@ func main() {
 		log.Println("Error:", err)
 		return
 	}
+	pgs.GetPriors()
 
-	individuals := make(map[string]map[string]float64)
+	cohort := NewCohort()
+	cohort.CalculatePRS(pgs)
+	FindSolution(cohort["NA20543"][SCORE], pgs)
+	//sortedInd := cohort.SortByScore()
+	//err = cohort.SaveScores(sortedInd)
+	//if err != nil {
+	//	log.Println("Error saving scores:", err)
+	//	return
+	//}
+	//for _, ind := range sortedInd {
+	//	fmt.Println(ind, c[ind][SCORE])
+	//}
+}
+
+type Cohort map[string]map[string]float64
+
+func NewCohort() Cohort {
+	c := make(Cohort)
+	return c
+}
+
+func (c Cohort) CalculatePRS(pgs *PGS) {
 	for _, variant := range pgs.Variants {
 		chr := variant.GetHmChr()
 		position := variant.GetHmPos()
@@ -33,7 +59,7 @@ func main() {
 		for _, sample := range samples {
 			fields := strings.Split(sample, "=")
 			if len(fields) != 2 {
-				fmt.Println("Error splitting sample:", sample)
+				//fmt.Println("Error splitting sample:", sample)
 				continue
 			}
 			individual := fields[0]
@@ -43,31 +69,25 @@ func main() {
 				fmt.Println(err)
 				continue
 			}
-			if _, ok := individuals[individual]; !ok {
-				individuals[individual] = make(map[string]float64)
+			if _, ok := c[individual]; !ok {
+				c[individual] = make(map[string]float64)
 			}
 			key := fmt.Sprintf("%s:%s", chr, position)
-			individuals[individual][key] = value
-			individuals[individual]["score"] += value * variant.GetWeight()
+			c[individual][key] = value
+			c[individual][SCORE] += value * variant.GetWeight()
 		}
-	}
-
-	sortedInd := make([]string, 0, len(individuals))
-	for ind := range individuals {
-		sortedInd = append(sortedInd, ind)
-	}
-	sortByScore(sortedInd, individuals)
-
-	for _, ind := range sortedInd {
-		fmt.Println(ind, individuals[ind]["score"])
 	}
 }
 
-func sortByScore(sortedInd []string, individuals map[string]map[string]float64) {
+func (c Cohort) SortByScore() []string {
+	sortedInd := make([]string, 0, len(c))
+	for ind := range c {
+		sortedInd = append(sortedInd, ind)
+	}
 	for i := 0; i < len(sortedInd)-1; i++ {
 		minIndex := i
 		for j := i + 1; j < len(sortedInd); j++ {
-			if individuals[sortedInd[j]]["score"] < individuals[sortedInd[minIndex]]["score"] {
+			if c[sortedInd[j]][SCORE] < c[sortedInd[minIndex]][SCORE] {
 				minIndex = j
 			}
 		}
@@ -75,4 +95,54 @@ func sortByScore(sortedInd []string, individuals map[string]map[string]float64) 
 			sortedInd[i], sortedInd[minIndex] = sortedInd[minIndex], sortedInd[i]
 		}
 	}
+	return sortedInd
+}
+
+func (c Cohort) SaveScores(sortedInd []string) error {
+	file, err := os.Create("scores.csv")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	writer := csv.NewWriter(file)
+	for _, ind := range sortedInd {
+		writer.Write([]string{ind, fmt.Sprintf("%0.17f", c[ind][SCORE])})
+	}
+	writer.Flush()
+	return nil
+}
+
+func (c Cohort) LoadScores(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			return err
+		}
+		individual := record[0]
+		score := record[1]
+		c[individual] = make(map[string]float64)
+		if v, err := strconv.ParseFloat(score, 64); err == nil {
+			c[individual][SCORE] = v
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+func FindSolution(score float64, pgs *PGS) []int {
+	candidates := make([][]int, 10)
+	variantLocations := pgs.SortedLocations()
+	fmt.Println(variantLocations)
+	for i := 0; i < len(candidates); i++ {
+		candidates[i] = make([]int, len(pgs.Variants))
+
+	}
+	return nil
 }
