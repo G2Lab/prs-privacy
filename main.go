@@ -3,28 +3,44 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/nikirill/prs/utils"
 	"log"
+	"math"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/nikirill/prs/utils"
 )
 
-const SCORE = "score"
+const (
+	SCORE      = "score"
+	ITERATIONS = 100
+	MARGIN     = 0.0001
+)
 
 func main() {
 	pgs := NewPGS()
-	err := pgs.Load("PGS000073_hmPOS_GRCh38.txt")
+	err := pgs.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
 	if err != nil {
 		log.Println("Error:", err)
 		return
 	}
-	pgs.GetPriors()
+	pgs.LoadPriors()
 
 	cohort := NewCohort()
 	cohort.CalculatePRS(pgs)
-	FindSolution(cohort["NA20543"][SCORE], pgs)
+	solution := FindSolution(cohort["NA20543"][SCORE], pgs)
+	fmt.Println(pgs.Weights)
+	fmt.Println("Guessed:", solution)
+	fmt.Print("True:     ")
+	for _, location := range pgs.Locations {
+		fmt.Printf("%.0f ", cohort["NA20543"][location])
+	}
+	fmt.Printf("\nGuessed score:%f\n", calculateScore(solution, pgs.Weights))
+	fmt.Printf("True score:%f", cohort["NA20543"][SCORE])
 	//sortedInd := cohort.SortByScore()
 	//err = cohort.SaveScores(sortedInd)
 	//if err != nil {
@@ -136,13 +152,83 @@ func (c Cohort) LoadScores(filename string) error {
 	return nil
 }
 
-func FindSolution(score float64, pgs *PGS) []int {
+func FindSolution(targetScore float64, pgs *PGS) []int {
+	SNPS := [...]int{0, 1, 2}
 	candidates := make([][]int, 10)
-	variantLocations := pgs.SortedLocations()
-	fmt.Println(variantLocations)
+	weights := pgs.Weights
+
+	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
 		candidates[i] = make([]int, len(pgs.Variants))
+		for j, loc := range pgs.Locations {
+			candidates[i][j] = sample(pgs.GetVariantPriors(loc))
+			if candidates[i][j] == -1 {
+				fmt.Println("Error sampling candidate")
+				return nil
+			}
+		}
+	}
 
+	// Evaluate candidates
+	var delta float64
+	//mutated := make([][]int, len(candidates))
+	for k := 0; k < ITERATIONS; k++ {
+		for j, candidate := range candidates {
+			delta = calculateScore(candidate, weights) - targetScore
+			//fmt.Println(candidate, delta)
+			if math.Abs(delta) < MARGIN {
+				fmt.Println("Found solution:", candidate)
+				return candidate
+			}
+			// the weights that cover the delta better, get higher probability of being selected
+			// big delta -> bigger weights get higher probability.
+			// probability = 1 / abs( delta - weight * snp_old + weight * snp_new )
+			possibleMutations := make([]int, 0, len(candidate)*(len(SNPS)-1))
+			probs := make([]float64, 0)
+			for i, snp := range candidate {
+				tmp := delta
+				tmp -= weights[i] * float64(snp)
+				for _, v := range SNPS {
+					if v == snp {
+						continue
+					}
+					possibleMutations = append(possibleMutations, v)
+					if math.Abs(tmp+weights[i]*float64(v)) < MARGIN {
+						//fmt.Println("Found solution:", candidate)
+						//fmt.Printf("%d -> %d\n", i, v)
+						candidate[i] = v
+						return candidate
+					}
+					probs = append(probs, 1/math.Abs(tmp+weights[i]*float64(v)))
+				}
+			}
+			//mutated[j] = pgs.MutateVariant(candidate, possibleMutations, probs)
+			candidates[j] = pgs.MutateVariant(candidate, possibleMutations, probs)
+		}
 	}
 	return nil
+}
+
+func sample(distribution map[int]float64) int {
+	rand.NewSource(time.Now().UnixNano())
+	cumulative := 0.0
+	for _, p := range distribution {
+		cumulative += p
+	}
+	r := rand.Float64() * cumulative
+	for k, v := range distribution {
+		r -= v
+		if r <= 0.0 {
+			return k
+		}
+	}
+	return -1
+}
+
+func calculateScore(snps []int, weights []float64) float64 {
+	score := 0.0
+	for i, snp := range snps {
+		score += float64(snp) * weights[i]
+	}
+	return score
 }

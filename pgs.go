@@ -5,9 +5,11 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var ALL_FIELDS = []string{
@@ -86,6 +88,8 @@ type PGS struct {
 	VariantsNumber int
 	Fieldnames     []string
 	Variants       map[string]*Variant
+	Locations      []string
+	Weights        []float64
 }
 
 func NewPGS() *PGS {
@@ -94,7 +98,7 @@ func NewPGS() *PGS {
 	}
 }
 
-func (p *PGS) Load(inputFile string) error {
+func (p *PGS) LoadCatalogFile(inputFile string) error {
 	file, err := os.Open(inputFile)
 	if err != nil {
 		return err
@@ -145,6 +149,11 @@ func (p *PGS) Load(inputFile string) error {
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocation()] = variant
 	}
+	p.Locations = p.GetSortedVariantLocations()
+	p.Weights = make([]float64, len(p.Locations))
+	for i, loc := range p.Locations {
+		p.Weights[i] = p.Variants[loc].GetWeight()
+	}
 
 	if err := scanner.Err(); err != nil {
 		return err
@@ -153,7 +162,7 @@ func (p *PGS) Load(inputFile string) error {
 	return nil
 }
 
-func (p *PGS) SortedLocations() []string {
+func (p *PGS) GetSortedVariantLocations() []string {
 	sortedLoc := make([]string, 0, len(p.Variants))
 	for location := range p.Variants {
 		sortedLoc = append(sortedLoc, location)
@@ -172,7 +181,7 @@ func (p *PGS) SortedLocations() []string {
 	return sortedLoc
 }
 
-func (p *PGS) GetPriors() {
+func (p *PGS) LoadPriors() {
 	_, err := os.Stat(p.PgsID + ".priors")
 	if os.IsNotExist(err) {
 		priorsFile, error := os.Create(p.PgsID + ".priors")
@@ -253,4 +262,38 @@ func (p *PGS) GetPriors() {
 			p.Variants[location].priors[key] = value
 		}
 	}
+}
+
+func (p *PGS) MutateVariant(original, mutations []int, probabilities []float64) []int {
+	candidatesPerVariant := len(mutations) / len(original)
+	for i := range original {
+		priors := p.Variants[p.Locations[i]].priors
+		currentVariant := i * candidatesPerVariant
+		for j := 0; j < candidatesPerVariant; j++ {
+			probabilities[currentVariant+j] = probabilities[currentVariant+j] * priors[mutations[currentVariant+j]]
+		}
+	}
+	mutationId := sampleSlice(probabilities)
+	original[mutationId/candidatesPerVariant] = mutations[mutationId]
+	return original
+}
+
+func (p *PGS) GetVariantPriors(location string) map[int]float64 {
+	return p.Variants[location].priors
+}
+
+func sampleSlice(distribution []float64) int {
+	rand.NewSource(time.Now().UnixNano())
+	cumulative := 0.0
+	for _, p := range distribution {
+		cumulative += p
+	}
+	r := rand.Float64() * cumulative
+	for k, v := range distribution {
+		r -= v
+		if r <= 0.0 {
+			return k
+		}
+	}
+	return -1
 }

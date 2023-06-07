@@ -7,7 +7,7 @@ import (
 
 func TestPGSLoad(t *testing.T) {
 	p := NewPGS()
-	err := p.Load("PGS000073_hmPOS_GRCh38.txt")
+	err := p.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
