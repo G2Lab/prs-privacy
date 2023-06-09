@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nikirill/prs/utils"
+	"github.com/nikirill/prs/tools"
 )
 
 const (
@@ -40,7 +40,7 @@ func main() {
 				log.Fatalf("Error writing header to file chr%d.csv: %s\n", chr, err)
 			}
 			// Get all the SNP positions for this chromosome
-			query, args := utils.AllChrPositionsQuery(strconv.Itoa(chr))
+			query, args := tools.AllChrPositionsQuery(strconv.Itoa(chr))
 			cmd := exec.Command(query, args...)
 			output, err := cmd.Output()
 			if err != nil {
@@ -54,7 +54,7 @@ func main() {
 				if end >= len(positions) {
 					end = len(positions) - 1
 				}
-				query, args := utils.RangeSnpValuesQuery(strconv.Itoa(chr), positions[i], positions[end])
+				query, args := tools.RangeSnpValuesQuery(strconv.Itoa(chr), positions[i], positions[end])
 				cmd := exec.Command(query, args...)
 				output, err := cmd.Output()
 				if err != nil {

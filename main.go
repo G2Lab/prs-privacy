@@ -1,171 +1,79 @@
 package main
 
 import (
-	"encoding/csv"
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
-	"os"
-	"os/exec"
-	"strconv"
 	"strings"
-	"time"
-
-	"github.com/nikirill/prs/utils"
 )
 
 const (
 	SCORE      = "score"
-	ITERATIONS = 100
-	MARGIN     = 0.0001
+	ITERATIONS = 1000
+	MARGIN     = 0.0000001
 )
 
+var GENOTYPES = [...]int{0, 1, 2}
+
 func main() {
+	//INDIVIDUAL := "NA20543"
+	INDIVIDUAL := "NA11881"
+	//INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "HG03304"
+	//INDIVIDUAL := "NA19082"
+	//INDIVIDUAL := "HG03022"
+	//INDIVIDUAL := "HG01767"
+	//INDIVIDUAL := "HG01868"
 	pgs := NewPGS()
-	err := pgs.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
+	//err := pgs.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
+	//err := pgs.LoadCatalogFile("PGS000037_hmPOS_GRCh38.txt")
+	err := pgs.LoadCatalogFile("PGS000040_hmPOS_GRCh38.txt")
 	if err != nil {
 		log.Println("Error:", err)
 		return
 	}
 	pgs.LoadPriors()
-
 	cohort := NewCohort()
 	cohort.CalculatePRS(pgs)
-	solution := FindSolution(cohort["NA20543"][SCORE], pgs)
-	fmt.Println(pgs.Weights)
-	fmt.Println("Guessed:", solution)
-	fmt.Print("True:     ")
-	for _, location := range pgs.Locations {
-		fmt.Printf("%.0f ", cohort["NA20543"][location])
-	}
-	fmt.Printf("\nGuessed score:%f\n", calculateScore(solution, pgs.Weights))
-	fmt.Printf("True score:%f", cohort["NA20543"][SCORE])
-	//sortedInd := cohort.SortByScore()
-	//err = cohort.SaveScores(sortedInd)
-	//if err != nil {
-	//	log.Println("Error saving scores:", err)
-	//	return
-	//}
-	//for _, ind := range sortedInd {
-	//	fmt.Println(ind, c[ind][SCORE])
-	//}
-}
 
-type Cohort map[string]map[string]float64
-
-func NewCohort() Cohort {
-	c := make(Cohort)
-	return c
-}
-
-func (c Cohort) CalculatePRS(pgs *PGS) {
-	for _, variant := range pgs.Variants {
-		chr := variant.GetHmChr()
-		position := variant.GetHmPos()
-		query, args := utils.IndividualSnpsQuery(chr, position)
-		cmd := exec.Command(query, args...)
-		output, err := cmd.Output()
-		if err != nil {
-			fmt.Println("Error executing bcftools command:", err)
-			continue
-		}
-
-		samples := strings.Split(string(output), "\t")
-		for _, sample := range samples {
-			fields := strings.Split(sample, "=")
-			if len(fields) != 2 {
-				//fmt.Println("Error splitting sample:", sample)
-				continue
-			}
-			individual := fields[0]
-			snp := fields[1]
-			value, err := utils.SnpToValue(snp)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			if _, ok := c[individual]; !ok {
-				c[individual] = make(map[string]float64)
-			}
-			key := fmt.Sprintf("%s:%s", chr, position)
-			c[individual][key] = value
-			c[individual][SCORE] += value * variant.GetWeight()
-		}
-	}
-}
-
-func (c Cohort) SortByScore() []string {
-	sortedInd := make([]string, 0, len(c))
-	for ind := range c {
-		sortedInd = append(sortedInd, ind)
-	}
-	for i := 0; i < len(sortedInd)-1; i++ {
-		minIndex := i
-		for j := i + 1; j < len(sortedInd); j++ {
-			if c[sortedInd[j]][SCORE] < c[sortedInd[minIndex]][SCORE] {
-				minIndex = j
-			}
-		}
-		if minIndex != i {
-			sortedInd[i], sortedInd[minIndex] = sortedInd[minIndex], sortedInd[i]
-		}
-	}
-	return sortedInd
-}
-
-func (c Cohort) SaveScores(sortedInd []string) error {
-	file, err := os.Create("scores.csv")
+	err = cohort.SaveScores(pgs.PgsID)
 	if err != nil {
-		return err
+		log.Println("Error saving scores:", err)
+		return
 	}
-	defer file.Close()
-	writer := csv.NewWriter(file)
-	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf("%0.17f", c[ind][SCORE])})
+	target := make([]int, len(pgs.Variants))
+	for i, locus := range pgs.Loci {
+		target[i] = int(cohort[INDIVIDUAL][locus])
 	}
-	writer.Flush()
-	return nil
+
+	solutions := Solve(cohort[INDIVIDUAL][SCORE], pgs)
+	//for i := range pgs.Weights {
+	//	fmt.Printf("%.5f ", pgs.Weights[i])
+	//}
+	sortedSolutions := sortByAccuracy(solutions, target)
+	fmt.Printf("True:\n%s\n", arrayTostring(target))
+	fmt.Printf("Guessed:\n")
+	for _, solution := range sortedSolutions {
+		fmt.Printf("%s -- %f\n", arrayTostring(solution), accuracy(solution, target))
+	}
+	//fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
+	//fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, pgs.Weights))
+	//fmt.Printf("Accuracy: %.2f\n", accuracy(solution, target))
+	//allPermutations(solution, pgs.Weights)
 }
 
-func (c Cohort) LoadScores(filename string) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	reader := csv.NewReader(file)
-	for {
-		record, err := reader.Read()
-		if err != nil {
-			return err
-		}
-		individual := record[0]
-		score := record[1]
-		c[individual] = make(map[string]float64)
-		if v, err := strconv.ParseFloat(score, 64); err == nil {
-			c[individual][SCORE] = v
-		} else {
-			return err
-		}
-	}
-	return nil
-}
-
-func FindSolution(targetScore float64, pgs *PGS) []int {
-	SNPS := [...]int{0, 1, 2}
-	candidates := make([][]int, 10)
+func Solve(targetScore float64, pgs *PGS) map[string][]int {
+	var err error
+	candidates := make([][]int, len(pgs.Variants))
+	solutions := make(map[string][]int, 0)
 	weights := pgs.Weights
 
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
-		candidates[i] = make([]int, len(pgs.Variants))
-		for j, loc := range pgs.Locations {
-			candidates[i][j] = sample(pgs.GetVariantPriors(loc))
-			if candidates[i][j] == -1 {
-				fmt.Println("Error sampling candidate")
-				return nil
-			}
+		candidates[i], err = pgs.SampleFromPopulation()
+		if err != nil {
+			fmt.Println(err)
+			return nil
 		}
 	}
 
@@ -173,56 +81,49 @@ func FindSolution(targetScore float64, pgs *PGS) []int {
 	var delta float64
 	//mutated := make([][]int, len(candidates))
 	for k := 0; k < ITERATIONS; k++ {
+	candidateLoop:
 		for j, candidate := range candidates {
 			delta = calculateScore(candidate, weights) - targetScore
-			//fmt.Println(candidate, delta)
 			if math.Abs(delta) < MARGIN {
-				fmt.Println("Found solution:", candidate)
-				return candidate
+				solutions[arrayTostring(candidate)] = candidate
+				candidates[j], err = pgs.SampleFromPopulation()
+				if err != nil {
+					fmt.Println(err)
+					return nil
+				}
+				continue
 			}
 			// the weights that cover the delta better, get higher probability of being selected
 			// big delta -> bigger weights get higher probability.
 			// probability = 1 / abs( delta - weight * snp_old + weight * snp_new )
-			possibleMutations := make([]int, 0, len(candidate)*(len(SNPS)-1))
+			possibleMutations := make([]int, 0, len(candidate)*(len(GENOTYPES)-1))
 			probs := make([]float64, 0)
 			for i, snp := range candidate {
 				tmp := delta
 				tmp -= weights[i] * float64(snp)
-				for _, v := range SNPS {
+				for _, v := range GENOTYPES {
 					if v == snp {
 						continue
 					}
 					possibleMutations = append(possibleMutations, v)
 					if math.Abs(tmp+weights[i]*float64(v)) < MARGIN {
-						//fmt.Println("Found solution:", candidate)
-						//fmt.Printf("%d -> %d\n", i, v)
 						candidate[i] = v
-						return candidate
+						solutions[arrayTostring(candidate)] = candidate
+						candidates[j], err = pgs.SampleFromPopulation()
+						if err != nil {
+							fmt.Println(err)
+							return nil
+						}
+						continue candidateLoop
 					}
 					probs = append(probs, 1/math.Abs(tmp+weights[i]*float64(v)))
 				}
 			}
-			//mutated[j] = pgs.MutateVariant(candidate, possibleMutations, probs)
-			candidates[j] = pgs.MutateVariant(candidate, possibleMutations, probs)
+			//mutated[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
+			candidates[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
 		}
 	}
-	return nil
-}
-
-func sample(distribution map[int]float64) int {
-	rand.NewSource(time.Now().UnixNano())
-	cumulative := 0.0
-	for _, p := range distribution {
-		cumulative += p
-	}
-	r := rand.Float64() * cumulative
-	for k, v := range distribution {
-		r -= v
-		if r <= 0.0 {
-			return k
-		}
-	}
-	return -1
+	return solutions
 }
 
 func calculateScore(snps []int, weights []float64) float64 {
@@ -231,4 +132,69 @@ func calculateScore(snps []int, weights []float64) float64 {
 		score += float64(snp) * weights[i]
 	}
 	return score
+}
+
+func accuracy(solution []int, target []int) float64 {
+	if len(solution) != len(target) {
+		return 0.0
+	}
+	acc := 0.0
+	for i := range solution {
+		if solution[i] == target[i] {
+			acc++
+		}
+	}
+	return acc / float64(len(solution))
+}
+
+func allPermutations(origin []int, weights []float64) [][]int {
+	permutations := make([][]int, 1)
+	permutations[0] = origin
+	// Find all the positions by their weights
+	duplicates := make(map[float64][]int)
+	for i, weight := range weights {
+		if _, ok := duplicates[weight]; !ok {
+			duplicates[weight] = make([]int, 0)
+		}
+		duplicates[weight] = append(duplicates[weight], i)
+	}
+	// Remove all the unique weights, and leave only the duplicates
+	for _, weight := range weights {
+		if len(duplicates[weight]) < 2 {
+			delete(duplicates, weight)
+		}
+	}
+	//for i := range origin {
+	//
+	//}
+	return permutations
+}
+
+func arrayTostring(array []int) string {
+	str := make([]string, len(array))
+	for i, num := range array {
+		str[i] = fmt.Sprint(num)
+	}
+	return strings.Join(str, "")
+}
+
+func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
+	sorted := make([][]int, 0, len(solutions))
+	for _, solution := range solutions {
+		sorted = append(sorted, solution)
+	}
+	for i := 0; i < len(sorted)-1; i++ {
+		maxIndex := i
+		maxAccuracy := accuracy(sorted[i], target)
+		for j := i + 1; j < len(sorted); j++ {
+			if accuracy(sorted[j], target) > maxAccuracy {
+				maxIndex = j
+				maxAccuracy = accuracy(sorted[j], target)
+			}
+		}
+		if maxIndex != i {
+			sorted[i], sorted[maxIndex] = sorted[maxIndex], sorted[i]
+		}
+	}
+	return sorted
 }

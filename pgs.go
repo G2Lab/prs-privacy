@@ -3,13 +3,13 @@ package main
 import (
 	"bufio"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"github.com/nikirill/prs/tools"
 	"log"
-	"math/rand"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var ALL_FIELDS = []string{
@@ -67,7 +67,7 @@ func (v *Variant) GetHmPos() string {
 	return v.fields["hm_pos"].(string)
 }
 
-func (v *Variant) GetLocation() string {
+func (v *Variant) GetLocus() string {
 	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
@@ -88,7 +88,7 @@ type PGS struct {
 	VariantsNumber int
 	Fieldnames     []string
 	Variants       map[string]*Variant
-	Locations      []string
+	Loci           []string
 	Weights        []float64
 }
 
@@ -147,11 +147,14 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 			fields[p.Fieldnames[i]] = value
 		}
 		variant := NewVariant(fields)
-		p.Variants[variant.GetLocation()] = variant
+		p.Variants[variant.GetLocus()] = variant
 	}
-	p.Locations = p.GetSortedVariantLocations()
-	p.Weights = make([]float64, len(p.Locations))
-	for i, loc := range p.Locations {
+	p.Loci, err = p.GetSortedVariantLoci()
+	if err != nil {
+		return err
+	}
+	p.Weights = make([]float64, len(p.Loci))
+	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()
 	}
 
@@ -162,23 +165,35 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	return nil
 }
 
-func (p *PGS) GetSortedVariantLocations() []string {
+func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 	sortedLoc := make([]string, 0, len(p.Variants))
-	for location := range p.Variants {
-		sortedLoc = append(sortedLoc, location)
+	for locus := range p.Variants {
+		sortedLoc = append(sortedLoc, locus)
 	}
 	for i := 0; i < len(sortedLoc)-1; i++ {
 		minIndex := i
+		minChr, minPos, err := parseLocus(sortedLoc[minIndex])
+		if err != nil {
+			log.Printf("Error parsing locus %s: %v, %v", sortedLoc[minIndex], err)
+			return nil, err
+		}
 		for j := i + 1; j < len(sortedLoc); j++ {
-			if sortedLoc[j] < sortedLoc[minIndex] {
+			chr, pos, err := parseLocus(sortedLoc[j])
+			if err != nil {
+				log.Printf("Error parsing locus %s: %v, %v", sortedLoc[minIndex], err)
+				return nil, err
+			}
+			if chr < minChr || (chr == minChr && pos < minPos) {
 				minIndex = j
+				minChr = chr
+				minPos = pos
 			}
 		}
 		if minIndex != i {
 			sortedLoc[i], sortedLoc[minIndex] = sortedLoc[minIndex], sortedLoc[i]
 		}
 	}
-	return sortedLoc
+	return sortedLoc, nil
 }
 
 func (p *PGS) LoadPriors() {
@@ -216,7 +231,6 @@ func (p *PGS) LoadPriors() {
 				if row[0] != pos {
 					continue
 				}
-				fmt.Println(row)
 				zeroOneProb, err1 := strconv.ParseFloat(row[2], 64)
 				oneZeroProb, err2 := strconv.ParseFloat(row[3], 64)
 				if err1 != nil || err2 != nil {
@@ -251,7 +265,7 @@ func (p *PGS) LoadPriors() {
 		}
 		chr := row[0]
 		pos := row[1]
-		location := fmt.Sprintf("%s:%s", chr, pos)
+		locus := fmt.Sprintf("%s:%s", chr, pos)
 		for i := 2; i < len(row); i++ {
 			key, err1 := strconv.Atoi(header[i])
 			value, err2 := strconv.ParseFloat(row[i], 64)
@@ -259,41 +273,48 @@ func (p *PGS) LoadPriors() {
 				log.Printf("Error converting key %s or value %s to int: %v, %v", header[i], row[i], err1, err2)
 				continue
 			}
-			p.Variants[location].priors[key] = value
+			p.Variants[locus].priors[key] = value
 		}
 	}
 }
 
-func (p *PGS) MutateVariant(original, mutations []int, probabilities []float64) []int {
-	candidatesPerVariant := len(mutations) / len(original)
+func (p *PGS) MutateGenome(original, mutations []int, probabilities []float64) []int {
+	candidatesPerVariant := len(GENOTYPES) - 1
 	for i := range original {
-		priors := p.Variants[p.Locations[i]].priors
+		priors := p.Variants[p.Loci[i]].priors
 		currentVariant := i * candidatesPerVariant
 		for j := 0; j < candidatesPerVariant; j++ {
 			probabilities[currentVariant+j] = probabilities[currentVariant+j] * priors[mutations[currentVariant+j]]
 		}
 	}
-	mutationId := sampleSlice(probabilities)
+	mutationId := tools.SampleFromSlice(probabilities)
 	original[mutationId/candidatesPerVariant] = mutations[mutationId]
 	return original
 }
 
-func (p *PGS) GetVariantPriors(location string) map[int]float64 {
-	return p.Variants[location].priors
+func (p *PGS) GetVariantPriors(locus string) map[int]float64 {
+	return p.Variants[locus].priors
 }
 
-func sampleSlice(distribution []float64) int {
-	rand.NewSource(time.Now().UnixNano())
-	cumulative := 0.0
-	for _, p := range distribution {
-		cumulative += p
-	}
-	r := rand.Float64() * cumulative
-	for k, v := range distribution {
-		r -= v
-		if r <= 0.0 {
-			return k
+func (p *PGS) SampleFromPopulation() ([]int, error) {
+	sample := make([]int, len(p.Variants))
+	for i, loc := range p.Loci {
+		sample[i] = tools.SampleFromMap(p.GetVariantPriors(loc))
+		if sample[i] == -1 {
+			return nil, errors.New("error in population sampling")
 		}
 	}
-	return -1
+	return sample, nil
+}
+
+func parseLocus(locus string) (int, int, error) {
+	chr, err := strconv.Atoi(strings.Split(locus, ":")[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	pos, err := strconv.Atoi(strings.Split(locus, ":")[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return chr, pos, nil
 }
