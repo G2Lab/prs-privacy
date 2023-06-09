@@ -11,6 +11,7 @@ const (
 	SCORE      = "score"
 	ITERATIONS = 1000
 	MARGIN     = 0.0000001
+	numThreads = 8
 )
 
 var GENOTYPES = [...]int{0, 1, 2}
@@ -64,8 +65,7 @@ func main() {
 
 func Solve(targetScore float64, pgs *PGS) map[string][]int {
 	var err error
-	candidates := make([][]int, len(pgs.Variants))
-	solutions := make(map[string][]int, 0)
+	candidates := make([][]int, (len(pgs.Variants)/numThreads)*2*numThreads)
 	weights := pgs.Weights
 
 	// Initialize candidate solutions according to the SNPs likelihood in the population
@@ -76,51 +76,65 @@ func Solve(targetScore float64, pgs *PGS) map[string][]int {
 			return nil
 		}
 	}
-
-	// Evaluate candidates
-	var delta float64
-	//mutated := make([][]int, len(candidates))
-	for k := 0; k < ITERATIONS; k++ {
-	candidateLoop:
-		for j, candidate := range candidates {
-			delta = calculateScore(candidate, weights) - targetScore
-			if math.Abs(delta) < MARGIN {
-				solutions[arrayTostring(candidate)] = candidate
-				candidates[j], err = pgs.SampleFromPopulation()
-				if err != nil {
-					fmt.Println(err)
-					return nil
-				}
-				continue
-			}
-			// the weights that cover the delta better, get higher probability of being selected
-			// big delta -> bigger weights get higher probability.
-			// probability = 1 / abs( delta - weight * snp_old + weight * snp_new )
-			possibleMutations := make([]int, 0, len(candidate)*(len(GENOTYPES)-1))
-			probs := make([]float64, 0)
-			for i, snp := range candidate {
-				tmp := delta
-				tmp -= weights[i] * float64(snp)
-				for _, v := range GENOTYPES {
-					if v == snp {
-						continue
-					}
-					possibleMutations = append(possibleMutations, v)
-					if math.Abs(tmp+weights[i]*float64(v)) < MARGIN {
-						candidate[i] = v
+	collectChans := make([]chan map[string][]int, numThreads)
+	for thread := 0; thread < numThreads; thread++ {
+		collectChans[thread] = make(chan map[string][]int)
+		go func(t int) {
+			solutions := make(map[string][]int, 0)
+			// Evaluate candidates
+			var delta float64
+			//mutated := make([][]int, len(candidates))
+			for k := 0; k < ITERATIONS; k++ {
+			candidateLoop:
+				for j, candidate := range candidates[t*len(candidates)/numThreads : (t+1)*len(candidates)/numThreads] {
+					delta = calculateScore(candidate, weights) - targetScore
+					if math.Abs(delta) < MARGIN {
 						solutions[arrayTostring(candidate)] = candidate
 						candidates[j], err = pgs.SampleFromPopulation()
 						if err != nil {
 							fmt.Println(err)
-							return nil
+							return
 						}
-						continue candidateLoop
+						continue
 					}
-					probs = append(probs, 1/math.Abs(tmp+weights[i]*float64(v)))
+					// the weights that cover the delta better, get higher probability of being selected
+					// big delta -> bigger weights get higher probability.
+					// probability = 1 / abs( delta - weight * snp_old + weight * snp_new )
+					possibleMutations := make([]int, 0, len(candidate)*(len(GENOTYPES)-1))
+					probs := make([]float64, 0)
+					for i, snp := range candidate {
+						tmp := delta
+						tmp -= weights[i] * float64(snp)
+						for _, v := range GENOTYPES {
+							if v == snp {
+								continue
+							}
+							possibleMutations = append(possibleMutations, v)
+							if math.Abs(tmp+weights[i]*float64(v)) < MARGIN {
+								candidate[i] = v
+								solutions[arrayTostring(candidate)] = candidate
+								candidates[j], err = pgs.SampleFromPopulation()
+								if err != nil {
+									fmt.Println(err)
+									return
+								}
+								continue candidateLoop
+							}
+							probs = append(probs, 1/math.Abs(tmp+weights[i]*float64(v)))
+						}
+					}
+					//mutated[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
+					candidates[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
 				}
 			}
-			//mutated[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
-			candidates[j] = pgs.MutateGenome(candidate, possibleMutations, probs)
+			collectChans[t] <- solutions
+		}(thread)
+	}
+	// Collect solutions from all the threads
+	solutions := make(map[string][]int)
+	for thread := 0; thread < numThreads; thread++ {
+		for k, v := range <-collectChans[thread] {
+			solutions[k] = v
 		}
 	}
 	return solutions
