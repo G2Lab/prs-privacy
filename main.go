@@ -18,8 +18,8 @@ var GENOTYPES = [...]int{0, 1, 2}
 
 func main() {
 	//INDIVIDUAL := "NA20543"
-	INDIVIDUAL := "NA11881"
-	//INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "NA11881"
+	INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG03304"
 	//INDIVIDUAL := "NA19082"
 	//INDIVIDUAL := "HG03022"
@@ -52,10 +52,10 @@ func main() {
 	//	fmt.Printf("%.5f ", pgs.Weights[i])
 	//}
 	sortedSolutions := sortByAccuracy(solutions, target)
-	fmt.Printf("True:\n%s\n", arrayTostring(target))
+	fmt.Printf("True:\n%s -- %f\n", arrayTostring(target), pgs.CalculateSequenceLikelihood(target))
 	fmt.Printf("Guessed:\n")
 	for _, solution := range sortedSolutions {
-		fmt.Printf("%s -- %f\n", arrayTostring(solution), accuracy(solution, target))
+		fmt.Printf("%s -- %f, %f\n", arrayTostring(solution), accuracy(solution, target), pgs.CalculateSequenceLikelihood(solution))
 	}
 	//fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
 	//fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, pgs.Weights))

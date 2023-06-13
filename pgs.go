@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/nikirill/prs/tools"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -317,4 +318,12 @@ func parseLocus(locus string) (int, int, error) {
 		return 0, 0, err
 	}
 	return chr, pos, nil
+}
+
+func (p *PGS) CalculateSequenceLikelihood(seq []int) float64 {
+	likelihood := 0.0
+	for i, locus := range p.Loci {
+		likelihood += math.Log(p.Variants[locus].priors[seq[i]])
+	}
+	return likelihood
 }
