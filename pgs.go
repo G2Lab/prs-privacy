@@ -288,7 +288,7 @@ func (p *PGS) MutateGenome(original, mutations []int, probabilities []float64) [
 			probabilities[currentVariant+j] = probabilities[currentVariant+j] * priors[mutations[currentVariant+j]]
 		}
 	}
-	mutationId := tools.SampleFromSlice(probabilities)
+	mutationId := tools.SampleFromDistribution(probabilities)
 	original[mutationId/candidatesPerVariant] = mutations[mutationId]
 	return original
 }
@@ -299,8 +299,10 @@ func (p *PGS) GetVariantPriors(locus string) map[int]float64 {
 
 func (p *PGS) SampleFromPopulation() ([]int, error) {
 	sample := make([]int, len(p.Variants))
+	//for i := range p.Loci {
+	//	sample[i] = tools.SampleUniform(GENOTYPES)
 	for i, loc := range p.Loci {
-		sample[i] = tools.SampleFromMap(p.GetVariantPriors(loc))
+		sample[i] = tools.SampleFromMap(p.Variants[loc].priors)
 		if sample[i] == -1 {
 			return nil, errors.New("error in population sampling")
 		}
