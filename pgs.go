@@ -31,6 +31,8 @@ var ALL_FIELDS = []string{
 	"hm_inferOtherAllele",
 }
 
+var GENOTYPES = []int{0, 1, 2}
+
 type Variant struct {
 	fields map[string]interface{}
 	priors map[int]float64
@@ -279,17 +281,18 @@ func (p *PGS) LoadPriors() {
 	}
 }
 
-func (p *PGS) MutateGenome(original, mutations []int, probabilities []float64) []int {
-	candidatesPerVariant := len(GENOTYPES) - 1
+func (p *PGS) MutateGenome(original []int) []int {
+	mutations := make([]int, 0, len(GENOTYPES)*len(original))
+	probabilities := make([]float64, 0, len(GENOTYPES)*len(original))
 	for i := range original {
-		priors := p.Variants[p.Loci[i]].priors
-		currentVariant := i * candidatesPerVariant
-		for j := 0; j < candidatesPerVariant; j++ {
-			probabilities[currentVariant+j] = probabilities[currentVariant+j] * priors[mutations[currentVariant+j]]
+		// We range over all the possible genotypes, even the present one, to allow for the possibility of no mutation
+		for _, v := range GENOTYPES {
+			probabilities = append(probabilities, p.Variants[p.Loci[i]].priors[v])
+			mutations = append(mutations, v)
 		}
 	}
 	mutationId := tools.SampleFromDistribution(probabilities)
-	original[mutationId/candidatesPerVariant] = mutations[mutationId]
+	original[mutationId/len(GENOTYPES)] = mutations[mutationId]
 	return original
 }
 

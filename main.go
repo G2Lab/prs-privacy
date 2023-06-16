@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nikirill/prs/tools"
@@ -14,12 +13,10 @@ import (
 
 const (
 	SCORE      = "score"
-	ITERATIONS = 1000
+	ITERATIONS = 10000
 	MARGIN     = 0.0000001
 	numThreads = 16
 )
-
-var GENOTYPES = []int{0, 1, 2}
 
 func main() {
 	//INDIVIDUAL := "NA20543"
@@ -53,14 +50,12 @@ func main() {
 	}
 
 	solutions := Solve(cohort[INDIVIDUAL][SCORE], pgs)
-	//for i := range pgs.Weights {
-	//	fmt.Printf("%.5f ", pgs.Weights[i])
-	//}
-	sortedSolutions := sortByAccuracy(solutions, target)
+	solutions = sortByAccuracy(solutions, target)
 	fmt.Printf("True:\n%s -- %f\n", arrayTostring(target), pgs.CalculateSequenceLikelihood(target))
 	fmt.Printf("Guessed:\n")
-	for _, solution := range sortedSolutions {
-		fmt.Printf("%s -- %f, %f\n", arrayTostring(solution), accuracy(solution, target), pgs.CalculateSequenceLikelihood(solution))
+	for _, solution := range solutions {
+		fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, target),
+			cohort[INDIVIDUAL][SCORE]-calculateScore(solution, pgs.Weights), pgs.CalculateSequenceLikelihood(solution))
 	}
 	//fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
 	//fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, pgs.Weights))
@@ -68,13 +63,9 @@ func main() {
 	//allPermutations(solution, pgs.Weights)
 }
 
-func Solve(targetScore float64, pgs *PGS) map[string][]int {
+func Solve(targetScore float64, pgs *PGS) [][]int {
 	var err error
-	candidates := make([][]int, (len(pgs.Variants)/numThreads)*2*numThreads)
-	candidatesPerThread := len(candidates) / numThreads
-	deltas := make([]float64, len(candidates))
-	weights := pgs.Weights
-
+	candidates := make([][]int, len(pgs.Variants)*2)
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
 		candidates[i], err = pgs.SampleFromPopulation()
@@ -83,88 +74,79 @@ func Solve(targetScore float64, pgs *PGS) map[string][]int {
 			return nil
 		}
 	}
-	var workerPool sync.WaitGroup
-	crossOverDone := make([]chan struct{}, numThreads)
-	collectChans := make([]chan map[string][]int, numThreads)
-	for thread := 0; thread < numThreads; thread++ {
-		collectChans[thread] = make(chan map[string][]int)
-		go func(t int, wg sync.WaitGroup) {
-			threadSolutions := make(map[string][]int, 0)
-			// Evaluate candidates
-			for k := 0; k < ITERATIONS; k++ {
-				wg.Add(1)
-				// Check for valid solutions
-				for j, candidate := range candidates[t*candidatesPerThread : (t+1)*candidatesPerThread] {
-					deltas[t*candidatesPerThread+j] = calculateScore(candidate, weights) - targetScore
-					// Found a solution
-					if math.Abs(deltas[t*candidatesPerThread+j]) < MARGIN {
-						threadSolutions[arrayTostring(candidate)] = candidate
-						candidates[t*candidatesPerThread+j], err = pgs.SampleFromPopulation()
-						if err != nil {
-							fmt.Println(err)
-							wg.Done()
-							return
-						}
-						deltas[t*candidatesPerThread+j] = calculateScore(candidate, weights) - targetScore
-					}
-				}
-				wg.Done()
-				<-crossOverDone[t]
-			candidateLoop:
-				for j, candidate := range candidates[t*candidatesPerThread : (t+1)*candidatesPerThread] {
-					//the weights that cover the delta better, get higher probability of being selected
-					// big delta -> bigger weights get higher probability.
-					// probability = 1 / abs( delta - weight * snp_old + weight * snp_new )
-					possibleMutations := make([]int, 0, len(candidate)*(len(GENOTYPES)-1))
-					probs := make([]float64, 0)
-					for i, snp := range candidate {
-						tmp := deltas[t*candidatesPerThread+j]
-						tmp -= weights[i] * float64(snp)
-						for _, v := range GENOTYPES {
-							if v == snp {
-								continue
-							}
-							possibleMutations = append(possibleMutations, v)
-							if math.Abs(tmp+weights[i]*float64(v)) < MARGIN {
-								candidate[i] = v
-								threadSolutions[arrayTostring(candidate)] = candidate
-								candidates[t*candidatesPerThread+j], err = pgs.SampleFromPopulation()
-								if err != nil {
-									fmt.Println(err)
-									return
-								}
-								continue candidateLoop
-							}
-							probs = append(probs, 1/math.Abs(tmp+weights[i]*float64(v)))
-						}
-					}
-					candidates[t*candidatesPerThread+j] = pgs.MutateGenome(candidate, possibleMutations, probs)
-				}
-			}
-			collectChans[t] <- threadSolutions
-		}(thread, workerPool)
-	}
-	// Cross over among all candidates
+	// Evaluate candidates
 	for k := 0; k < ITERATIONS; k++ {
-		workerPool.Wait()
-		parents, offspring := crossover(candidates, deltas)
-		offspringDeltas := make([]float64, len(offspring))
-		for i, child := range offspring {
-			offspringDeltas[i] = calculateScore(child, weights) - targetScore
-		}
-		candidates, deltas = tournament(append(parents, offspring...), append(deltas, offspringDeltas...))
-		for thread := 0; thread < numThreads; thread++ {
-			crossOverDone[thread] <- struct{}{}
+		fitness := calculateFitness(candidates, pgs, targetScore)
+		parents, children := crossover(candidates, fitness)
+		childrenFitness := calculateFitness(children, pgs, targetScore)
+		candidates = tournament(append(parents, children...), append(fitness, childrenFitness...))
+		//	mutations happen independently of the score, they are based only on likelihood
+		candidates = mutate(candidates, pgs)
+	}
+	candidates = sortByFitness(candidates, pgs, targetScore)
+	return candidates
+}
+
+func crossover(parents [][]int, fitness []float64) ([][]int, [][]int) {
+	rand.NewSource(time.Now().UnixNano())
+	offspring := make([][]int, 0, len(parents))
+	parents, fitness = tools.Shuffle(parents, fitness)
+	cumulative := 0.0
+	var splitPos, step float64
+	splice := func(firstIndex, secondIndex int) {
+		child := make([]int, len(parents[firstIndex]))
+		cumulative = fitness[firstIndex] + fitness[secondIndex]
+		splitPos = rand.Float64() * cumulative
+		step = cumulative / float64(len(parents[firstIndex]))
+		copy(child[:int(splitPos/step)], parents[firstIndex][:int(splitPos/step)])
+		copy(child[int(splitPos/step):], parents[secondIndex][int(splitPos/step):])
+		offspring = append(offspring, child)
+	}
+	// each parent has two offspring: one with the next parent, and one with the parent at + len(parents)/2
+	for i := 0; i < len(parents); i += 2 {
+		splice(i, i+1)
+	}
+	for i := 0; i < len(parents)/2; i++ {
+		splice(i, i+len(parents)/2)
+	}
+	return parents, offspring
+}
+
+func tournament(population [][]int, fitness []float64) [][]int {
+	survivors := make([][]int, 0, len(population)/2)
+	population, fitness = tools.Shuffle(population, fitness)
+	// Select the best half of the population
+	for i := 0; i < len(population); i += 2 {
+		if fitness[i] > fitness[i+1] {
+			survivors = append(survivors, population[i])
+		} else {
+			survivors = append(survivors, population[i+1])
 		}
 	}
-	// Collect solutions from all the threads
-	solutions := make(map[string][]int)
-	for thread := 0; thread < numThreads; thread++ {
-		for k, v := range <-collectChans[thread] {
-			solutions[k] = v
-		}
+	return survivors
+}
+
+func mutate(population [][]int, pgs *PGS) [][]int {
+	for j, individual := range population {
+		population[j] = pgs.MutateGenome(individual)
 	}
-	return solutions
+	return population
+}
+
+func calculateFitness(population [][]int, pgs *PGS, targetScore float64) []float64 {
+	var delta, likelihood float64
+	fitness := make([]float64, len(population))
+	for i, individual := range population {
+		delta = calculateScore(individual, pgs.Weights) - targetScore
+		if delta == 0 {
+			delta = MARGIN
+		}
+		likelihood = pgs.CalculateSequenceLikelihood(individual)
+		// the smaller delta the better, the bigger likelihood the better, but the likelihood is negative so
+		// the smaller the absolute value the better.
+		fitness[i] = 1 / math.Abs(delta*likelihood)
+	}
+	return fitness
 }
 
 func calculateScore(snps []int, weights []float64) float64 {
@@ -173,6 +155,19 @@ func calculateScore(snps []int, weights []float64) float64 {
 		score += float64(snp) * weights[i]
 	}
 	return score
+}
+
+func sortByFitness(population [][]int, pgs *PGS, targetScore float64) [][]int {
+	fitness := calculateFitness(population, pgs, targetScore)
+	for i := 0; i < len(population); i++ {
+		for j := i; j < len(population); j++ {
+			if fitness[i] < fitness[j] {
+				population[i], population[j] = population[j], population[i]
+				fitness[i], fitness[j] = fitness[j], fitness[i]
+			}
+		}
+	}
+	return population
 }
 
 func accuracy(solution []int, target []int) float64 {
@@ -196,91 +191,18 @@ func arrayTostring(array []int) string {
 	return strings.Join(str, "")
 }
 
-func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
-	sorted := make([][]int, 0, len(solutions))
-	for _, solution := range solutions {
-		sorted = append(sorted, solution)
+func sortByAccuracy(solutions [][]int, target []int) [][]int {
+	accuracies := make([]float64, len(solutions))
+	for i, solution := range solutions {
+		accuracies[i] = accuracy(solution, target)
 	}
-	for i := 0; i < len(sorted)-1; i++ {
-		maxIndex := i
-		maxAccuracy := accuracy(sorted[i], target)
-		for j := i + 1; j < len(sorted); j++ {
-			if accuracy(sorted[j], target) > maxAccuracy {
-				maxIndex = j
-				maxAccuracy = accuracy(sorted[j], target)
+	for i := 0; i < len(solutions)-1; i++ {
+		for j := i + 1; j < len(solutions); j++ {
+			if accuracies[i] < accuracies[j] {
+				solutions[i], solutions[j] = solutions[j], solutions[i]
+				accuracies[i], accuracies[j] = accuracies[j], accuracies[i]
 			}
 		}
-		if maxIndex != i {
-			sorted[i], sorted[maxIndex] = sorted[maxIndex], sorted[i]
-		}
 	}
-	return sorted
-}
-
-func crossover(parents [][]int, fitness []float64) ([][]int, [][]int) {
-	rand.NewSource(time.Now().UnixNano())
-	offspring := make([][]int, 0, len(parents))
-	parents, fitness = tools.Shuffle(parents, fitness)
-	cumulative := 0.0
-	var splitPos, step float64
-	splice := func(firstIndex, secondIndex int) {
-		child := make([]int, len(parents[firstIndex]))
-		cumulative = 1/fitness[firstIndex] + 1/fitness[secondIndex]
-		splitPos = rand.Float64() * cumulative
-		step = cumulative / float64(len(parents[firstIndex]))
-		fmt.Println(cumulative, splitPos, step)
-		copy(child[:int(splitPos/step)], parents[firstIndex][:int(splitPos/step)])
-		copy(child[int(splitPos/step):], parents[secondIndex][int(splitPos/step):])
-		offspring = append(offspring, child)
-	}
-	fmt.Println(fitness)
-	// each parent has two offspring: one with the next parent, and one with the parent at + len(parents)/2
-	for i := 0; i < len(parents); i += 2 {
-		fmt.Println(i, i+1)
-		splice(i, i+1)
-	}
-	for i := 0; i < len(parents)/2; i++ {
-		splice(i, i+len(parents)/2)
-	}
-	return parents, offspring
-}
-
-func tournament(population [][]int, fitness []float64) ([][]int, []float64) {
-	survivors := make([][]int, 0, len(population)/2)
-	survFit := make([]float64, 0, len(fitness)/2)
-	population, fitness = tools.Shuffle(population, fitness)
-	// Select the best half of the population
-	for i := 0; i < len(population); i += 2 {
-		if fitness[i] > fitness[i+1] {
-			survivors = append(survivors, population[i])
-			survFit = append(survFit, fitness[i])
-		} else {
-			survivors = append(survivors, population[i+1])
-			survFit = append(survFit, fitness[i+1])
-		}
-	}
-	return survivors, survFit
-}
-
-func allPermutations(origin []int, weights []float64) [][]int {
-	permutations := make([][]int, 1)
-	permutations[0] = origin
-	// Find all the positions by their weights
-	duplicates := make(map[float64][]int)
-	for i, weight := range weights {
-		if _, ok := duplicates[weight]; !ok {
-			duplicates[weight] = make([]int, 0)
-		}
-		duplicates[weight] = append(duplicates[weight], i)
-	}
-	// Remove all the unique weights, and leave only the duplicates
-	for _, weight := range weights {
-		if len(duplicates[weight]) < 2 {
-			delete(duplicates, weight)
-		}
-	}
-	//for i := range origin {
-	//
-	//}
-	return permutations
+	return solutions
 }
