@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
+	"github.com/nikirill/prs/pgs"
 	"os"
 	"os/exec"
 	"strconv"
@@ -18,7 +19,7 @@ func NewCohort() Cohort {
 	return c
 }
 
-func (c Cohort) CalculatePRS(pgs *PGS) {
+func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
 	for _, variant := range pgs.Variants {
 		chr := variant.GetHmChr()
 		position := variant.GetHmPos()

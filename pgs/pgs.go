@@ -1,16 +1,17 @@
-package main
+package pgs
 
 import (
 	"bufio"
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/nikirill/prs/tools"
 )
 
 var ALL_FIELDS = []string{
@@ -79,6 +80,10 @@ func (v *Variant) GetWeight() float64 {
 		return weight
 	}
 	return 0.0
+}
+
+func (v *Variant) GetPriors() map[int]float64 {
+	return v.priors
 }
 
 type PGS struct {
@@ -330,5 +335,5 @@ func (p *PGS) CalculateSequenceLikelihood(seq []int) float64 {
 	for i, locus := range p.Loci {
 		likelihood += math.Log(p.Variants[locus].priors[seq[i]])
 	}
-	return likelihood
+	return -likelihood
 }
