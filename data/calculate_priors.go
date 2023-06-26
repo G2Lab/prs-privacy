@@ -121,7 +121,6 @@ func calculatePairwisePriors(filename string) {
 		log.Println("Error:", err)
 		return
 	}
-	p.LoadPriors()
 
 	// retrieve the variants for all the individuals at the SNPs of interest
 	individuals := make(map[string]map[string]int)
@@ -179,6 +178,7 @@ func calculatePairwisePriors(filename string) {
 	}
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
+	var likelihood float64
 	for i := range frequency {
 		tmp := make([]string, len(frequency[i]))
 		for j := 0; j < len(frequency[i]); j += len(pgs.GENOTYPES) {
@@ -187,7 +187,12 @@ func calculatePairwisePriors(filename string) {
 				sum += frequency[i][j+k]
 			}
 			for k := 0; k < len(pgs.GENOTYPES); k++ {
-				tmp[j+k] = strconv.FormatFloat(frequency[i][j]/sum, 'f', 5, 64)
+				if sum != 0 {
+					likelihood = frequency[i][j+k] / sum
+				} else {
+					likelihood = 0
+				}
+				tmp[j+k] = strconv.FormatFloat(likelihood, 'f', 5, 64)
 			}
 		}
 		err = writer.Write(tmp)

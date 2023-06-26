@@ -98,6 +98,7 @@ type PGS struct {
 	Variants       map[string]*Variant
 	Loci           []string
 	Weights        []float64
+	pairwise       [][]float64
 }
 
 func NewPGS() *PGS {
@@ -205,6 +206,11 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 }
 
 func (p *PGS) LoadPriors() {
+	p.LoadIndividualPriors()
+	p.LoadPairwisePriors()
+}
+
+func (p *PGS) LoadIndividualPriors() {
 	_, err := os.Stat(p.PgsID + ".priors")
 	if os.IsNotExist(err) {
 		priorsFile, error := os.Create(p.PgsID + ".priors")
@@ -283,6 +289,34 @@ func (p *PGS) LoadPriors() {
 			}
 			p.Variants[locus].priors[key] = value
 		}
+	}
+}
+
+func (p *PGS) LoadPairwisePriors() {
+	file, err := os.Open("data/prior/" + p.PgsID + ".pairwise")
+	if err != nil {
+		log.Printf("Error opening priors file: %v", err)
+		return
+	}
+	defer file.Close()
+	p.pairwise = make([][]float64, len(GENOTYPES)*p.VariantsNumber)
+	reader := csv.NewReader(file)
+	j := 0
+	for {
+		row, err := reader.Read()
+		if err != nil {
+			break // Reached end of file or encountered an error
+		}
+		p.pairwise[j] = make([]float64, len(row))
+		for i := 0; i < len(row); i++ {
+			prob, err := strconv.ParseFloat(row[i], 64)
+			if err != nil {
+				log.Printf("Error converting probabilitiy to float: %s, %v", row[i], err)
+				continue
+			}
+			p.pairwise[j][i] = prob
+		}
+		j++
 	}
 }
 

@@ -61,7 +61,6 @@ func main() {
 	//fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
 	//fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, p.Weights))
 	//fmt.Printf("Accuracy: %.2f\n", accuracy(solution, target))
-	//allPermutations(solution, p.Weights)
 }
 
 func Solve(targetScore float64, pgs *pgs.PGS) [][]int {
