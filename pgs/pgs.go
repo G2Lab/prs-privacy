@@ -323,10 +323,21 @@ func (p *PGS) LoadPairwisePriors() {
 func (p *PGS) MutateGenome(original []int) []int {
 	mutations := make([]int, 0, len(GENOTYPES)*len(original))
 	probabilities := make([]float64, 0, len(GENOTYPES)*len(original))
+	prob := 0.0
 	for i := range original {
 		// We range over all the possible genotypes, even the present one, to allow for the possibility of no mutation
-		for _, v := range GENOTYPES {
-			probabilities = append(probabilities, p.Variants[p.Loci[i]].priors[v])
+		for j, v := range GENOTYPES {
+			// Get individual prior
+			prob = math.Exp(p.Variants[p.Loci[i]].priors[v])
+			// Add conditional probabilities based on the rest of the genome
+			for k := range original {
+				if k == i {
+					continue
+				}
+				// Given the SNP value at position k, what is the probability of the SNP value at position i being j
+				prob += math.Exp(p.pairwise[k*len(GENOTYPES)+original[k]][i*len(GENOTYPES)+j])
+			}
+			probabilities = append(probabilities, prob)
 			mutations = append(mutations, v)
 		}
 	}
@@ -339,16 +350,22 @@ func (p *PGS) GetVariantPriors(locus string) map[int]float64 {
 	return p.Variants[locus].priors
 }
 
+// We use the Gibbs sampling approach: first sample based only on the individual priors,
+// then iterate by taking into account pairwise conditional probabilities
 func (p *PGS) SampleFromPopulation() ([]int, error) {
 	sample := make([]int, len(p.Variants))
-	//for i := range p.Loci {
-	//	sample[i] = tools.SampleUniform(GENOTYPES)
+	// Initial sample based on individual priors
 	for i, loc := range p.Loci {
 		sample[i] = tools.SampleFromMap(p.Variants[loc].priors)
 		if sample[i] == -1 {
 			return nil, errors.New("error in population sampling")
 		}
 	}
+	//// Iterate to convergence
+	//NUM_ITERATIONS := 100
+	//for i := 0; i < NUM_ITERATIONS; i++ {
+	//
+	//}
 	return sample, nil
 }
 

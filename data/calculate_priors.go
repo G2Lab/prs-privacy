@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	numCPUs       = 8
-	readBatchSize = 500
+	numCPUs       = 22
+	readBatchSize = 1000
 )
 
 var alleles = []string{"0|0", "0|1", "1|0", "1|1"}
@@ -176,8 +176,8 @@ func calculatePairwisePriors(filename string) {
 	if err != nil {
 		log.Fatalf("Error creating file %s.pairwise: %v\n", title, err)
 	}
+	defer file.Close()
 	writer := csv.NewWriter(file)
-	defer writer.Flush()
 	var likelihood float64
 	for i := range frequency {
 		tmp := make([]string, len(frequency[i]))
@@ -200,10 +200,7 @@ func calculatePairwisePriors(filename string) {
 			log.Printf("Error writing to file %s.pairwise: %v\n", title, err)
 			return
 		}
-	}
-	err = file.Close()
-	if err != nil {
-		log.Printf("Error closing file %s.pairwise: %v\n", title, err)
+		writer.Flush()
 	}
 }
 

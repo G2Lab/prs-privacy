@@ -14,8 +14,7 @@ import (
 
 const (
 	SCORE      = "score"
-	ITERATIONS = 5000
-	MARGIN     = 0.0000001
+	ITERATIONS = 2000
 	numThreads = 16
 )
 
