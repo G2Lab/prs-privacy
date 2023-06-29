@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -17,7 +18,7 @@ import (
 
 const (
 	numCPUs       = 22
-	readBatchSize = 1000
+	readBatchSize = 10000
 )
 
 var alleles = []string{"0|0", "0|1", "1|0", "1|1"}
@@ -31,7 +32,9 @@ func getAllChromosomePositions(chr int) ([]string, error) {
 		log.Printf("Error querying %d chromosome for positions: %s\n", chr, err)
 		return nil, err
 	}
-	return strings.Split(string(output), "\t"), nil
+	positions := strings.Split(string(output), "\t")
+	// Every returned element is position+Tab so the last element after split by tab is an empty space
+	return positions[:len(positions)-1], nil
 }
 
 func calculateSNPpriors() {
@@ -60,22 +63,30 @@ func calculateSNPpriors() {
 			}
 			end := 0
 			for i := 0; i < len(positions); i += readBatchSize {
-				end = i + readBatchSize
+				end = i + readBatchSize - 1
 				if end >= len(positions) {
 					end = len(positions) - 1
 				}
 				query, args := tools.RangeSnpValuesQuery(strconv.Itoa(chr), positions[i], positions[end])
 				cmd := exec.Command(query, args...)
-				output, err := cmd.Output()
+				batch, err := cmd.Output()
 				if err != nil {
 					log.Printf("Error querying %d:%s-%s: %v\n", chr, positions[i], positions[end], err)
 					return
 				}
-				lines := strings.Split(string(output), "\n")
+				lines := strings.Split(string(batch), "\n")
 				for k, line := range lines[:len(lines)-1] {
 					samples := strings.Split(line, "\t")
 					counts := make(map[string]int)
 					for _, sample := range samples[:len(samples)-1] {
+						if strings.Contains(sample, ".") {
+							continue
+						}
+						sample, err = normalizeSNP(sample)
+						if err != nil {
+							log.Printf("%v: %s, snp %s\n", err, sample, positions[i+k])
+							continue
+						}
 						if _, exists := counts[sample]; exists {
 							counts[sample] += 1
 						} else {
@@ -201,6 +212,26 @@ func calculatePairwisePriors(filename string) {
 			return
 		}
 		writer.Flush()
+	}
+}
+
+func normalizeSNP(snp string) (string, error) {
+	switch snp {
+	case "0|0", "0|1", "1|0", "1|1":
+		return snp, nil
+	case "0|2", "0|3", "0|4", "0|5", "0|6":
+		return "0|1", nil
+	case "2|0", "3|0", "4|0", "5|0", "6|0":
+		return "1|0", nil
+	//	rare biallelic and triallelic cases
+	case "1|2", "2|1", "2|2",
+		"1|3", "3|1", "2|3", "3|2", "3|3",
+		"4|1", "1|4", "2|4", "4|2", "4|3", "3|4", "4|4",
+		"5|1", "1|5", "5|2", "2|5", "5|3", "3|5", "5|4", "4|5", "5|5",
+		"6|1", "1|6", "6|2", "2|6", "6|3", "3|6", "6|4", "4|6", "6|5", "5|6", "6|6":
+		return "1|1", nil
+	default:
+		return snp, errors.New("unknown snp value")
 	}
 }
 
