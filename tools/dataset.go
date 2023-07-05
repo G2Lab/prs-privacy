@@ -1,6 +1,11 @@
 package tools
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+)
 
 func GetChromosomeFilepath(chr string) string {
 	path := "/gpfs/commons/datasets/1000genomes/hg38/"
@@ -38,25 +43,65 @@ func AllChrPositionsQuery(c string) (string, []string) {
 	}
 }
 
-func SnpToValue(allele string) (float64, error) {
-	switch allele {
+func GetSnpsAtPosition(c string, p string) ([]string, error) {
+	query, args := RangeSnpValuesQuery(c, p, p)
+	cmd := exec.Command(query, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	samples := strings.Split(string(output), "\t")
+	return samples[:len(samples)-1], nil
+}
+
+func NormalizeSnp(snp string) (string, error) {
+	switch snp {
+	case "0|0", "0|1", "1|0", "1|1":
+		return snp, nil
+	/*
+		rare multiallelic cases
+	*/
+	case "0|2", "0|3", "0|4", "0|5", "0|6", "0|7", "0|8":
+		return "0|1", nil
+	case "2|0", "3|0", "4|0", "5|0", "6|0", "7|0", "8|0":
+		return "1|0", nil
+	case "1|2", "2|1", "2|2",
+		"1|3", "3|1", "2|3", "3|2", "3|3",
+		"4|1", "1|4", "2|4", "4|2", "4|3", "3|4", "4|4",
+		"5|1", "1|5", "2|5", "5|2", "5|3", "3|5", "4|5", "5|4", "5|5",
+		"6|1", "1|6", "2|6", "6|2", "6|3", "3|6", "4|6", "6|4", "5|6", "6|5", "6|6",
+		"7|1", "1|7", "2|7", "7|2", "7|3", "3|7", "4|7", "7|4", "5|7", "7|5", "6|7", "7|6", "7|7",
+		"8|1", "1|8", "2|8", "8|2", "8|3", "3|8", "4|8", "8|4", "5|8", "8|5", "6|8", "8|6", "7|8", "8|7", "8|8":
+		return "1|1", nil
+	default:
+		return snp, errors.New("unknown snp value")
+	}
+}
+
+func SnpToPair(snp string) ([]float64, error) {
+	switch snp {
+	case "0|0":
+		return []float64{0, 0}, nil
+	case "0|1":
+		return []float64{0, 1}, nil
+	case "1|0":
+		return []float64{1, 0}, nil
+	case "1|1":
+		return []float64{1, 1}, nil
+	default:
+		return nil, fmt.Errorf("invalid snp value: %s", snp)
+	}
+}
+
+func SnpToSum(snp string) (float64, error) {
+	switch snp {
 	case "0|0":
 		return 0, nil
 	case "0|1", "1|0":
 		return 1, nil
 	case "1|1":
 		return 2, nil
-	case "0|2", "2|0":
-		return 1, nil
-	case "1|2", "2|1", "2|2":
-		return 2, nil
-	case "0|3", "3|0":
-		return 1, nil
-	case "1|3", "3|1", "3|2", "2|3", "3|3":
-		return 2, nil
-	//case "0|2", "2|0", "1|2", "2|1", "2|2", "0|3", "3|0", "1|3", "3|1", "3|2", "2|3", "3|3":
-	//	return 3, nil
 	default:
-		return 0, fmt.Errorf("invalid allele value: %s", allele)
+		return -1, fmt.Errorf("invalid snp value: %s", snp)
 	}
 }

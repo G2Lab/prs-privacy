@@ -21,7 +21,7 @@ const (
 func main() {
 	//INDIVIDUAL := "NA20543"
 	//INDIVIDUAL := "NA11881"
-	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG03304"
 	//INDIVIDUAL := "NA19082"
 	//INDIVIDUAL := "HG03022"
@@ -35,56 +35,57 @@ func main() {
 		log.Println("Error:", err)
 		return
 	}
-	p.LoadPriors()
-	cohort := NewCohort()
-	cohort.CalculatePRS(p)
+	fmt.Println(p.Loci)
+	//p.LoadPriors()
+	//cohort := NewCohort()
+	//cohort.CalculatePRS(p)
 
-	err = cohort.SaveScores(p.PgsID)
-	if err != nil {
-		log.Println("Error saving scores:", err)
-		return
-	}
-	target := make([]int, len(p.Variants))
-	for i, locus := range p.Loci {
-		target[i] = int(cohort[INDIVIDUAL][locus])
-	}
-
-	solutions := Solve(cohort[INDIVIDUAL][SCORE], p)
-	//solutions = sortByAccuracy(solutions, target)
-	fmt.Printf("True:\n%s -- %f\n", arrayTostring(target), p.CalculateSequenceLikelihood(target))
-	fmt.Printf("Guessed:\n")
-	for _, solution := range solutions {
-		fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, target),
-			cohort[INDIVIDUAL][SCORE]-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
-	}
-	//fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
-	//fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, p.Weights))
-	//fmt.Printf("Accuracy: %.2f\n", accuracy(solution, target))
+	//err = cohort.SaveScores(p.PgsID)
+	//if err != nil {
+	//	log.Println("Error saving scores:", err)
+	//	return
+	//}
+	//target := make([]int, len(p.Variants))
+	//for i, locus := range p.Loci {
+	//	target[i] = int(cohort[INDIVIDUAL][locus])
+	//}
+	//
+	//solutions := Solve(cohort[INDIVIDUAL][SCORE], p)
+	////solutions = sortByAccuracy(solutions, target)
+	//fmt.Printf("True:\n%s -- %f\n", arrayTostring(target), p.CalculateSequenceLikelihood(target))
+	//fmt.Printf("Guessed:\n")
+	//for _, solution := range solutions {
+	//	fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, target),
+	//		cohort[INDIVIDUAL][SCORE]-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+	//}
+	////fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
+	////fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, p.Weights))
+	////fmt.Printf("Accuracy: %.2f\n", accuracy(solution, target))
 }
 
-func Solve(targetScore float64, pgs *pgs.PGS) [][]int {
-	var err error
-	candidates := make([][]int, len(pgs.Variants)*4)
-	// Initialize candidate solutions according to the SNPs likelihood in the population
-	for i := 0; i < len(candidates); i++ {
-		candidates[i], err = pgs.SampleFromPopulation()
-		if err != nil {
-			fmt.Println(err)
-			return nil
-		}
-	}
-	// Evaluate candidates
-	for k := 0; k < ITERATIONS; k++ {
-		fitness := calculateFitness(candidates, pgs, targetScore, k)
-		parents, children := crossover(candidates, fitness)
-		childrenFitness := calculateFitness(children, pgs, targetScore, k)
-		candidates = tournament(append(parents, children...), append(fitness, childrenFitness...))
-		//	mutations happen independently of the score, they are based only on likelihood
-		candidates = mutate(candidates, pgs)
-	}
-	candidates = sortByFitness(candidates, pgs, targetScore)
-	return candidates
-}
+//func Solve(targetScore float64, pgs *pgs.PGS) [][]int {
+//	var err error
+//	candidates := make([][]float64, len(pgs.Variants)*2)
+//	// Initialize candidate solutions according to the SNPs likelihood in the population
+//	for i := 0; i < len(candidates); i++ {
+//		candidates[i], err = pgs.SampleFromPopulation()
+//		if err != nil {
+//			fmt.Println(err)
+//			return nil
+//		}
+//	}
+//	// Evaluate candidates
+//	for k := 0; k < ITERATIONS; k++ {
+//		fitness := calculateFitness(candidates, pgs, targetScore, k)
+//		parents, children := crossover(candidates, fitness)
+//		childrenFitness := calculateFitness(children, pgs, targetScore, k)
+//		candidates = tournament(append(parents, children...), append(fitness, childrenFitness...))
+//		//	mutations happen independently of the score, they are based only on likelihood
+//		candidates = mutate(candidates, pgs)
+//	}
+//	candidates = sortByFitness(candidates, pgs, targetScore)
+//	return candidates
+//}
 
 func crossover(parents [][]int, fitness []float64) ([][]int, [][]int) {
 	rand.NewSource(time.Now().UnixNano())

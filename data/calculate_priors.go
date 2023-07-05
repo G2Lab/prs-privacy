@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/csv"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
+	"gonum.org/v1/gonum/stat"
 )
 
 const (
@@ -37,7 +37,7 @@ func getAllChromosomePositions(chr int) ([]string, error) {
 	return positions[:len(positions)-1], nil
 }
 
-func calculateSNPpriors() {
+func calculatePriors() {
 	// first we send a command without -r and obtain all the positions in the file
 	// then we query row by row and compute frequencies for each allele
 	nRoutines := 0
@@ -82,7 +82,7 @@ func calculateSNPpriors() {
 						if strings.Contains(sample, ".") {
 							continue
 						}
-						sample, err = normalizeSNP(sample)
+						sample, err = tools.NormalizeSnp(sample)
 						if err != nil {
 							log.Printf("%v: %s, snp %s\n", err, sample, positions[i+k])
 							continue
@@ -125,7 +125,7 @@ func calculateSNPpriors() {
 	wg.Wait()
 }
 
-func calculatePairwisePriors(filename string) {
+func calculateCorrelation(filename string) {
 	p := pgs.NewPGS()
 	err := p.LoadCatalogFile(filename)
 	if err != nil {
@@ -134,50 +134,38 @@ func calculatePairwisePriors(filename string) {
 	}
 
 	// retrieve the variants for all the individuals at the SNPs of interest
-	individuals := make(map[string]map[string]int)
-	for _, locus := range p.Loci {
+	var snp string
+	genotypes := make([][]float64, len(p.Loci))
+	for i, locus := range p.Loci {
+		genotypes[i] = make([]float64, 0)
 		chr, position := strings.Split(locus, ":")[0], strings.Split(locus, ":")[1]
-		query, args := tools.IndividualSnpsQuery(chr, position)
-		cmd := exec.Command(query, args...)
-		output, err := cmd.Output()
+		samples, err := tools.GetSnpsAtPosition(chr, position)
 		if err != nil {
-			fmt.Printf("Error querying locus %s: %v\n", locus, err)
+			log.Printf("Error querying for SNPs at %s: %v", locus, err)
 			continue
 		}
-		samples := strings.Split(string(output), "\t")
 		for _, sample := range samples {
-			fields := strings.Split(sample, "=")
-			if len(fields) != 2 {
-				continue
-			}
-			individual := fields[0]
-			snp := fields[1]
-			if _, exists := individuals[individual]; !exists {
-				individuals[individual] = make(map[string]int)
-			}
-			value, err := tools.SnpToValue(snp)
+			snp, err = tools.NormalizeSnp(sample)
 			if err != nil {
-				fmt.Println(err)
+				log.Printf("%v: %s, snp %s\n", err, sample, locus)
+				genotypes[i] = append(genotypes[i], []float64{0, 0}...)
 				continue
 			}
-			individuals[individual][locus] = int(value)
+			diploids, err := tools.SnpToPair(snp)
+			if err != nil {
+				log.Printf("%v: %s, snp %s\n", err, sample, locus)
+				genotypes[i] = append(genotypes[i], []float64{0, 0}...)
+				continue
+			}
+			genotypes[i] = append(genotypes[i], diploids...)
 		}
 	}
 
-	// calculate the pairwise frequencies
-	frequency := make([][]float64, len(p.Loci)*len(pgs.GENOTYPES))
-	for i := range frequency {
-		frequency[i] = make([]float64, len(p.Loci)*len(pgs.GENOTYPES))
-	}
-	// the result consists of len(pgs.GENOTYPES) x len(p.GENOTYPES) blocks which all add up to len(individuals)
-	for i, locus1 := range p.Loci {
-		for j, locus2 := range p.Loci {
-			if i == j {
-				continue
-			}
-			for _, individual := range individuals {
-				frequency[i*len(pgs.GENOTYPES)+individual[locus1]][j*len(pgs.GENOTYPES)+individual[locus2]] += 1
-			}
+	correlations := make([][]float64, len(p.Loci))
+	for i := range p.Loci {
+		correlations[i] = make([]float64, len(p.Loci))
+		for j := range p.Loci {
+			correlations[i][j] = stat.Correlation(genotypes[i], genotypes[j], nil)
 		}
 	}
 
@@ -189,22 +177,10 @@ func calculatePairwisePriors(filename string) {
 	}
 	defer file.Close()
 	writer := csv.NewWriter(file)
-	var likelihood float64
-	for i := range frequency {
-		tmp := make([]string, len(frequency[i]))
-		for j := 0; j < len(frequency[i]); j += len(pgs.GENOTYPES) {
-			sum := 0.0
-			for k := 0; k < len(pgs.GENOTYPES); k++ {
-				sum += frequency[i][j+k]
-			}
-			for k := 0; k < len(pgs.GENOTYPES); k++ {
-				if sum != 0 {
-					likelihood = frequency[i][j+k] / sum
-				} else {
-					likelihood = 0
-				}
-				tmp[j+k] = strconv.FormatFloat(likelihood, 'f', 5, 64)
-			}
+	for i := range correlations {
+		tmp := make([]string, len(correlations[i]))
+		for j := 0; j < len(tmp); j++ {
+			tmp[j] = strconv.FormatFloat(correlations[i][j], 'f', 5, 64)
 		}
 		err = writer.Write(tmp)
 		if err != nil {
@@ -215,35 +191,15 @@ func calculatePairwisePriors(filename string) {
 	}
 }
 
-func normalizeSNP(snp string) (string, error) {
-	switch snp {
-	case "0|0", "0|1", "1|0", "1|1":
-		return snp, nil
-	case "0|2", "0|3", "0|4", "0|5", "0|6":
-		return "0|1", nil
-	case "2|0", "3|0", "4|0", "5|0", "6|0":
-		return "1|0", nil
-	//	rare biallelic and triallelic cases
-	case "1|2", "2|1", "2|2",
-		"1|3", "3|1", "2|3", "3|2", "3|3",
-		"4|1", "1|4", "2|4", "4|2", "4|3", "3|4", "4|4",
-		"5|1", "1|5", "5|2", "2|5", "5|3", "3|5", "5|4", "4|5", "5|5",
-		"6|1", "1|6", "6|2", "2|6", "6|3", "3|6", "6|4", "4|6", "6|5", "5|6", "6|6":
-		return "1|1", nil
-	default:
-		return snp, errors.New("unknown snp value")
-	}
-}
-
 func main() {
 	prior := flag.Bool("prior", false, "calculate individual SNP priors")
 	pairwise := flag.Bool("pairwise", false, "calculate pairwise priors")
 	flag.Parse()
 
 	if *prior {
-		calculateSNPpriors()
+		calculatePriors()
 	}
 	if *pairwise {
-		calculatePairwisePriors("PGS000040_hmPOS_GRCh38.txt")
+		calculateCorrelation("PGS000040_hmPOS_GRCh38.txt")
 	}
 }

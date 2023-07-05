@@ -34,7 +34,7 @@ func SampleUniform(values []int) int {
 	return -1
 }
 
-func SampleFromMap(distribution map[int]float64) int {
+func SampleFromMap(distribution map[string]float64) string {
 	rand.NewSource(time.Now().UnixNano())
 	cumulative := 0.0
 	for _, p := range distribution {
@@ -47,7 +47,7 @@ func SampleFromMap(distribution map[int]float64) int {
 			return k
 		}
 	}
-	return -1
+	return ""
 }
 
 func Shuffle(values [][]int, labels []float64) ([][]int, []float64) {

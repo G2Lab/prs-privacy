@@ -32,17 +32,17 @@ var ALL_FIELDS = []string{
 	"hm_inferOtherAllele",
 }
 
-var GENOTYPES = []int{0, 1, 2}
+var GENOTYPES = []string{"0|0", "0|1", "1|0", "1|1"}
 
 type Variant struct {
 	fields map[string]interface{}
-	priors map[int]float64
+	priors map[string]float64
 }
 
 func NewVariant(fields map[string]interface{}) *Variant {
 	v := &Variant{
 		fields: make(map[string]interface{}),
-		priors: make(map[int]float64),
+		priors: make(map[string]float64),
 	}
 
 	if weight, ok := fields["effect_weight"].(string); ok {
@@ -82,7 +82,7 @@ func (v *Variant) GetWeight() float64 {
 	return 0.0
 }
 
-func (v *Variant) GetPriors() map[int]float64 {
+func (v *Variant) GetPriors() map[string]float64 {
 	return v.priors
 }
 
@@ -98,7 +98,7 @@ type PGS struct {
 	Variants       map[string]*Variant
 	Loci           []string
 	Weights        []float64
-	pairwise       [][]float64
+	correlations   [][]float64
 }
 
 func NewPGS() *PGS {
@@ -183,13 +183,13 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 		minIndex := i
 		minChr, minPos, err := parseLocus(sortedLoc[minIndex])
 		if err != nil {
-			log.Printf("Error parsing locus %s: %v, %v", sortedLoc[minIndex], err)
+			log.Printf("Error parsing locus %s: %v", sortedLoc[minIndex], err)
 			return nil, err
 		}
 		for j := i + 1; j < len(sortedLoc); j++ {
 			chr, pos, err := parseLocus(sortedLoc[j])
 			if err != nil {
-				log.Printf("Error parsing locus %s: %v, %v", sortedLoc[minIndex], err)
+				log.Printf("Error parsing locus %s: %v", sortedLoc[minIndex], err)
 				return nil, err
 			}
 			if chr < minChr || (chr == minChr && pos < minPos) {
@@ -207,20 +207,20 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 
 func (p *PGS) LoadPriors() {
 	p.LoadIndividualPriors()
-	p.LoadPairwisePriors()
+	//p.LoadCorrelations()
 }
 
 func (p *PGS) LoadIndividualPriors() {
 	_, err := os.Stat(p.PgsID + ".priors")
 	if os.IsNotExist(err) {
-		priorsFile, error := os.Create(p.PgsID + ".priors")
-		if error != nil {
-			log.Printf("Error creating priors file: %s", error)
+		priorsFile, err := os.Create(p.PgsID + ".priors")
+		if err != nil {
+			log.Printf("Error creating priors file: %v", err)
 			return
 		}
 		defer priorsFile.Close()
 		writer := csv.NewWriter(priorsFile)
-		writer.Write([]string{"chromosome", "position", "0", "1", "2"})
+		writer.Write([]string{"chromosome", "position", "0|0", "0|1", "1|0", "1|1"})
 		for _, variant := range p.Variants {
 			chr := variant.GetHmChr()
 			pos := variant.GetHmPos()
@@ -245,13 +245,7 @@ func (p *PGS) LoadIndividualPriors() {
 				if row[0] != pos {
 					continue
 				}
-				zeroOneProb, err1 := strconv.ParseFloat(row[2], 64)
-				oneZeroProb, err2 := strconv.ParseFloat(row[3], 64)
-				if err1 != nil || err2 != nil {
-					log.Printf("Error converting probabilities from position %s in chr%s.csv: %s", pos, chr, err)
-					continue
-				}
-				writer.Write([]string{chr, pos, row[1], fmt.Sprintf("%.5f", zeroOneProb+oneZeroProb), row[4]})
+				writer.Write([]string{chr, pos, row[1], row[2], row[3], row[4]})
 				break
 			}
 			f.Close()
@@ -261,7 +255,7 @@ func (p *PGS) LoadIndividualPriors() {
 	}
 	priorsFile, err := os.Open(p.PgsID + ".priors")
 	if err != nil {
-		log.Printf("Error opening priors file: %v", err)
+		log.Printf("Error opening priors file: %v\n", err)
 		return
 	}
 	defer priorsFile.Close()
@@ -281,25 +275,24 @@ func (p *PGS) LoadIndividualPriors() {
 		pos := row[1]
 		locus := fmt.Sprintf("%s:%s", chr, pos)
 		for i := 2; i < len(row); i++ {
-			key, err1 := strconv.Atoi(header[i])
-			value, err2 := strconv.ParseFloat(row[i], 64)
-			if err1 != nil || err2 != nil {
-				log.Printf("Error converting key %s or value %s to int: %v, %v", header[i], row[i], err1, err2)
+			value, err := strconv.ParseFloat(row[i], 64)
+			if err != nil {
+				log.Printf("Error converting key %s or value %s to int: %v", header[i], row[i], err)
 				continue
 			}
-			p.Variants[locus].priors[key] = value
+			p.Variants[locus].priors[header[i]] = value
 		}
 	}
 }
 
-func (p *PGS) LoadPairwisePriors() {
+func (p *PGS) LoadCorrelations() {
 	file, err := os.Open("data/prior/" + p.PgsID + ".pairwise")
 	if err != nil {
 		log.Printf("Error opening priors file: %v", err)
 		return
 	}
 	defer file.Close()
-	p.pairwise = make([][]float64, len(GENOTYPES)*p.VariantsNumber)
+	p.correlations = make([][]float64, len(GENOTYPES)*p.VariantsNumber)
 	reader := csv.NewReader(file)
 	j := 0
 	for {
@@ -307,21 +300,21 @@ func (p *PGS) LoadPairwisePriors() {
 		if err != nil {
 			break // Reached end of file or encountered an error
 		}
-		p.pairwise[j] = make([]float64, len(row))
+		p.correlations[j] = make([]float64, len(row))
 		for i := 0; i < len(row); i++ {
 			prob, err := strconv.ParseFloat(row[i], 64)
 			if err != nil {
 				log.Printf("Error converting probabilitiy to float: %s, %v", row[i], err)
 				continue
 			}
-			p.pairwise[j][i] = prob
+			p.correlations[j][i] = prob
 		}
 		j++
 	}
 }
 
-func (p *PGS) MutateGenome(original []int) []int {
-	mutations := make([]int, 0, len(GENOTYPES)*len(original))
+func (p *PGS) MutateGenome(original []string) []string {
+	mutations := make([]string, 0, len(GENOTYPES)*len(original))
 	probabilities := make([]float64, 0, len(GENOTYPES)*len(original))
 	prob := 0.0
 	for i := range original {
@@ -335,7 +328,7 @@ func (p *PGS) MutateGenome(original []int) []int {
 					continue
 				}
 				// Given the SNP value at position k, what is the probability of the SNP value at position i being j
-				prob += math.Exp(p.pairwise[k*len(GENOTYPES)+original[k]][i*len(GENOTYPES)+j])
+				prob += math.Exp(p.correlations[k*len(GENOTYPES)+original[k]][i*len(GENOTYPES)+j])
 			}
 			probabilities = append(probabilities, prob)
 			mutations = append(mutations, v)
@@ -346,18 +339,18 @@ func (p *PGS) MutateGenome(original []int) []int {
 	return original
 }
 
-func (p *PGS) GetVariantPriors(locus string) map[int]float64 {
+func (p *PGS) GetVariantPriors(locus string) map[string]float64 {
 	return p.Variants[locus].priors
 }
 
 // We use the Gibbs sampling approach: first sample based only on the individual priors,
-// then iterate by taking into account pairwise conditional probabilities
-func (p *PGS) SampleFromPopulation() ([]int, error) {
-	sample := make([]int, len(p.Variants))
+// then iterate by taking into account correlations correlations
+func (p *PGS) SampleFromPopulation() ([]string, error) {
+	sample := make([]string, 2*len(p.Variants))
 	// Initial sample based on individual priors
 	for i, loc := range p.Loci {
 		sample[i] = tools.SampleFromMap(p.Variants[loc].priors)
-		if sample[i] == -1 {
+		if sample[i] == "" {
 			return nil, errors.New("error in population sampling")
 		}
 	}
@@ -379,12 +372,4 @@ func parseLocus(locus string) (int, int, error) {
 		return 0, 0, err
 	}
 	return chr, pos, nil
-}
-
-func (p *PGS) CalculateSequenceLikelihood(seq []int) float64 {
-	likelihood := 0.0
-	for i, locus := range p.Loci {
-		likelihood += math.Log(p.Variants[locus].priors[seq[i]])
-	}
-	return -likelihood
 }

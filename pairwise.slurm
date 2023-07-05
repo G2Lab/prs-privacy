@@ -10,5 +10,6 @@
 module load bcftools/1.17
 module load htslib/1.17
 module load go/1.20.2
+export GOPATH=/gpfs/commons/groups/gursoy_lab/knikitin/go
 go build -o ./data/calculate ./data/
 ./data/calculate --pairwise=true

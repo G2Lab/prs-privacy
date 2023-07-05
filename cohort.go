@@ -40,9 +40,14 @@ func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
 			}
 			individual := fields[0]
 			snp := fields[1]
-			value, err := tools.SnpToValue(snp)
+			snp, err = tools.NormalizeSnp(snp)
 			if err != nil {
-				fmt.Println(err)
+				fmt.Printf("Error normilizing %s: %v", snp, err)
+				continue
+			}
+			value, err := tools.SnpToSum(snp)
+			if err != nil {
+				fmt.Printf("Error converting SNP %s to a value: %v", snp, err)
 				continue
 			}
 			if _, ok := c[individual]; !ok {
