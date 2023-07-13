@@ -2,167 +2,216 @@ package main
 
 import (
 	"fmt"
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"math/rand"
 	"strings"
 	"time"
-
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 )
 
 const (
-	SCORE      = "score"
-	ITERATIONS = 2000
+	ITERATIONS = 10000
 	numThreads = 16
 )
 
 func main() {
 	//INDIVIDUAL := "NA20543"
 	//INDIVIDUAL := "NA11881"
-	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG03304"
 	//INDIVIDUAL := "NA19082"
 	//INDIVIDUAL := "HG03022"
 	//INDIVIDUAL := "HG01767"
 	//INDIVIDUAL := "HG01868"
 	p := pgs.NewPGS()
-	//err := p.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
+	err := p.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
 	//err := p.LoadCatalogFile("PGS000037_hmPOS_GRCh38.txt")
-	err := p.LoadCatalogFile("PGS000040_hmPOS_GRCh38.txt")
+	//err := p.LoadCatalogFile("PGS000040_hmPOS_GRCh38.txt")
 	if err != nil {
-		log.Println("Error:", err)
+		log.Printf("Error loading catalog file: %v\n", err)
 		return
 	}
-	fmt.Println(p.Loci)
-	//p.LoadPriors()
-	//cohort := NewCohort()
-	//cohort.CalculatePRS(p)
+	p.LoadStats()
+	cohort := NewCohort(p)
 
-	//err = cohort.SaveScores(p.PgsID)
-	//if err != nil {
-	//	log.Println("Error saving scores:", err)
-	//	return
-	//}
-	//target := make([]int, len(p.Variants))
-	//for i, locus := range p.Loci {
-	//	target[i] = int(cohort[INDIVIDUAL][locus])
-	//}
-	//
-	//solutions := Solve(cohort[INDIVIDUAL][SCORE], p)
-	////solutions = sortByAccuracy(solutions, target)
-	//fmt.Printf("True:\n%s -- %f\n", arrayTostring(target), p.CalculateSequenceLikelihood(target))
-	//fmt.Printf("Guessed:\n")
-	//for _, solution := range solutions {
-	//	fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, target),
-	//		cohort[INDIVIDUAL][SCORE]-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
-	//}
-	////fmt.Printf("True score:%f", cohort[INDIVIDUAL][SCORE])
-	////fmt.Printf("\nGuessed scores:%f\n", calculateScore(solution, p.Weights))
-	////fmt.Printf("Accuracy: %.2f\n", accuracy(solution, target))
+	solutions := Solve(cohort[INDIVIDUAL].Score, p)
+	solutions = sortByAccuracy(solutions, cohort[INDIVIDUAL].Genotype)
+	fmt.Printf("\nTrue:\n%s -- %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype), p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
+	fmt.Printf("Guessed %d:\n", len(solutions))
+	for _, solution := range solutions {
+		fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+	}
 }
 
-//func Solve(targetScore float64, pgs *pgs.PGS) [][]int {
-//	var err error
-//	candidates := make([][]float64, len(pgs.Variants)*2)
-//	// Initialize candidate solutions according to the SNPs likelihood in the population
-//	for i := 0; i < len(candidates); i++ {
-//		candidates[i], err = pgs.SampleFromPopulation()
-//		if err != nil {
-//			fmt.Println(err)
-//			return nil
-//		}
-//	}
-//	// Evaluate candidates
-//	for k := 0; k < ITERATIONS; k++ {
-//		fitness := calculateFitness(candidates, pgs, targetScore, k)
-//		parents, children := crossover(candidates, fitness)
-//		childrenFitness := calculateFitness(children, pgs, targetScore, k)
-//		candidates = tournament(append(parents, children...), append(fitness, childrenFitness...))
-//		//	mutations happen independently of the score, they are based only on likelihood
-//		candidates = mutate(candidates, pgs)
-//	}
-//	candidates = sortByFitness(candidates, pgs, targetScore)
-//	return candidates
-//}
-
-func crossover(parents [][]int, fitness []float64) ([][]int, [][]int) {
+func Solve(targetScore float64, p *pgs.PGS) [][]int {
+	var err error
 	rand.NewSource(time.Now().UnixNano())
-	offspring := make([][]int, 0, len(parents))
-	parents, fitness = tools.Shuffle(parents, fitness)
-	cumulative := 0.0
-	var splitPos, step float64
-	splice := func(firstIndex, secondIndex int) {
-		child := make([]int, len(parents[firstIndex]))
-		cumulative = fitness[firstIndex] + fitness[secondIndex]
-		splitPos = rand.Float64() * cumulative
-		step = cumulative / float64(len(parents[firstIndex]))
-		copy(child[:int(splitPos/step)], parents[firstIndex][:int(splitPos/step)])
-		copy(child[int(splitPos/step):], parents[secondIndex][int(splitPos/step):])
-		offspring = append(offspring, child)
-	}
-	// each parent has two offspring: one with the next parent, and one with the parent at + len(parents)/2
-	for i := 0; i < len(parents); i += 2 {
-		splice(i, i+1)
-	}
-	for i := 0; i < len(parents)/2; i++ {
-		splice(i, i+len(parents)/2)
-	}
-	return parents, offspring
-}
-
-func tournament(population [][]int, fitness []float64) [][]int {
-	survivors := make([][]int, 0, len(population)/2)
-	population, fitness = tools.Shuffle(population, fitness)
-	// Select the best half of the population
-	for i := 0; i < len(population); i += 2 {
-		if fitness[i] > fitness[i+1] {
-			survivors = append(survivors, population[i])
-		} else {
-			survivors = append(survivors, population[i+1])
+	POOLSIZE := len(p.Variants) * 10
+	solutions := make([][]int, 0)
+	candidates := make([][]int, POOLSIZE, 2*POOLSIZE)
+	// Initialize candidate solutions according to the SNPs likelihood in the population
+	for i := 0; i < len(candidates); i++ {
+		candidates[i], err = p.SampleFromPopulation()
+		if err != nil {
+			fmt.Println(err)
+			return nil
 		}
 	}
-	return survivors
-}
-
-func mutate(population [][]int, pgs *pgs.PGS) [][]int {
-	for j, individual := range population {
-		population[j] = pgs.MutateGenome(individual)
+	fmt.Printf("Iteration: ")
+	// Evaluate candidates
+	for k := 0; k < ITERATIONS; k++ {
+		if k%1000 == 0 {
+			fmt.Printf("%d/%d ", k, ITERATIONS)
+		}
+		deltas, solved := calculateDeltas(candidates, p, targetScore)
+		if len(solved) > 0 {
+			placeholder := make([][]int, len(solved))
+			solutions = append(solutions, placeholder...)
+			copy(solutions[len(solutions)-len(solved):], solved)
+		}
+		//solutions = append(solutions, solved...)
+		children := crossover(candidates, p, targetScore)
+		//_, solved = calculateDeltas(children, p, targetScore)
+		chDeltas, solved := calculateDeltas(children, p, targetScore)
+		if len(solved) > 0 {
+			placeholder := make([][]int, len(solved))
+			solutions = append(solutions, placeholder...)
+			copy(solutions[len(solutions)-len(solved):], solved)
+		}
+		////solutions = append(solutions, solved...)
+		candidates = tournament(append(candidates, children...), append(deltas, chDeltas...), POOLSIZE)
+		deltas, solved = calculateDeltas(candidates, p, targetScore)
+		if len(solved) > 0 {
+			placeholder := make([][]int, len(solved))
+			solutions = append(solutions, placeholder...)
+			copy(solutions[len(solutions)-len(solved):], solved)
+		}
+		//solutions = append(solutions, solved...)
+		//	mutations happen independently of the score, they are based only on likelihood
+		mutate(candidates, deltas, p)
 	}
-	return population
+	//solutions = sortByFitness(solutions, p, targetScore)
+	return solutions
 }
 
-func calculateFitness(population [][]int, pgs *pgs.PGS, targetScore float64, iteration int) []float64 {
+func calculateDeltas(population [][]int, p *pgs.PGS, targetScore float64) ([]float64, [][]int) {
 	var delta float64
-	fitness := make([]float64, len(population))
-	for i, individual := range population {
-		delta = calculateScore(individual, pgs.Weights) - targetScore
-		// smaller the delta, higher the fitness. the delta's significance increases with iterations
-		fitness[i] = math.Exp(-math.Abs(delta) / float64(ITERATIONS-iteration))
+	var err error
+	deltas := make([]float64, len(population))
+	matches := make([][]int, 0)
+	for i := range population {
+		delta = calculateScore(population[i], p.Weights) - targetScore
+		for delta == 0 {
+			match := make([]int, len(population[i]))
+			copy(match, population[i])
+			matches = append(matches, match)
+			population[i], err = p.SampleFromPopulation()
+			if err != nil {
+				log.Printf("Error resampling in fitness calculation: %v\n", err)
+				return nil, nil
+			}
+			delta = calculateScore(population[i], p.Weights) - targetScore
+		}
+		deltas[i] = delta
 	}
-	return fitness
+	return deltas, matches
 }
 
 func calculateScore(snps []int, weights []float64) float64 {
 	score := 0.0
-	for i, snp := range snps {
-		score += float64(snp) * weights[i]
+	for i := 0; i < len(snps); i += pgs.NUM_HAPLOTYPES {
+		for j := 0; j < pgs.NUM_HAPLOTYPES; j++ {
+			switch snps[i+j] {
+			case 0:
+				continue
+			case 1:
+				score += weights[i/2]
+			default:
+				log.Printf("Invalid alelle value: %d", snps[i+j])
+			}
+		}
 	}
 	return score
 }
 
-func sortByFitness(population [][]int, pgs *pgs.PGS, targetScore float64) [][]int {
-	fitness := calculateFitness(population, pgs, targetScore, 0)
-	for i := 0; i < len(population); i++ {
-		for j := i; j < len(population); j++ {
-			if fitness[i] < fitness[j] {
-				population[i], population[j] = population[j], population[i]
-				fitness[i], fitness[j] = fitness[j], fitness[i]
+func crossover(population [][]int, p *pgs.PGS, target float64) [][]int {
+	parents := tools.Shuffle(population)
+	splice := func(first, second int) [][]int {
+		children := make([][]int, len(parents[first])/2)
+		for k := 0; k < len(children); k++ {
+			children[k] = make([]int, len(parents[first]))
+			copy(children[k][:k*pgs.NUM_HAPLOTYPES], parents[first][:k*pgs.NUM_HAPLOTYPES])
+			copy(children[k][k*pgs.NUM_HAPLOTYPES:], parents[second][k*pgs.NUM_HAPLOTYPES:])
+		}
+		deltas, matches := calculateDeltas(children, p, target)
+		if len(matches) > 0 {
+			return matches
+		}
+		fitness := deltasToFitness(deltas)
+		pickedIndex := tools.SampleFromDistribution(fitness)
+		return [][]int{children[pickedIndex]}
+	}
+	offspring := make([][]int, 0, len(parents))
+	// each parent has two offspring: one with the next parent, and one with the parent at + len(parents)/2
+	for i := 0; i < len(parents); i += 2 {
+		offspring = append(offspring, splice(i, i+1)...)
+	}
+	//for i := 0; i < len(parents)/2; i++ {
+	//	offspring = append(offspring, splice(i, i+len(parents)/2))
+	//}
+	return offspring
+}
+
+func tournament(population [][]int, deltas []float64, populationSize int) [][]int {
+	fitness := deltasToFitness(deltas)
+	scores := make([]float64, len(population))
+	var opponentIdx int
+	for i := range population {
+		for k := 0; k < len(population)/10; k++ {
+			opponentIdx = rand.Intn(len(population))
+			for opponentIdx == i {
+				opponentIdx = rand.Intn(len(population))
+			}
+			if fitness[i] >= fitness[opponentIdx] {
+				scores[i]++
 			}
 		}
 	}
-	return population
+	sortBy(population, scores)
+	return population[:populationSize]
+}
+
+//func tournament(population [][][]int, deltas []float64) [][][]int {
+//	fitness := deltasToFitness(deltas)
+//	survivors := make([][][]int, 0, len(population)/2)
+//	population, fitness = tools.ShuffleWithLabels(population, fitness)
+//	// Select the best half of the population
+//	for i := 0; i < len(population); i += 2 {
+//		if fitness[i] > fitness[i+1] {
+//			survivors = append(survivors, population[i])
+//		} else {
+//			survivors = append(survivors, population[i+1])
+//		}
+//	}
+//	return survivors
+//}
+
+func mutate(population [][]int, deltas []float64, p *pgs.PGS) {
+	for j, original := range population {
+		population[j] = p.MutateGenome(original, deltas[j])
+	}
+}
+
+func deltasToFitness(deltas []float64) []float64 {
+	fitness := make([]float64, len(deltas))
+	for i, delta := range deltas {
+		// smaller the delta, higher the fitness
+		fitness[i] = 1 / math.Abs(delta)
+	}
+	return fitness
 }
 
 func accuracy(solution []int, target []int) float64 {
@@ -170,18 +219,18 @@ func accuracy(solution []int, target []int) float64 {
 		return 0.0
 	}
 	acc := 0.0
-	for i := range solution {
-		if solution[i] == target[i] {
+	for i := 0; i < len(solution); i += pgs.NUM_HAPLOTYPES {
+		if solution[i]+solution[i+1] == target[i]+target[i+1] {
 			acc++
 		}
 	}
-	return acc / float64(len(solution))
+	return acc * pgs.NUM_HAPLOTYPES / float64(len(solution))
 }
 
 func arrayTostring(array []int) string {
 	str := make([]string, len(array))
-	for i, num := range array {
-		str[i] = fmt.Sprint(num)
+	for i := 0; i < len(array); i += pgs.NUM_HAPLOTYPES {
+		str[i] = fmt.Sprint(array[i] + array[i+1])
 	}
 	return strings.Join(str, "")
 }
@@ -200,4 +249,15 @@ func sortByAccuracy(solutions [][]int, target []int) [][]int {
 		}
 	}
 	return solutions
+}
+
+func sortBy(items [][]int, properties []float64) {
+	for i := 0; i < len(items)-1; i++ {
+		for j := i + 1; j < len(items); j++ {
+			if properties[i] < properties[j] {
+				items[i], items[j] = items[j], items[i]
+				properties[i], properties[j] = properties[j], properties[i]
+			}
+		}
+	}
 }

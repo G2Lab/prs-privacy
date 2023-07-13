@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"github.com/nikirill/prs/pgs"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,17 +14,45 @@ import (
 	"github.com/nikirill/prs/tools"
 )
 
-type Cohort map[string]map[string]float64
+type Individual struct {
+	Genotype []int
+	Score    float64
+}
 
-func NewCohort() Cohort {
+type Cohort map[string]*Individual
+
+func NewIndividual() *Individual {
+	return &Individual{
+		Genotype: make([]int, 0),
+		Score:    0.0,
+	}
+}
+
+func NewCohort(pgs *pgs.PGS) Cohort {
 	c := make(Cohort)
+	c.Populate(pgs)
 	return c
 }
 
+func (c Cohort) Populate(pgs *pgs.PGS) {
+	filename := fmt.Sprintf("%s.json", pgs.PgsID)
+	// If the file doesn't exist, calculate the PRS and save it
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		c.CalculatePRS(pgs)
+		c.SaveToDisk(filename)
+		if _, err := os.Stat(fmt.Sprintf("%s.scores", pgs.PgsID)); os.IsNotExist(err) {
+			c.SaveScores(fmt.Sprintf("%s.scores", pgs.PgsID))
+		}
+		// Save scores separately for the ease of reading
+		return
+	}
+	// Otherwise, load the data from disk
+	c.LoadFromDisk(filename)
+}
+
 func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
-	for _, variant := range pgs.Variants {
-		chr := variant.GetHmChr()
-		position := variant.GetHmPos()
+	for i, locus := range pgs.Loci {
+		chr, position := tools.SplitLocus(locus)
 		query, args := tools.IndividualSnpsQuery(chr, position)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
@@ -38,24 +68,23 @@ func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
 				//fmt.Println("Error splitting sampleFromMap:", sampleFromMap)
 				continue
 			}
-			individual := fields[0]
+			individ := fields[0]
 			snp := fields[1]
 			snp, err = tools.NormalizeSnp(snp)
 			if err != nil {
-				fmt.Printf("Error normilizing %s: %v", snp, err)
+				fmt.Printf("Error normalizing %s: %v", snp, err)
 				continue
 			}
-			value, err := tools.SnpToSum(snp)
+			allele, err := tools.SnpToPair(snp)
 			if err != nil {
-				fmt.Printf("Error converting SNP %s to a value: %v", snp, err)
+				fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
 				continue
 			}
-			if _, ok := c[individual]; !ok {
-				c[individual] = make(map[string]float64)
+			if _, ok := c[individ]; !ok {
+				c[individ] = NewIndividual()
 			}
-			key := fmt.Sprintf("%s:%s", chr, position)
-			c[individual][key] = value
-			c[individual][SCORE] += value * variant.GetWeight()
+			c[individ].Genotype = append(c[individ].Genotype, allele...)
+			c[individ].Score += float64(allele[0]+allele[1]) * pgs.Weights[i]
 		}
 	}
 }
@@ -68,7 +97,7 @@ func (c Cohort) SortByScore() []string {
 	for i := 0; i < len(sortedInd)-1; i++ {
 		minIndex := i
 		for j := i + 1; j < len(sortedInd); j++ {
-			if c[sortedInd[j]][SCORE] < c[sortedInd[minIndex]][SCORE] {
+			if c[sortedInd[j]].Score < c[sortedInd[minIndex]].Score {
 				minIndex = j
 			}
 		}
@@ -79,16 +108,40 @@ func (c Cohort) SortByScore() []string {
 	return sortedInd
 }
 
+func (c Cohort) SaveToDisk(filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Cannot create json file %v", err)
+	}
+	defer file.Close()
+	encoder := json.NewEncoder(file)
+	if err := encoder.Encode(c); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+}
+
+func (c Cohort) LoadFromDisk(filename string) {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("Cannot open cohort json file %v", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&c); err != nil {
+		log.Fatal("Cannot decode json", err)
+	}
+}
+
 func (c Cohort) SaveScores(filename string) error {
 	sortedInd := c.SortByScore()
-	file, err := os.Create(filename + ".scores")
+	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf("%0.17f", c[ind][SCORE])})
+		writer.Write([]string{ind, fmt.Sprintf("%0.17f", c[ind].Score)})
 	}
 	writer.Flush()
 	return nil
@@ -106,11 +159,11 @@ func (c Cohort) LoadScores(filename string) error {
 		if err != nil {
 			return err
 		}
-		individual := record[0]
+		name := record[0]
 		score := record[1]
-		c[individual] = make(map[string]float64)
+		c[name] = NewIndividual()
 		if v, err := strconv.ParseFloat(score, 64); err == nil {
-			c[individual][SCORE] = v
+			c[name].Score = v
 		} else {
 			return err
 		}

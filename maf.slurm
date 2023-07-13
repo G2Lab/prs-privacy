@@ -11,4 +11,4 @@ module load bcftools/1.17
 module load htslib/1.17
 module load go/1.20.2
 go build -o ./data/calculate ./data/
-./data/calculate --prior=true
+./data/calculate --maf=true
