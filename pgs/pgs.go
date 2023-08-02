@@ -33,8 +33,9 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	NUM_HAPLOTYPES = 2
-	NUM_GENOTYPES  = 2
+	NumHaplotypes = 2
+	MaxValue      = 1.7e+308
+	ErrorMargin   = 1e-8
 )
 
 var GENOTYPES = []int{0, 1}
@@ -113,6 +114,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	}
 	defer file.Close()
 
+	headerInProgress := true
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -144,8 +146,9 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 		}
 
 		// Specified variant fields
-		if strings.HasPrefix(line, "rsID") {
+		if headerInProgress {
 			p.Fieldnames = strings.Split(line, "\t")
+			headerInProgress = false
 			continue
 		}
 
@@ -234,7 +237,7 @@ func (p *PGS) LoadMAF() {
 				fmt.Printf("Error reading MAF file chr%s.csv: %v", chr, err)
 				continue
 			}
-
+			found := false
 			for {
 				row, err := reader.Read()
 				if err != nil {
@@ -244,7 +247,12 @@ func (p *PGS) LoadMAF() {
 					continue
 				}
 				writer.Write([]string{chr, pos, row[1]})
+				found = true
 				break
+			}
+			if !found {
+				writer.Write([]string{chr, pos, "0.99999"})
+				log.Printf("No MAF found for locus %s", locus)
 			}
 			f.Close()
 			writer.Flush()
@@ -279,39 +287,49 @@ func (p *PGS) LoadMAF() {
 	}
 }
 
-func (p *PGS) MutateGenome(original []int, delta float64) []int {
-	mutations := make([]int, 0, len(original))
-	probabilities := make([]float64, 0, len(mutations))
+func (p *PGS) MutateGenome(original []int, delta float64) [][]int {
+	mutations := make([]int, len(original))
+	probabilities := make([]float64, len(original))
+	mutated := make([][]int, 0, 1)
 	tmp := 0.0
-	for i := 0; i < len(original); i += NUM_HAPLOTYPES {
-		for j := 0; j < NUM_HAPLOTYPES; j++ {
-			tmp = delta - float64(original[i+j])*p.Weights[i/2]
+	for i := 0; i < len(original)/NumHaplotypes; i++ {
+		for j := 0; j < NumHaplotypes; j++ {
+			tmp = delta - float64(original[NumHaplotypes*i+j])*p.Weights[i]
 			for _, v := range GENOTYPES {
-				if v == original[i+j] {
+				if v == original[NumHaplotypes*i+j] {
 					continue
 				}
-				if tmp+float64(v)*p.Weights[i/2] == 0 {
-					original[i+j] = v
-					return original
+				//if tmp+float64(v)*p.Weights[i] == 0 {
+				if math.Abs(tmp+float64(v)*p.Weights[i]) <= ErrorMargin {
+					match := make([]int, len(original))
+					copy(match, original)
+					match[NumHaplotypes*i+j] = v
+					mutated = append(mutated, match)
+					continue
 				}
-				probabilities = append(probabilities, 1/math.Abs(tmp+float64(v)*p.Weights[i/2]))
-				mutations = append(mutations, v)
+				//probabilities[NumHaplotypes*i+j] = 1 / math.Abs(tmp+float64(v)*p.Weights[i])
+				probabilities[NumHaplotypes*i+j] = p.Maf[i][v]
+				mutations[NumHaplotypes*i+j] = v
 			}
 		}
 	}
-	//fmt.Println(probabilities)
+	if len(mutated) > 0 {
+		// we found solutions so no need to sample
+		return mutated
+	}
 	mutationId := tools.SampleFromDistribution(probabilities)
 	original[mutationId] = mutations[mutationId]
-	return original
+	mutated = append(mutated, original)
+	return mutated
 }
 
 //func (p *PGS) MutateGenome(original [][]int) [][]int {
-//	mutations := make([]int, 0, NUM_HAPLOTYPES*len(GENOTYPES)*len(original))
-//	probabilities := make([]float64, 0, NUM_HAPLOTYPES*len(GENOTYPES)*len(original))
+//	mutations := make([]int, 0, NumHaplotypes*len(GENOTYPES)*len(original))
+//	probabilities := make([]float64, 0, NumHaplotypes*len(GENOTYPES)*len(original))
 //	prob := 0.0
 //	for i := range original {
 //		// We range over all the possible genotypes, even the present one, to allow for the possibility of no mutation
-//		for j := 0; j < NUM_HAPLOTYPES; j++ {
+//		for j := 0; j < NumHaplotypes; j++ {
 //			for _, v := range GENOTYPES {
 //				// Get individual prior
 //				prob = p.Maf[i][v]
@@ -321,20 +339,34 @@ func (p *PGS) MutateGenome(original []int, delta float64) []int {
 //		}
 //	}
 //	mutationId := tools.SampleFromDistribution(probabilities)
-//	original[mutationId/(NUM_HAPLOTYPES*len(GENOTYPES))][(mutationId/len(GENOTYPES))%NUM_HAPLOTYPES] = mutations[mutationId]
+//	original[mutationId/(NumHaplotypes*len(GENOTYPES))][(mutationId/len(GENOTYPES))%NumHaplotypes] = mutations[mutationId]
 //	return original
 //}
 
 // Sample according to the MAF
 func (p *PGS) SampleFromPopulation() ([]int, error) {
-	sample := make([]int, p.VariantCount*NUM_HAPLOTYPES)
+	sample := make([]int, p.VariantCount*NumHaplotypes)
 	// Initial sample based on individual priors
 	for i := range p.Loci {
-		for j := 0; j < NUM_HAPLOTYPES; j++ {
+		for j := 0; j < NumHaplotypes; j++ {
 			maf := p.Maf[i]
 			ind := tools.SampleFromDistribution(maf)
-			sample[i*NUM_HAPLOTYPES+j] = GENOTYPES[ind]
-			if sample[i*NUM_HAPLOTYPES+j] == -1 {
+			sample[i*NumHaplotypes+j] = GENOTYPES[ind]
+			if sample[i*NumHaplotypes+j] == -1 {
+				return nil, errors.New("error in population sampling")
+			}
+		}
+	}
+	return sample, nil
+}
+
+func (p *PGS) SampleUniform() ([]int, error) {
+	sample := make([]int, p.VariantCount*NumHaplotypes)
+	// Initial sample based on individual priors
+	for i := range p.Loci {
+		for j := 0; j < NumHaplotypes; j++ {
+			sample[i*NumHaplotypes+j] = tools.SampleUniform(GENOTYPES)
+			if sample[i*NumHaplotypes+j] == -1 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -345,8 +377,8 @@ func (p *PGS) SampleFromPopulation() ([]int, error) {
 func (p *PGS) CalculateSequenceLikelihood(sequence []int) float64 {
 	likelihood := 1.0
 	for i := range p.Loci {
-		for j := 0; j < NUM_HAPLOTYPES; j++ {
-			likelihood += math.Log(p.Maf[i][sequence[i*NUM_HAPLOTYPES+j]])
+		for j := 0; j < NumHaplotypes; j++ {
+			likelihood += math.Log(p.Maf[i][sequence[i*NumHaplotypes+j]])
 		}
 	}
 	return likelihood

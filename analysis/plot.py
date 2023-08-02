@@ -24,5 +24,23 @@ def pairwise(filepath):
     plt.savefig('pairwise.png', dpi=300)
 
 
+def score_distribution(filepath):
+    scores = []
+    with open(filepath, 'r') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            scores.append(float(row[1]))
+
+    print("Median: ", np.median(scores))
+    print("Percentiles: ", np.percentile(scores, range(5, 100, 5)))
+    plt.hist(scores, bins=100)
+    plt.xlabel("Score")
+    plt.ylabel("Frequency")
+    plt.tight_layout()
+    plt.show()
+    # plt.savefig('score_distribution.png', dpi=300)
+
+
 if __name__ == "__main__":
-    pairwise("data/prior/PGS000040.pairwise")
+    # pairwise("data/prior/PGS000040.pairwise")
+    score_distribution("PGS000040.scores")
