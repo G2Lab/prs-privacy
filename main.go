@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
@@ -15,6 +16,28 @@ const (
 	ITERATIONS = 10000
 	numThreads = 8
 )
+
+type Solver struct {
+	target          float64
+	p               *pgs.PGS
+	populationChans []chan [][]int
+	deltaChans      []chan []float64
+}
+
+func NewSolver(ctx context.Context, target float64, p *pgs.PGS) *Solver {
+	s := &Solver{
+		target: target,
+		p:      p,
+	}
+	s.populationChans = make([]chan [][]int, numThreads)
+	s.deltaChans = make([]chan []float64, numThreads)
+	for i := 0; i < numThreads; i++ {
+		s.populationChans[i] = make(chan [][]int)
+		s.deltaChans[i] = make(chan []float64)
+		go s.mutate(ctx, s.populationChans[i], s.deltaChans[i])
+	}
+	return s
+}
 
 func main() {
 	//INDIVIDUAL := "NA18595"
@@ -33,7 +56,10 @@ func main() {
 	p.LoadStats()
 	cohort := NewCohort(p)
 
-	solmap := Solve(cohort[INDIVIDUAL].Score, p)
+	ctx, cancel := context.WithCancel(context.Background())
+	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p)
+
+	solmap := solver.solve()
 	solmap = findComplements(solmap, p)
 	solutions := sortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	fmt.Printf("\nTrue:\n%s -- %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype), p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
@@ -42,49 +68,46 @@ func main() {
 		fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
 	}
+	cancel()
 }
 
-func Solve(targetScore float64, p *pgs.PGS) map[string][]int {
+func (s *Solver) solve() map[string][]int {
 	var err error
 	rand.NewSource(time.Now().UnixNano())
-	POOLSIZE := len(p.Variants) * 100
+	POOLSIZE := len(s.p.Variants) * 100
 	solutions := make(map[string][]int)
 	candidates := make([][]int, POOLSIZE, 2*POOLSIZE)
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
-		candidates[i], err = p.SampleFromPopulation()
+		candidates[i], err = s.p.SampleFromPopulation()
 		if err != nil {
 			fmt.Println(err)
 			return nil
 		}
 	}
-	//done := make([]chan struct{}, numThreads)
-	//for i := 0; i < numThreads; i++ {
-	//	done[i] = make(chan struct{})
-	//}
 	//Evaluate candidates
 	for k := 0; k < ITERATIONS; k++ {
 		if k%500 == 0 {
 			fmt.Printf("Iteration %d/%d\n", k, ITERATIONS)
 		}
-		deltas, solved := calculateDeltas(candidates, p, targetScore)
+		deltas, solved := s.calculateDeltas(candidates)
 		extend(solutions, solved)
-		children := crossover(candidates, p, targetScore)
-		chDeltas, solved := calculateDeltas(children, p, targetScore)
+		children := s.crossover(candidates)
+		chDeltas, solved := s.calculateDeltas(children)
 		extend(solutions, solved)
 		candidates = tournament(append(candidates, children...), append(deltas, chDeltas...), POOLSIZE)
-		deltas, solved = calculateDeltas(candidates, p, targetScore)
+		deltas, solved = s.calculateDeltas(candidates)
 		extend(solutions, solved)
-		candidates = mutate(candidates, deltas, p)
-		//for thread := 0; thread < numThreads; thread++ {
-		//	go func(t int) {
-		//		mutate(candidates[t*len(candidates)/numThreads:(t+1)*len(candidates)/numThreads], deltas[t*len(candidates)/numThreads:(t+1)*len(candidates)/numThreads], p)
-		//		done[t] <- struct{}{}
-		//	}(thread)
-		//}
-		//for thread := 0; thread < numThreads; thread++ {
-		//	<-done[thread]
-		//}
+		for thread := 0; thread < numThreads; thread++ {
+			s.populationChans[thread] <- candidates[thread*len(candidates)/numThreads : (thread+1)*len(candidates)/numThreads]
+			s.deltaChans[thread] <- deltas[thread*len(candidates)/numThreads : (thread+1)*len(candidates)/numThreads]
+		}
+		mutated := make([][]int, 0, len(candidates))
+		for thread := 0; thread < numThreads; thread++ {
+			mutated = append(mutated, <-s.populationChans[thread]...)
+		}
+		candidates = make([][]int, len(mutated))
+		copy(candidates, mutated)
 	}
 
 	//collectChans := make([]chan [][]int, numThreads)
@@ -122,25 +145,25 @@ func extend(base map[string][]int, extension [][]int) {
 	}
 }
 
-func calculateDeltas(population [][]int, p *pgs.PGS, targetScore float64) ([]float64, [][]int) {
+func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
 	var delta float64
 	var err error
 	deltas := make([]float64, len(population))
 	matches := make([][]int, 0)
 	for i := range population {
-		delta = calculateScore(population[i], p.Weights) - targetScore
+		delta = calculateScore(population[i], s.p.Weights) - s.target
 		//for delta == 0 {
 		for math.Abs(delta) <= pgs.ErrorMargin {
 			match := make([]int, len(population[i]))
 			copy(match, population[i])
 			matches = append(matches, match)
-			fmt.Printf("Found match: %s %f\n", arrayTostring(match), calculateScore(match, p.Weights)-targetScore)
-			population[i], err = p.SampleFromPopulation()
+			fmt.Printf("Found match: %s %f\n", arrayTostring(match), calculateScore(match, s.p.Weights)-s.target)
+			population[i], err = s.p.SampleFromPopulation()
 			if err != nil {
 				log.Printf("Error resampling in fitness calculation: %v\n", err)
 				return nil, nil
 			}
-			delta = calculateScore(population[i], p.Weights) - targetScore
+			delta = calculateScore(population[i], s.p.Weights) - s.target
 		}
 		deltas[i] = delta
 	}
@@ -164,7 +187,7 @@ func calculateScore(snps []int, weights []float64) float64 {
 	return score
 }
 
-func crossover(population [][]int, p *pgs.PGS, target float64) [][]int {
+func (s *Solver) crossover(population [][]int) [][]int {
 	parents := tools.Shuffle(population)
 	splice := func(first, second int) [][]int {
 		children := make([][]int, len(parents[first])/2)
@@ -173,7 +196,7 @@ func crossover(population [][]int, p *pgs.PGS, target float64) [][]int {
 			copy(children[k][:k*pgs.NumHaplotypes], parents[first][:k*pgs.NumHaplotypes])
 			copy(children[k][k*pgs.NumHaplotypes:], parents[second][k*pgs.NumHaplotypes:])
 		}
-		deltas, matches := calculateDeltas(children, p, target)
+		deltas, matches := s.calculateDeltas(children)
 		if len(matches) > 0 {
 			return matches
 		}
@@ -207,42 +230,26 @@ func tournament(population [][]int, deltas []float64, populationSize int) [][]in
 	return population[:populationSize]
 }
 
-//func tournament(population [][][]int, deltas []float64) [][][]int {
-//	fitness := deltasToFitness(deltas)
-//	survivors := make([][][]int, 0, len(population)/2)
-//	population, fitness = tools.ShuffleWithLabels(population, fitness)
-//	// Select the best half of the population
-//	for i := 0; i < len(population); i += 2 {
-//		if fitness[i] > fitness[i+1] {
-//			survivors = append(survivors, population[i])
-//		} else {
-//			survivors = append(survivors, population[i+1])
-//		}
-//	}
-//	return survivors
-//}
-
-func mutate(population [][]int, deltas []float64, p *pgs.PGS) [][]int {
-	//// We shuffle the indices to avoid biasing the mutation towards the first SNPs
-	//// which can happen when multiple SNPs have the same weight
-	//shuffledIndices := make([]int, p.VariantCount)
-	//for i := 0; i < len(shuffledIndices); i++ {
-	//	shuffledIndices[i] = i
-	//}
-	//for i := len(shuffledIndices) - 1; i > 0; i-- {
-	//	j := rand.Intn(i + 1)
-	//	shuffledIndices[i], shuffledIndices[j] = shuffledIndices[j], shuffledIndices[i]
-	//}
-	mutated := make([][]int, len(population))
-	copy(mutated, population)
-	for j, original := range population {
-		result := p.MutateGenome(original, deltas[j])
-		mutated[j] = result[0]
-		if len(result) > 1 {
-			mutated = append(mutated, result[1:]...)
+func (s *Solver) mutate(ctx context.Context, popChan chan [][]int, deltaChan chan []float64) {
+	for {
+		var population [][]int
+		select {
+		case <-ctx.Done():
+			return
+		case population = <-popChan:
 		}
+		deltas := <-deltaChan
+		mutated := make([][]int, len(population))
+		copy(mutated, population)
+		for j, original := range population {
+			result := s.p.MutateGenome(original, deltas[j])
+			mutated[j] = result[0]
+			if len(result) > 1 {
+				mutated = append(mutated, result[1:]...)
+			}
+		}
+		popChan <- mutated
 	}
-	return mutated
 }
 
 func deltasToFitness(deltas []float64) []float64 {
