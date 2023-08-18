@@ -8,14 +8,14 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const (
-	ITERATIONS = 10000
-	numThreads = 8
-)
+const ITERATIONS = 5000
+const numCpusEnv = "SLURM_CPUS_PER_TASK"
 
 type Solver struct {
 	target          float64
@@ -24,7 +24,7 @@ type Solver struct {
 	deltaChans      []chan []float64
 }
 
-func NewSolver(ctx context.Context, target float64, p *pgs.PGS) *Solver {
+func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) *Solver {
 	s := &Solver{
 		target: target,
 		p:      p,
@@ -45,21 +45,36 @@ func main() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 
 	p := pgs.NewPGS()
-	//err := p.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
-	//err := p.LoadCatalogFile("PGS000037_hmPOS_GRCh38.txt")
-	//err := p.LoadCatalogFile("PGS000040_hmPOS_GRCh38.txt")
-	err := p.LoadCatalogFile("PGS000648_hmPOS_GRCh38.txt")
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
 	}
+	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
 	p.LoadStats()
 	cohort := NewCohort(p)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p)
+	numThreadsEnv := os.Getenv(numCpusEnv)
+	var numThreads int
+	if numThreadsEnv != "" {
+		numThreads, err = strconv.Atoi(numThreadsEnv)
+		if err != nil {
+			log.Printf("Error parsing numCpus %s: %v\n", numCpusEnv, err)
+			return
+		}
+	} else {
+		log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
+		return
+	}
 
-	solmap := solver.solve()
+	ctx, cancel := context.WithCancel(context.Background())
+	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
+
+	solmap := solver.solve(numThreads)
 	solmap = findComplements(solmap, p)
 	solutions := sortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	fmt.Printf("\nTrue:\n%s -- %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype), p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
@@ -71,12 +86,12 @@ func main() {
 	cancel()
 }
 
-func (s *Solver) solve() map[string][]int {
+func (s *Solver) solve(numThreads int) map[string][]int {
 	var err error
 	rand.NewSource(time.Now().UnixNano())
-	POOLSIZE := len(s.p.Variants) * 100
+	poolSize := len(s.p.Variants) * 100
 	solutions := make(map[string][]int)
-	candidates := make([][]int, POOLSIZE, 2*POOLSIZE)
+	candidates := make([][]int, poolSize, 2*poolSize)
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
 		candidates[i], err = s.p.SampleFromPopulation()
@@ -95,7 +110,7 @@ func (s *Solver) solve() map[string][]int {
 		children := s.crossover(candidates)
 		chDeltas, solved := s.calculateDeltas(children)
 		extend(solutions, solved)
-		candidates = tournament(append(candidates, children...), append(deltas, chDeltas...), POOLSIZE)
+		candidates = tournament(append(candidates, children...), append(deltas, chDeltas...), poolSize)
 		deltas, solved = s.calculateDeltas(candidates)
 		extend(solutions, solved)
 		for thread := 0; thread < numThreads; thread++ {
@@ -109,29 +124,6 @@ func (s *Solver) solve() map[string][]int {
 		candidates = make([][]int, len(mutated))
 		copy(candidates, mutated)
 	}
-
-	//collectChans := make([]chan [][]int, numThreads)
-	//for thread := 0; thread < numThreads; thread++ {
-	//	collectChans[thread] = make(chan [][]int)
-	//	go func(t int) {
-	//		localSol := make([][]int, 0)
-	//		cnd := make([][]int, len(candidates)/numThreads)
-	//		copy(cnd, candidates[t*len(candidates)/numThreads:(t+1)*len(candidates)/numThreads])
-	//		for k := 0; k < ITERATIONS; k++ {
-	//			if k%1000 == 0 {
-	//				fmt.Printf("Thread %d: %d/%d\n", t, k, ITERATIONS)
-	//			}
-	//			deltas, solved := calculateDeltas(cnd, p, targetScore)
-	//			localSol = append(localSol, solved...)
-	//			cnd = mutate(cnd, deltas, p)
-	//		}
-	//		collectChans[t] <- localSol
-	//	}(thread)
-	//}
-	//for thread := 0; thread < numThreads; thread++ {
-	//	collect := <-collectChans[thread]
-	//	extend(solutions, collect)
-	//}
 
 	return solutions
 }
@@ -231,22 +223,24 @@ func tournament(population [][]int, deltas []float64, populationSize int) [][]in
 }
 
 func (s *Solver) mutate(ctx context.Context, popChan chan [][]int, deltaChan chan []float64) {
+	timeout := 10 * time.Second
+	t := time.NewTimer(timeout)
 	for {
 		var population [][]int
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.C:
+			t.Reset(timeout)
+			continue
 		case population = <-popChan:
+			t.Reset(timeout)
 		}
 		deltas := <-deltaChan
-		mutated := make([][]int, len(population))
-		copy(mutated, population)
+		mutated := make([][]int, 0, len(population))
 		for j, original := range population {
 			result := s.p.MutateGenome(original, deltas[j])
-			mutated[j] = result[0]
-			if len(result) > 1 {
-				mutated = append(mutated, result[1:]...)
-			}
+			mutated = append(mutated, result...)
 		}
 		popChan <- mutated
 	}
@@ -311,13 +305,13 @@ func findComplements(solutions map[string][]int, p *pgs.PGS) map[string][]int {
 	weightGroups := make(map[float64][]int)
 	for i, weight := range p.Weights {
 		if _, ok := weightGroups[weight]; !ok {
-			weightGroups[weight] = make([]int, 1)
+			weightGroups[weight] = make([]int, 1, 2)
 			weightGroups[weight][0] = i
 		} else {
 			weightGroups[weight] = append(weightGroups[weight], i)
 		}
 	}
-	// Get all duplicated weight positions in a list
+	// Get all identical weight positions in a list
 	weightCopies := make([][]int, 0)
 	for weight, positions := range weightGroups {
 		if len(positions) > 1 {
@@ -326,33 +320,68 @@ func findComplements(solutions map[string][]int, p *pgs.PGS) map[string][]int {
 		}
 	}
 
-	extended := make(map[string][]int)
-	for k, solution := range solutions {
-		extended[k] = make([]int, len(solution))
-		copy(extended[k], solution)
-	}
-
-	var leftVal, rightVal int
+	mutexed := NewMutexMap(solutions)
 	for _, solution := range solutions {
-		for _, weights := range weightCopies {
-			for _, leftPos := range weights {
-				leftVal = solution[leftPos*pgs.NumHaplotypes] + solution[leftPos*pgs.NumHaplotypes+1]
-				for _, rightPos := range weights {
-					rightVal = solution[rightPos*pgs.NumHaplotypes] + solution[rightPos*pgs.NumHaplotypes+1]
-					if leftVal != rightVal {
-						swapped := make([]int, len(solution))
-						copy(swapped, solution)
-						swapped[leftPos*pgs.NumHaplotypes], solution[rightPos*pgs.NumHaplotypes] =
-							solution[rightPos*pgs.NumHaplotypes], solution[leftPos*pgs.NumHaplotypes]
-						swapped[leftPos*pgs.NumHaplotypes+1], solution[rightPos*pgs.NumHaplotypes+1] =
-							solution[rightPos*pgs.NumHaplotypes+1], solution[leftPos*pgs.NumHaplotypes+1]
-						extend(extended, [][]int{swapped})
+		//fmt.Printf("Exploring %s\n", arrayTostring(solution))
+		explore(solution, weightCopies, mutexed)
+	}
+	return mutexed.RetrieveMapOnly()
+}
+
+func explore(source []int, positions [][]int, saver *MutexMap) {
+	var leftPos, rightPos, leftVal, rightVal int
+	//fmt.Printf("Exploring %s\n", arrayTostring(source))
+	//fmt.Printf("Num positions: %d\n", len(positions[0]))
+	for i := 0; i < len(positions[0])-1; i++ {
+		leftPos = positions[0][i]
+		leftVal = source[leftPos*pgs.NumHaplotypes] + source[leftPos*pgs.NumHaplotypes+1]
+		for j := i + 1; j < len(positions[0]); j++ {
+			rightPos = positions[0][j]
+			rightVal = source[rightPos*pgs.NumHaplotypes] + source[rightPos*pgs.NumHaplotypes+1]
+			switch {
+			case leftVal != rightVal:
+				// first, simple swapping
+				swapped := make([]int, len(source))
+				copy(swapped, source)
+				swapped[leftPos*pgs.NumHaplotypes], swapped[rightPos*pgs.NumHaplotypes] =
+					swapped[rightPos*pgs.NumHaplotypes], swapped[leftPos*pgs.NumHaplotypes]
+				swapped[leftPos*pgs.NumHaplotypes+1], swapped[rightPos*pgs.NumHaplotypes+1] =
+					swapped[rightPos*pgs.NumHaplotypes+1], swapped[leftPos*pgs.NumHaplotypes+1]
+				saver.Put(arrayTostring(swapped), swapped)
+				if len(positions) > 1 {
+					explore(swapped, positions[1:], saver)
+				}
+				// second, splitting 2 + 0 into 1 + 1
+				if (leftVal == 2 && rightVal == 0) || (leftVal == 0 && rightVal == 2) {
+					split := make([]int, len(source))
+					copy(split, source)
+					split[leftPos*pgs.NumHaplotypes], split[leftPos*pgs.NumHaplotypes+1] = 1, 0
+					split[rightPos*pgs.NumHaplotypes], split[rightPos*pgs.NumHaplotypes+1] = 0, 1
+					saver.Put(arrayTostring(split), split)
+					if len(positions) > 1 {
+						explore(split, positions[1:], saver)
 					}
 				}
+			//	converting 1 + 1 into 2 + 0 and 0 + 2
+			case leftVal == 1 && rightVal == 1:
+				leftPushed, rightPushed := make([]int, len(source)), make([]int, len(source))
+				copy(leftPushed, source)
+				copy(rightPushed, source)
+				leftPushed[leftPos*pgs.NumHaplotypes], leftPushed[leftPos*pgs.NumHaplotypes+1] = 1, 1
+				leftPushed[rightPos*pgs.NumHaplotypes], leftPushed[rightPos*pgs.NumHaplotypes+1] = 0, 0
+				saver.Put(arrayTostring(leftPushed), leftPushed)
+				rightPushed[leftPos*pgs.NumHaplotypes], rightPushed[leftPos*pgs.NumHaplotypes+1] = 0, 0
+				rightPushed[rightPos*pgs.NumHaplotypes], rightPushed[rightPos*pgs.NumHaplotypes+1] = 1, 1
+				saver.Put(arrayTostring(rightPushed), rightPushed)
+				if len(positions) > 1 {
+					explore(leftPushed, positions[1:], saver)
+					explore(rightPushed, positions[1:], saver)
+				}
+			default:
+				continue
 			}
 		}
 	}
-	return extended
 }
 
 func diploidToSum(diploid []int) []int {
@@ -362,30 +391,3 @@ func diploidToSum(diploid []int) []int {
 	}
 	return sum
 }
-
-//func removeDuplicates(slices [][]int) [][]int {
-//	// Create a map to store unique slices
-//	uniqueSlices := make(map[string][]int)
-//
-//	// Iterate over the slices
-//	for _, slice := range slices {
-//		// Convert the slice to a string representation
-//		key := fmt.Sprintf("%v", slice)
-//
-//		// Check if the slice already exists in the map
-//		if _, ok := uniqueSlices[key]; !ok {
-//			// If not, add it to the map
-//			uniqueSlices[key] = slice
-//		}
-//	}
-//
-//	// Create a new slice to store the unique slices
-//	uniqueSliceList := make([][]int, 0, len(uniqueSlices))
-//
-//	// Add the unique slices to the new slice
-//	for _, slice := range uniqueSlices {
-//		uniqueSliceList = append(uniqueSliceList, slice)
-//	}
-//
-//	return uniqueSliceList
-//}

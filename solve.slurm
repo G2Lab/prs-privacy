@@ -2,7 +2,7 @@
 #SBATCH --job-name=solve                   # Job name
 #SBATCH --mem=4G                          # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log              # Standard output and error log
-#SBATCH --cpus-per-task=8                  # Number of CPUs per task
+#SBATCH --cpus-per-task=4                  # Number of CPUs per task
 #SBATCH --time=1-00:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
 #SBATCH --priority=TOP                    # Job priority
