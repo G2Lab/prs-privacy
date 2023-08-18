@@ -40,8 +40,8 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 
 	p := pgs.NewPGS()
@@ -77,10 +77,12 @@ func main() {
 	solmap := solver.solve(numThreads)
 	solmap = findComplements(solmap, p)
 	solutions := sortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	fmt.Printf("\nTrue:\n%s -- %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype), p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
+	fmt.Printf("\nTrue:\n%s -- %f, %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype),
+		cohort[INDIVIDUAL].Score-calculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
+		p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
-		fmt.Printf("%s -- %.3f, %.5f, %.2f\n", arrayTostring(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
+		fmt.Printf("%s -- %.3f, %.6f, %.2f\n", arrayTostring(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
 	}
 	cancel()
@@ -268,38 +270,6 @@ func accuracy(solution []int, target []int) float64 {
 	return acc * pgs.NumHaplotypes / float64(len(solution))
 }
 
-func arrayTostring(array []int) string {
-	str := make([]string, len(array))
-	for i := 0; i < len(array); i += pgs.NumHaplotypes {
-		str[i] = fmt.Sprint(array[i] + array[i+1])
-	}
-	return strings.Join(str, "")
-}
-
-func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
-	i := 0
-	flattened := make([][]int, len(solutions))
-	accuracies := make([]float64, len(solutions))
-	for _, solution := range solutions {
-		flattened[i] = solution
-		accuracies[i] = accuracy(solution, target)
-		i++
-	}
-	sortBy(flattened, accuracies)
-	return flattened
-}
-
-func sortBy(items [][]int, properties []float64) {
-	for i := 0; i < len(items)-1; i++ {
-		for j := i + 1; j < len(items); j++ {
-			if properties[i] < properties[j] {
-				items[i], items[j] = items[j], items[i]
-				properties[i], properties[j] = properties[j], properties[i]
-			}
-		}
-	}
-}
-
 func findComplements(solutions map[string][]int, p *pgs.PGS) map[string][]int {
 	// Find which positions have the same weight, hence can be swapped
 	weightGroups := make(map[float64][]int)
@@ -332,6 +302,11 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 	var leftPos, rightPos, leftVal, rightVal int
 	//fmt.Printf("Exploring %s\n", arrayTostring(source))
 	//fmt.Printf("Num positions: %d\n", len(positions[0]))
+	if len(positions) > 1 {
+		// Sending further one unchanged version
+		explore(source, positions[1:], saver)
+	}
+	// pairwise search
 	for i := 0; i < len(positions[0])-1; i++ {
 		leftPos = positions[0][i]
 		leftVal = source[leftPos*pgs.NumHaplotypes] + source[leftPos*pgs.NumHaplotypes+1]
@@ -379,6 +354,85 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 				}
 			default:
 				continue
+			}
+		}
+	}
+	if len(positions[0]) < 3 {
+		return
+	}
+	triplets := getTriplets(positions[0])
+	for _, triplet := range triplets {
+		values := []int{source[triplet[0]*pgs.NumHaplotypes] + source[triplet[0]*pgs.NumHaplotypes+1],
+			source[triplet[1]*pgs.NumHaplotypes] + source[triplet[1]*pgs.NumHaplotypes+1],
+			source[triplet[2]*pgs.NumHaplotypes] + source[triplet[2]*pgs.NumHaplotypes+1]}
+		sortInts(triplet, values)
+		if values[0] == 0 && values[1] == 0 && values[2] == 2 {
+			distributed := make([]int, len(source))
+			copy(distributed, source)
+			distributed[triplet[0]*pgs.NumHaplotypes], distributed[triplet[0]*pgs.NumHaplotypes+1] = 0, 1
+			distributed[triplet[1]*pgs.NumHaplotypes], distributed[triplet[1]*pgs.NumHaplotypes+1] = 0, 1
+			distributed[triplet[2]*pgs.NumHaplotypes], distributed[triplet[2]*pgs.NumHaplotypes+1] = 0, 0
+			saver.Put(arrayTostring(distributed), distributed)
+			if len(positions) > 1 {
+				explore(distributed, positions[1:], saver)
+			}
+		}
+	}
+}
+
+func sortInts(positions []int, values []int) {
+	for i := 0; i < len(values)-1; i++ {
+		for j := i + 1; j < len(values); j++ {
+			if values[i] > values[j] {
+				values[i], values[j] = values[j], values[i]
+				positions[i], positions[j] = positions[j], positions[i]
+			}
+		}
+	}
+}
+
+func getTriplets(nums []int) [][]int {
+	triplets := make([][]int, 0)
+
+	for i := 0; i < len(nums)-2; i++ {
+		for j := i + 1; j < len(nums)-1; j++ {
+			for k := j + 1; k < len(nums); k++ {
+				triplet := []int{nums[i], nums[j], nums[k]}
+				triplets = append(triplets, triplet)
+			}
+		}
+	}
+
+	return triplets
+}
+
+func arrayTostring(array []int) string {
+	str := make([]string, len(array))
+	for i := 0; i < len(array); i += pgs.NumHaplotypes {
+		str[i] = fmt.Sprint(array[i] + array[i+1])
+	}
+	return strings.Join(str, "")
+}
+
+func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
+	i := 0
+	flattened := make([][]int, len(solutions))
+	accuracies := make([]float64, len(solutions))
+	for _, solution := range solutions {
+		flattened[i] = solution
+		accuracies[i] = accuracy(solution, target)
+		i++
+	}
+	sortBy(flattened, accuracies)
+	return flattened
+}
+
+func sortBy(items [][]int, properties []float64) {
+	for i := 0; i < len(items)-1; i++ {
+		for j := i + 1; j < len(items); j++ {
+			if properties[i] < properties[j] {
+				items[i], items[j] = items[j], items[i]
+				properties[i], properties[j] = properties[j], properties[i]
 			}
 		}
 	}
