@@ -40,8 +40,8 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	INDIVIDUAL := "NA18595"
-	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 
 	p := pgs.NewPGS()
@@ -49,6 +49,7 @@ func main() {
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -75,7 +76,8 @@ func main() {
 	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
 
 	solmap := solver.solve(numThreads)
-	solmap = findComplements(solmap, p)
+	cancel()
+	solmap = findComplements(solmap, p, numThreads)
 	solutions := sortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	fmt.Printf("\nTrue:\n%s -- %f, %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype),
 		cohort[INDIVIDUAL].Score-calculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
@@ -151,7 +153,7 @@ func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
 			match := make([]int, len(population[i]))
 			copy(match, population[i])
 			matches = append(matches, match)
-			fmt.Printf("Found match: %s %f\n", arrayTostring(match), calculateScore(match, s.p.Weights)-s.target)
+			//fmt.Printf("Found match: %s %f\n", arrayTostring(match), calculateScore(match, s.p.Weights)-s.target)
 			population[i], err = s.p.SampleFromPopulation()
 			if err != nil {
 				log.Printf("Error resampling in fitness calculation: %v\n", err)
@@ -225,7 +227,7 @@ func tournament(population [][]int, deltas []float64, populationSize int) [][]in
 }
 
 func (s *Solver) mutate(ctx context.Context, popChan chan [][]int, deltaChan chan []float64) {
-	timeout := 10 * time.Second
+	timeout := 1 * time.Second
 	t := time.NewTimer(timeout)
 	for {
 		var population [][]int
@@ -270,7 +272,7 @@ func accuracy(solution []int, target []int) float64 {
 	return acc * pgs.NumHaplotypes / float64(len(solution))
 }
 
-func findComplements(solutions map[string][]int, p *pgs.PGS) map[string][]int {
+func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map[string][]int {
 	// Find which positions have the same weight, hence can be swapped
 	weightGroups := make(map[float64][]int)
 	for i, weight := range p.Weights {
@@ -295,6 +297,22 @@ func findComplements(solutions map[string][]int, p *pgs.PGS) map[string][]int {
 		//fmt.Printf("Exploring %s\n", arrayTostring(solution))
 		explore(solution, weightCopies, mutexed)
 	}
+	//solSlice := make([][]int, 0, len(solutions))
+	//for _, solution := range solutions {
+	//	solSlice = append(solSlice, solution)
+	//}
+	//var wg sync.WaitGroup
+	//for thread := 0; thread < numThreads; thread++ {
+	//	go func() {
+	//		wg.Add(1)
+	//		defer wg.Done()
+	//		for _, solution := range solSlice[thread*len(solutions)/numThreads : (thread+1)*len(solutions)/numThreads] {
+	//			//fmt.Printf("Exploring %s\n", arrayTostring(solution))
+	//			explore(solution, weightCopies, mutexed)
+	//		}
+	//	}()
+	//}
+	//wg.Wait()
 	return mutexed.RetrieveMapOnly()
 }
 
