@@ -34,7 +34,7 @@ var ALL_FIELDS = []string{
 
 const (
 	NumHaplotypes = 2
-	ErrorMargin   = 1e-6
+	ErrorMargin   = 1e-8
 )
 
 var GENOTYPES = []int{0, 1}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,20 +30,23 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 		target: target,
 		p:      p,
 	}
-	s.populationChans = make([]chan [][]int, numThreads)
-	s.deltaChans = make([]chan []float64, numThreads)
-	for i := 0; i < numThreads; i++ {
-		s.populationChans[i] = make(chan [][]int)
-		s.deltaChans[i] = make(chan []float64)
-		go s.mutate(ctx, s.populationChans[i], s.deltaChans[i])
-	}
+	//s.populationChans = make([]chan [][]int, numThreads)
+	//s.deltaChans = make([]chan []float64, numThreads)
+	//for i := 0; i < numThreads; i++ {
+	//	s.populationChans[i] = make(chan [][]int)
+	//	s.deltaChans[i] = make(chan []float64)
+	//	go s.mutate(ctx, s.populationChans[i], s.deltaChans[i])
+	//}
 	return s
 }
 
 func main() {
 	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
+	//INDIVIDUAL := "HG02728" // middle 648
+	//INDIVIDUAL := "NA19780" // high 648
+	INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
@@ -75,19 +79,72 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
 
-	solmap := solver.solve(numThreads)
+	//solmap := solver.solve(numThreads)
+	solmap := solver.recursive(numThreads)
 	cancel()
-	solmap = findComplements(solmap, p, numThreads)
+	//solmap = findComplements(solmap, p, numThreads)
 	solutions := sortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	fmt.Printf("\nTrue:\n%s -- %f, %f\n", arrayTostring(cohort[INDIVIDUAL].Genotype),
-		cohort[INDIVIDUAL].Score-calculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
-		p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
+	fmt.Printf("\nTrue:\n%s -- %f\n", arrayToStringDiploid(cohort[INDIVIDUAL].Genotype),
+		cohort[INDIVIDUAL].Score-calculateScore(cohort[INDIVIDUAL].Genotype, p.Weights))
+		//p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
-		fmt.Printf("%s -- %.3f, %.6f, %.2f\n", arrayTostring(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+		//fmt.Printf("%s -- %.3f, %.8f, %.2f\n", arrayToStringDiploid(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
+		//cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+		fmt.Printf("%s -- %.3f, %.8f\n", arrayToStringDiploid(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			cohort[INDIVIDUAL].Score-calculateScore(solution, p.Weights))
 	}
-	cancel()
+}
+
+func (s *Solver) recursive(numThreads int) map[string][]int {
+	var wg sync.WaitGroup
+	solutions := NewMutexMap(make(map[string][]int))
+	initial := make([]int, 0, len(s.p.Weights))
+	s.branching(initial,0.0, s.target, 0, solutions, numThreads, &wg)
+	wg.Wait()
+	return solutions.RetrieveMapOnly()
+}
+
+func (s *Solver) branching(current []int, sum, target float64, pos int, solutions *MutexMap, threadsLeft int, wg *sync.WaitGroup) {
+	if math.Abs(sum - target) < pgs.ErrorMargin {
+		if len(current) < len(s.p.Weights) {
+			// pad with zeros
+			current = append(current, make([]int, len(s.p.Weights)-len(current))...)
+		}
+		//fmt.Printf("Found solution: %s\n", arrayToStringDiploid(current))
+		solutions.Put(arrayToStringDiploid(current), current)
+		return
+	}
+	if sum > target || pos >= len(s.p.Weights) {
+		return
+	}
+
+	current = append(current, 0)
+	if threadsLeft > 0 {
+		wg.Add(1)
+		threadsLeft -= 1
+		go func() {
+			s.branching(current, sum, target, pos+1, solutions, threadsLeft, wg)
+			wg.Done()
+		}()
+	} else {
+		s.branching(current, sum, target, pos+1, solutions, threadsLeft, wg)
+	}
+	for snp := 1; snp <= 2; snp++ {
+		branched := make([]int, len(current))
+		copy(branched, current)
+		branched[len(branched)-1] = snp
+		if threadsLeft > 0 {
+			wg.Add(1)
+			threadsLeft -= 1
+			go func() {
+				s.branching(branched, sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
+				wg.Done()
+			}()
+		} else {
+			s.branching(branched, sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
+		}
+	}
 }
 
 func (s *Solver) solve(numThreads int) map[string][]int {
@@ -99,6 +156,7 @@ func (s *Solver) solve(numThreads int) map[string][]int {
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
 		candidates[i], err = s.p.SampleFromPopulation()
+		//candidates[i], err = s.p.SampleUniform()
 		if err != nil {
 			fmt.Println(err)
 			return nil
@@ -134,9 +192,9 @@ func (s *Solver) solve(numThreads int) map[string][]int {
 
 func extend(base map[string][]int, extension [][]int) {
 	for _, ext := range extension {
-		if _, ok := base[arrayTostring(ext)]; !ok {
-			base[arrayTostring(ext)] = make([]int, len(ext))
-			copy(base[arrayTostring(ext)], ext)
+		if _, ok := base[arrayToString(ext)]; !ok {
+			base[arrayToString(ext)] = make([]int, len(ext))
+			copy(base[arrayToString(ext)], ext)
 		}
 	}
 }
@@ -153,8 +211,9 @@ func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
 			match := make([]int, len(population[i]))
 			copy(match, population[i])
 			matches = append(matches, match)
-			//fmt.Printf("Found match: %s %f\n", arrayTostring(match), calculateScore(match, s.p.Weights)-s.target)
+			//fmt.Printf("Found match: %s %f\n", arrayToString(match), calculateScore(match, s.p.Weights)-s.target)
 			population[i], err = s.p.SampleFromPopulation()
+			//population[i], err = s.p.SampleUniform()
 			if err != nil {
 				log.Printf("Error resampling in fitness calculation: %v\n", err)
 				return nil, nil
@@ -168,20 +227,37 @@ func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
 
 func calculateScore(snps []int, weights []float64) float64 {
 	score := 0.0
-	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
-		for j := 0; j < pgs.NumHaplotypes; j++ {
-			switch snps[i+j] {
+	for i := 0; i < len(snps); i++ {
+			switch snps[i] {
 			case 0:
 				continue
 			case 1:
-				score += weights[i/2]
+				score += weights[i]
+			case 2:
+				score += weights[i] + weights[i]
 			default:
-				log.Printf("Invalid alelle value: %d", snps[i+j])
+				log.Printf("Invalid alelle value: %d", snps[i])
 			}
-		}
 	}
 	return score
 }
+
+//func calculateScore(snps []int, weights []float64) float64 {
+//	score := 0.0
+//	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
+//		for j := 0; j < pgs.NumHaplotypes; j++ {
+//			switch snps[i+j] {
+//			case 0:
+//				continue
+//			case 1:
+//				score += weights[i/2]
+//			default:
+//				log.Printf("Invalid alelle value: %d", snps[i+j])
+//			}
+//		}
+//	}
+//	return score
+//}
 
 func (s *Solver) crossover(population [][]int) [][]int {
 	parents := tools.Shuffle(population)
@@ -264,13 +340,26 @@ func accuracy(solution []int, target []int) float64 {
 		return 0.0
 	}
 	acc := 0.0
-	for i := 0; i < len(solution); i += pgs.NumHaplotypes {
-		if solution[i]+solution[i+1] == target[i]+target[i+1] {
+	for i := 0; i < len(solution); i++ {
+		if solution[i] == target[i] {
 			acc++
 		}
 	}
-	return acc * pgs.NumHaplotypes / float64(len(solution))
+	return acc / float64(len(solution))
 }
+
+//func accuracy(solution []int, target []int) float64 {
+//	if len(solution) != len(target) {
+//		return 0.0
+//	}
+//	acc := 0.0
+//	for i := 0; i < len(solution); i += pgs.NumHaplotypes {
+//		if solution[i]+solution[i+1] == target[i]+target[i+1] {
+//			acc++
+//		}
+//	}
+//	return acc * pgs.NumHaplotypes / float64(len(solution))
+//}
 
 func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map[string][]int {
 	// Find which positions have the same weight, hence can be swapped
@@ -294,7 +383,7 @@ func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map
 
 	mutexed := NewMutexMap(solutions)
 	for _, solution := range solutions {
-		//fmt.Printf("Exploring %s\n", arrayTostring(solution))
+		//fmt.Printf("Exploring %s\n", arrayToString(solution))
 		explore(solution, weightCopies, mutexed)
 	}
 	//solSlice := make([][]int, 0, len(solutions))
@@ -307,7 +396,7 @@ func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map
 	//		wg.Add(1)
 	//		defer wg.Done()
 	//		for _, solution := range solSlice[thread*len(solutions)/numThreads : (thread+1)*len(solutions)/numThreads] {
-	//			//fmt.Printf("Exploring %s\n", arrayTostring(solution))
+	//			//fmt.Printf("Exploring %s\n", arrayToString(solution))
 	//			explore(solution, weightCopies, mutexed)
 	//		}
 	//	}()
@@ -318,7 +407,7 @@ func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map
 
 func explore(source []int, positions [][]int, saver *MutexMap) {
 	var leftPos, rightPos, leftVal, rightVal int
-	//fmt.Printf("Exploring %s\n", arrayTostring(source))
+	//fmt.Printf("Exploring %s\n", arrayToString(source))
 	//fmt.Printf("Num positions: %d\n", len(positions[0]))
 	if len(positions) > 1 {
 		// Sending further one unchanged version
@@ -340,7 +429,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 					swapped[rightPos*pgs.NumHaplotypes], swapped[leftPos*pgs.NumHaplotypes]
 				swapped[leftPos*pgs.NumHaplotypes+1], swapped[rightPos*pgs.NumHaplotypes+1] =
 					swapped[rightPos*pgs.NumHaplotypes+1], swapped[leftPos*pgs.NumHaplotypes+1]
-				saver.Put(arrayTostring(swapped), swapped)
+				saver.Put(arrayToString(swapped), swapped)
 				if len(positions) > 1 {
 					explore(swapped, positions[1:], saver)
 				}
@@ -350,7 +439,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 					copy(split, source)
 					split[leftPos*pgs.NumHaplotypes], split[leftPos*pgs.NumHaplotypes+1] = 1, 0
 					split[rightPos*pgs.NumHaplotypes], split[rightPos*pgs.NumHaplotypes+1] = 0, 1
-					saver.Put(arrayTostring(split), split)
+					saver.Put(arrayToString(split), split)
 					if len(positions) > 1 {
 						explore(split, positions[1:], saver)
 					}
@@ -362,10 +451,10 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 				copy(rightPushed, source)
 				leftPushed[leftPos*pgs.NumHaplotypes], leftPushed[leftPos*pgs.NumHaplotypes+1] = 1, 1
 				leftPushed[rightPos*pgs.NumHaplotypes], leftPushed[rightPos*pgs.NumHaplotypes+1] = 0, 0
-				saver.Put(arrayTostring(leftPushed), leftPushed)
+				saver.Put(arrayToString(leftPushed), leftPushed)
 				rightPushed[leftPos*pgs.NumHaplotypes], rightPushed[leftPos*pgs.NumHaplotypes+1] = 0, 0
 				rightPushed[rightPos*pgs.NumHaplotypes], rightPushed[rightPos*pgs.NumHaplotypes+1] = 1, 1
-				saver.Put(arrayTostring(rightPushed), rightPushed)
+				saver.Put(arrayToString(rightPushed), rightPushed)
 				if len(positions) > 1 {
 					explore(leftPushed, positions[1:], saver)
 					explore(rightPushed, positions[1:], saver)
@@ -390,7 +479,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 			distributed[triplet[0]*pgs.NumHaplotypes], distributed[triplet[0]*pgs.NumHaplotypes+1] = 0, 1
 			distributed[triplet[1]*pgs.NumHaplotypes], distributed[triplet[1]*pgs.NumHaplotypes+1] = 0, 1
 			distributed[triplet[2]*pgs.NumHaplotypes], distributed[triplet[2]*pgs.NumHaplotypes+1] = 0, 0
-			saver.Put(arrayTostring(distributed), distributed)
+			saver.Put(arrayToString(distributed), distributed)
 			if len(positions) > 1 {
 				explore(distributed, positions[1:], saver)
 			}
@@ -424,10 +513,18 @@ func getTriplets(nums []int) [][]int {
 	return triplets
 }
 
-func arrayTostring(array []int) string {
-	str := make([]string, len(array))
+func arrayToString(array []int) string {
+	str := make([]string, len(array)/2)
 	for i := 0; i < len(array); i += pgs.NumHaplotypes {
-		str[i] = fmt.Sprint(array[i] + array[i+1])
+		str[i/2] = fmt.Sprint(array[i] + array[i+1])
+	}
+	return strings.Join(str, "")
+}
+
+func arrayToStringDiploid(array []int) string {
+	str := make([]string, len(array))
+	for i := 0; i < len(array); i++ {
+		str[i] = fmt.Sprint(array[i])
 	}
 	return strings.Join(str, "")
 }

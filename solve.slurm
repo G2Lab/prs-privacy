@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=solve                   # Job name
-#SBATCH --mem=8G                          # Job memory request. Different units can be specified using the suffix [K|M|G|T]
+#SBATCH --mem=16G                          # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log              # Standard output and error log
-#SBATCH --cpus-per-task=2                  # Number of CPUs per task
-#SBATCH --time=1-00:00:00                    # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=8                  # Number of CPUs per task
+#SBATCH --time=05:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
 #SBATCH --priority=TOP                    # Job priority
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
