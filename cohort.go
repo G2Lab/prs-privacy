@@ -83,8 +83,8 @@ func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
 			if _, ok := c[individ]; !ok {
 				c[individ] = NewIndividual()
 			}
-			c[individ].Genotype = append(c[individ].Genotype, allele[0]+allele[1])
-			//c[individ].Genotype = append(c[individ].Genotype, allele...)
+			//c[individ].Genotype = append(c[individ].Genotype, allele[0]+allele[1])
+			c[individ].Genotype = append(c[individ].Genotype, allele...)
 			c[individ].Score += float64(allele[0]+allele[1]) * pgs.Weights[i]
 		}
 	}
