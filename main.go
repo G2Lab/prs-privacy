@@ -38,19 +38,19 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
-	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -96,7 +96,7 @@ func main() {
 }
 
 func (s *Solver) dp(numThreads int) map[string][]int {
-	errorMargin := 1e-14
+	errorMargin := math.Pow(10, -(float64(s.p.WeightPrecision) - 3))
 	weights := make([]float64, len(s.p.Weights))
 	for i, weight := range s.p.Weights {
 		weights[i] = weight

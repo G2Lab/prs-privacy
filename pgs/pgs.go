@@ -35,7 +35,6 @@ var ALL_FIELDS = []string{
 const (
 	NumHaplotypes = 2
 	ErrorMargin   = 1e-14
-	Precision    = 1e-15
 )
 
 var GENOTYPES = []int{0, 1}
@@ -87,18 +86,19 @@ func (v *Variant) GetWeight() float64 {
 }
 
 type PGS struct {
-	PgsID        string
-	TraitName    string
-	TraitEFO     string
-	GenomeBuild  string
-	WeightType   string
-	HmPOSBuild   string
-	VariantCount int
-	Fieldnames   []string
-	Variants     map[string]*Variant
-	Loci         []string
-	Weights      []float64
-	Maf          [][]float64
+	PgsID           string
+	TraitName       string
+	TraitEFO        string
+	GenomeBuild     string
+	WeightType      string
+	HmPOSBuild      string
+	VariantCount    int
+	Fieldnames      []string
+	Variants        map[string]*Variant
+	Loci            []string
+	Weights         []float64
+	WeightPrecision int
+	Maf             [][]float64
 }
 
 func NewPGS() *PGS {
@@ -115,6 +115,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	defer file.Close()
 
 	headerInProgress := true
+	maxPrecision := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -157,6 +158,9 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 		for i, value := range values {
 			fields[p.Fieldnames[i]] = value
 		}
+		if maxPrecision < getPrecision(fields["effect_weight"].(string)) {
+			maxPrecision = getPrecision(fields["effect_weight"].(string))
+		}
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
@@ -168,12 +172,17 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()
 	}
+	p.WeightPrecision = maxPrecision
 
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func getPrecision(value string) int {
+	return len(strings.Split(value, ".")[1])
 }
 
 func (p *PGS) GetSortedVariantLoci() ([]string, error) {
@@ -322,26 +331,6 @@ func (p *PGS) MutateGenome(original []int, delta float64) [][]int {
 	mutated = append(mutated, original)
 	return mutated
 }
-
-//func (p *PGS) MutateGenome(original [][]int) [][]int {
-//	mutations := make([]int, 0, NumHaplotypes*len(GENOTYPES)*len(original))
-//	probabilities := make([]float64, 0, NumHaplotypes*len(GENOTYPES)*len(original))
-//	prob := 0.0
-//	for i := range original {
-//		// We range over all the possible genotypes, even the present one, to allow for the possibility of no mutation
-//		for j := 0; j < NumHaplotypes; j++ {
-//			for _, v := range GENOTYPES {
-//				// Get individual prior
-//				prob = p.Maf[i][v]
-//				probabilities = append(probabilities, prob)
-//				mutations = append(mutations, v)
-//			}
-//		}
-//	}
-//	mutationId := tools.SampleFromDistribution(probabilities)
-//	original[mutationId/(NumHaplotypes*len(GENOTYPES))][(mutationId/len(GENOTYPES))%NumHaplotypes] = mutations[mutationId]
-//	return original
-//}
 
 // Sample according to the MAF
 func (p *PGS) SampleFromPopulation() ([]int, error) {
