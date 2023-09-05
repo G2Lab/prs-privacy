@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -36,6 +35,7 @@ var ALL_FIELDS = []string{
 const (
 	NumHaplotypes = 2
 	ErrorMargin   = 1e-14
+	Precision    = 1e-15
 )
 
 var GENOTYPES = []int{0, 1}
@@ -49,17 +49,12 @@ func NewVariant(fields map[string]interface{}) *Variant {
 		fields: make(map[string]interface{}),
 	}
 
-	var err error
 	if weight, ok := fields["effect_weight"].(string); ok {
-		fields["effect_weight"], _, err = new(big.Float).Parse(weight, 10)
-		if err != nil {
+		if value, err := strconv.ParseFloat(weight, 64); err == nil {
+			fields["effect_weight"] = value
+		} else {
 			log.Printf("Error parsing weight %s: %s", weight, err)
 		}
-		//if value, err := strconv.ParseFloat(weight, 64); err == nil {
-		//	fields["effect_weight"] = value
-		//} else {
-		//	log.Printf("Error parsing weight %s: %s", weight, err)
-		//}
 	}
 
 	for _, field := range ALL_FIELDS {
@@ -84,11 +79,11 @@ func (v *Variant) GetLocus() string {
 	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
-func (v *Variant) GetWeight() big.Float {
-	if weight, ok := v.fields["effect_weight"].(big.Float); ok {
+func (v *Variant) GetWeight() float64 {
+	if weight, ok := v.fields["effect_weight"].(float64); ok {
 		return weight
 	}
-	return *new(big.Float).SetInt64(0)
+	return 0.0
 }
 
 type PGS struct {
@@ -102,8 +97,7 @@ type PGS struct {
 	Fieldnames   []string
 	Variants     map[string]*Variant
 	Loci         []string
-	//Weights      []float64
-	Weights      []big.Float
+	Weights      []float64
 	Maf          [][]float64
 }
 
@@ -170,8 +164,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	if err != nil {
 		return err
 	}
-	//p.Weights = make([]float64, len(p.Loci))
-	p.Weights = make([]big.Float, len(p.Loci))
+	p.Weights = make([]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()
 	}

@@ -142,7 +142,7 @@ func (c Cohort) SaveScores(filename string) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf("%0.17f", c[ind].Score)})
+		writer.Write([]string{ind, fmt.Sprintf("%.17f", c[ind].Score)})
 	}
 	writer.Flush()
 	return nil

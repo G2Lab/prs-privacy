@@ -7,10 +7,7 @@ import (
 	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
-	"math/big"
 	"math/rand"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -41,12 +38,12 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
 	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
@@ -63,18 +60,19 @@ func main() {
 	p.LoadStats()
 	cohort := NewCohort(p)
 
-	numThreadsEnv := os.Getenv(numCpusEnv)
-	var numThreads int
-	if numThreadsEnv != "" {
-		numThreads, err = strconv.Atoi(numThreadsEnv)
-		if err != nil {
-			log.Printf("Error parsing numCpus %s: %v\n", numCpusEnv, err)
-			return
-		}
-	} else {
-		log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
-		return
-	}
+	//numThreadsEnv := os.Getenv(numCpusEnv)
+	//var numThreads int
+	//if numThreadsEnv != "" {
+	//	numThreads, err = strconv.Atoi(numThreadsEnv)
+	//	if err != nil {
+	//		log.Printf("Error parsing numCpus %s: %v\n", numCpusEnv, err)
+	//		return
+	//	}
+	//} else {
+	//	log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
+	//	return
+	//}
+	numThreads := 1
 
 	ctx, cancel := context.WithCancel(context.Background())
 	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
@@ -98,95 +96,71 @@ func main() {
 }
 
 func (s *Solver) dp(numThreads int) map[string][]int {
-	//roundingFactor := 1e+17
-	//weights := make([]int64, len(s.p.Weights))
-	//for i, weight := range s.p.Weights {
-	//	weights[i] = int64(weight * roundingFactor)
-	//}
-	
-	//rounding := new(big.Float).SetFloat64(1e+17)
-	weights := make([]int64, len(s.p.Weights))
-	var st string
-	var digit uint8
-	var f big.Float
+	errorMargin := 1e-14
+	weights := make([]float64, len(s.p.Weights))
 	for i, weight := range s.p.Weights {
-		weights[i] = 0
-		f.SetFloat64(weight)
-		st = f.Text('f', 17)
-		fmt.Println(st)
-		for j := 0; j < len(st); j++ {
-			digit = st[j] - '0'
-			weights[i] += int64(float64(digit) * math.Pow10(16-j))
+		weights[i] = weight
+	}
+
+	fmt.Printf("Target: %g\n", s.target)
+	fmt.Printf("Weights: %v\n", weights)
+
+	table := make([]map[float64][][]int, len(weights)+1)
+	table[0] = make(map[float64][][]int)
+	var kfl float64
+	// Fill the dp table using dynamic programming
+	for i := 1; i <= len(weights); i++ {
+		fmt.Printf("Position %d/%d\n", i-1, len(weights)-1)
+		table[i] = make(map[float64][][]int)
+		// Copy previous level
+		for prevW, paths := range table[i-1] {
+			table[i][prevW] = make([][]int, len(paths))
+			for p, path := range paths {
+				table[i][prevW][p] = make([]int, len(path))
+				copy(table[i][prevW][p], path)
+			}
+		}
+		wi := make([][]int, pgs.NumHaplotypes)
+		wi[0] = []int{2 * (i - 1)}
+		wi[1] = []int{2 * (i - 1), 2*(i-1) + 1}
+		for k := 1; k <= pgs.NumHaplotypes; k++ {
+			kfl = float64(k)
+			if kfl*weights[i-1] <= s.target+errorMargin {
+				if _, ok := table[i][kfl*weights[i-1]]; !ok {
+					table[i][kfl*weights[i-1]] = make([][]int, 0)
+				}
+				table[i][kfl*weights[i-1]] = append(table[i][kfl*weights[i-1]], wi[k-1])
+				for prevW, paths := range table[i-1] {
+					if prevW+kfl*weights[i-1] <= s.target+errorMargin {
+						for _, path := range paths {
+							appended := make([]int, len(path)+len(wi[k-1]))
+							copy(appended, path)
+							copy(appended[len(path):], wi[k-1])
+							table[i][prevW+kfl*weights[i-1]] = append(table[i][prevW+kfl*weights[i-1]], appended)
+						}
+					}
+				}
+			}
+		}
+		// Pruning the previous level to save storage
+		table[i-1] = nil
+	}
+
+	solutions := make(map[string][]int)
+	for w, results := range table[len(weights)] {
+		if math.Abs(w-s.target) > errorMargin {
+			continue
+		}
+		for _, res := range results {
+			sol := make([]int, len(weights)*pgs.NumHaplotypes)
+			for _, pos := range res {
+				sol[pos] = 1
+			}
+			solutions[arrayToString(sol)] = sol
 		}
 	}
 
-	//target := int(s.target * roundingFactor)
-	//fmt.Printf("Target: %d\n", target)
-	fmt.Printf("Weights: %v\n", weights)
-	//fmt.Printf("Weights: %v\n", weights)
-	////table := make([][][][]int, len(weights)+1)
-	////for i := range table {
-	////	table[i] = make([][][]int, target+1)
-	////	for j := range table[i] {
-	////		table[i][j] = make([][]int, 0)
-	////	}
-	////}
-	////// Fill the dp table using dynamic programming
-	////for i := 1; i <= len(weights); i++ {
-	////	fmt.Printf("Position %d/%d\n", i-1, len(weights)-1)
-	////	table[i] = make(map[int][][]int)
-	////	for j := 0; j <= target; j++ {
-	////		for k := 0; k <= 2; k++ {
-	////			if j >= k*weights[i-1] {
-	////				for _, prev := range table[i-1][j-k*weights[i-1]] {
-	////					combination := make([]int, k)
-	////					for l := 0; l < k; l++ {
-	////						combination[l] = 2*(i-1) + l
-	////					}
-	////					combination = append(combination, prev...)
-	////					table[i][j] = append(table[i][j], combination)
-	////				}
-	////			}
-	////		}
-	////	}
-	////}
-	//table := make([]map[int][][]int, len(weights)+1)
-	//table[0] = make(map[int][][]int)
-	//// Fill the dp table using dynamic programming
-	//for i := 1; i <= len(weights); i++ {
-	//	fmt.Printf("Position %d/%d\n", i-1, len(weights)-1)
-	//	table[i] = make(map[int][][]int)
-	//	for k := 0; k <= 2; k++ {
-	//		if k*weights[i-1] <= target {
-	//			table[i][k*weights[i-1]] = make([][]int, 1)
-	//			for l := 0; l < k; l++ {
-	//				table[i][k*weights[i-1]][0] = append(table[i][k*weights[i-1]][0], 2 * (i - 1) + l)
-	//			}
-	//			for prevW, paths := range table[i-1] {
-	//				for _, path := range paths {
-	//					if prevW+k*weights[i-1] <= target {
-	//						table[i][prevW+k*weights[i-1]] = append(table[i][prevW+k*weights[i-1]], append(path, 2*(i-1)))
-	//					}
-	//				}
-	//			}
-	//		}
-	//	}
-	//	// Pruning the previous level to save storage
-	//	//table[i-1] = nil
-	//}
-	//
-	//fmt.Print(len(table[len(weights)]))
-	//solutions := make(map[string][]int)
-	//for _, res := range table[len(weights)][target] {
-	//	sol := make([]int, len(weights)*pgs.NumHaplotypes)
-	//	for _, pos := range res {
-	//		sol[pos] = 1
-	//	}
-	//	solutions[arrayToString(sol)] = sol
-	//}
-
-	//return solutions
-	return nil
+	return solutions
 }
 
 //func (s *Solver) recursive(numThreads int) map[string][]int {
