@@ -46,11 +46,11 @@ func main() {
 	//INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -114,11 +114,7 @@ func (s *Solver) dp(numThreads int) map[string][]int {
 		table[i] = make(map[float64][][]int)
 		// Copy previous level
 		for prevW, paths := range table[i-1] {
-			table[i][prevW] = make([][]int, len(paths))
-			for p, path := range paths {
-				table[i][prevW][p] = make([]int, len(path))
-				copy(table[i][prevW][p], path)
-			}
+			table[i][prevW] = paths
 		}
 		wi := make([][]int, pgs.NumHaplotypes)
 		wi[0] = []int{2 * (i - 1)}
