@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 )
 
 const ITERATIONS = 5000
@@ -18,7 +19,7 @@ const numCpusEnv = "SLURM_CPUS_PER_TASK"
 type Solver struct {
 	target          float64
 	p               *pgs.PGS
-	populationChans []chan [][]int
+	populationChans []chan [][]uint8
 	deltaChans      []chan []float64
 }
 
@@ -38,19 +39,19 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
-	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -95,68 +96,123 @@ func main() {
 	}
 }
 
-func (s *Solver) dp(numThreads int) map[string][]int {
-	errorMargin := math.Pow(10, -(float64(s.p.WeightPrecision) - 3))
-	weights := make([]float64, len(s.p.Weights))
-	for i, weight := range s.p.Weights {
-		weights[i] = weight
+func (s *Solver) dp(numThreads int) map[string][]uint8 {
+	//errorMargin := math.Pow(10, -(float64(s.p.WeightPrecision) - 3))
+	errorMargin := 0.0
+	target := s.target
+	minWeight := findMin(s.p.Weights)
+
+	fmt.Printf("Target: %g\n", target)
+	fmt.Printf("Weights: %v\n", s.p.Weights)
+
+	// Fill the dp table using dynamic programming
+	table := make(map[float64][]uint8)
+	// add the zero weight
+	table[0.0] = make([]uint8, 0)
+	var prevSum, nextSum float64
+	for i := 0; i < len(s.p.Weights); i++ {
+		fmt.Printf("Position %d/%d\n", i+1, len(s.p.Weights))
+		existingSums := make([]float64, 0, len(table))
+		for w := range table {
+			existingSums = append(existingSums, w)
+		}
+		for _, prevSum = range existingSums {
+			for k := 1; k <= pgs.NumHaplotypes; k++ {
+				nextSum = prevSum + float64(k)*s.p.Weights[i]
+				if nextSum <= target+errorMargin-minWeight || (nextSum >= target-errorMargin && nextSum <= target+errorMargin) {
+					if _, ok := table[nextSum]; !ok {
+						table[nextSum] = make([]uint8, 0)
+					}
+					table[nextSum] = append(table[nextSum], uint8(pgs.NumHaplotypes*i+k-1))
+				}
+			}
+		}
 	}
 
-	fmt.Printf("Target: %g\n", s.target)
-	fmt.Printf("Weights: %v\n", weights)
-
-	table := make([]map[float64][][]int, len(weights)+1)
-	table[0] = make(map[float64][][]int)
-	var kfl float64
-	// Fill the dp table using dynamic programming
-	for i := 1; i <= len(weights); i++ {
-		fmt.Printf("Position %d/%d\n", i-1, len(weights)-1)
-		table[i] = make(map[float64][][]int)
-		// Copy previous level
-		for prevW, paths := range table[i-1] {
-			table[i][prevW] = paths
+	solutions := make(map[string][]uint8)
+	addToSolutions := func(path []uint8) {
+		sol := make([]uint8, len(s.p.Weights)*pgs.NumHaplotypes)
+		for _, pos := range path {
+			sol[pos] = 1
+			if pos%pgs.NumHaplotypes == 1 {
+				sol[pos-1] = 1
+			}
 		}
-		wi := make([][]int, pgs.NumHaplotypes)
-		wi[0] = []int{2 * (i - 1)}
-		wi[1] = []int{2 * (i - 1), 2*(i-1) + 1}
-		for k := 1; k <= pgs.NumHaplotypes; k++ {
-			kfl = float64(k)
-			if kfl*weights[i-1] <= s.target+errorMargin {
-				if _, ok := table[i][kfl*weights[i-1]]; !ok {
-					table[i][kfl*weights[i-1]] = make([][]int, 0)
-				}
-				table[i][kfl*weights[i-1]] = append(table[i][kfl*weights[i-1]], wi[k-1])
-				for prevW, paths := range table[i-1] {
-					if prevW+kfl*weights[i-1] <= s.target+errorMargin {
-						for _, path := range paths {
-							appended := make([]int, len(path)+len(wi[k-1]))
-							copy(appended, path)
-							copy(appended[len(path):], wi[k-1])
-							table[i][prevW+kfl*weights[i-1]] = append(table[i][prevW+kfl*weights[i-1]], appended)
-						}
+		solutions[arrayToString(sol)] = sol
+	}
+	fmt.Printf("Number of weights in the table %d\n", len(table))
+
+	//backtracking
+	var weight float64
+	var backtrack func(float64, []uint8)
+	backtrack = func(sum float64, path []uint8) {
+		pointers, ok := table[sum]
+		if math.Abs(sum) <= errorMargin {
+			addToSolutions(path)
+			if len(solutions)%10 == 0 {
+				fmt.Printf("Found %d solutions\n", len(solutions))
+			}
+			return
+		}
+		if !ok {
+			pointers = make([]uint8, 0)
+			// Due to the loss of precision, sometimes the sum in the table is slightly different
+			for w := range table {
+				if math.Abs(w-sum) < errorMargin {
+					for _, p := range table[w] {
+						pointers = append(pointers, p)
 					}
 				}
 			}
 		}
-		// Pruning the previous level to save storage
-		table[i-1] = nil
-	}
-
-	solutions := make(map[string][]int)
-	for w, results := range table[len(weights)] {
-		if math.Abs(w-s.target) > errorMargin {
-			continue
-		}
-		for _, res := range results {
-			sol := make([]int, len(weights)*pgs.NumHaplotypes)
-			for _, pos := range res {
-				sol[pos] = 1
+		for _, p := range pointers {
+			// Make sure if we do not have paths with two values for the same snp
+			if isNotPermitted(p, path) {
+				continue
 			}
-			solutions[arrayToString(sol)] = sol
+			newPath := make([]uint8, len(path)+1)
+			copy(newPath, path)
+			newPath[len(path)] = p
+			weight = s.p.Weights[p/2] * (1 + float64(p%2))
+			backtrack(sum-weight, newPath)
 		}
 	}
+	backtrack(target, make([]uint8, 0))
+
+	//var printer func(float64)
+	//printer = func(w float64) {
+	//	fmt.Printf("%g: ", w)
+	//	for _, pos := range table[w] {
+	//		fmt.Printf("%d ", pos)
+	//	}
+	//	fmt.Println()
+	//	for _, pos := range table[w] {
+	//		fmt.Printf("%d: ", pos)
+	//		weight = s.p.Weights[pos/2] * (1 + float64(pos%2))
+	//		printer(w - weight)
+	//	}
+	//}
 
 	return solutions
+}
+
+func isNotPermitted(v uint8, array []uint8) bool {
+	for _, a := range array {
+		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
+			return true
+		}
+	}
+	return false
+}
+
+func findMin(values []float64) float64 {
+	min := values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+	}
+	return min
 }
 
 //func (s *Solver) recursive(numThreads int) map[string][]int {
@@ -210,12 +266,12 @@ func (s *Solver) dp(numThreads int) map[string][]int {
 //	}
 //}
 
-func (s *Solver) solve(numThreads int) map[string][]int {
+func (s *Solver) solve(numThreads int) map[string][]uint8 {
 	var err error
 	rand.NewSource(time.Now().UnixNano())
 	poolSize := len(s.p.Variants) * 100
-	solutions := make(map[string][]int)
-	candidates := make([][]int, poolSize, 2*poolSize)
+	solutions := make(map[string][]uint8)
+	candidates := make([][]uint8, poolSize, 2*poolSize)
 	// Initialize candidate solutions according to the SNPs likelihood in the population
 	for i := 0; i < len(candidates); i++ {
 		candidates[i], err = s.p.SampleFromPopulation()
@@ -241,36 +297,36 @@ func (s *Solver) solve(numThreads int) map[string][]int {
 			s.populationChans[thread] <- candidates[thread*len(candidates)/numThreads : (thread+1)*len(candidates)/numThreads]
 			s.deltaChans[thread] <- deltas[thread*len(candidates)/numThreads : (thread+1)*len(candidates)/numThreads]
 		}
-		mutated := make([][]int, 0, len(candidates))
+		mutated := make([][]uint8, 0, len(candidates))
 		for thread := 0; thread < numThreads; thread++ {
 			mutated = append(mutated, <-s.populationChans[thread]...)
 		}
-		candidates = make([][]int, len(mutated))
+		candidates = make([][]uint8, len(mutated))
 		copy(candidates, mutated)
 	}
 
 	return solutions
 }
 
-func extend(base map[string][]int, extension [][]int) {
+func extend(base map[string][]uint8, extension [][]uint8) {
 	for _, ext := range extension {
 		if _, ok := base[arrayToString(ext)]; !ok {
-			base[arrayToString(ext)] = make([]int, len(ext))
+			base[arrayToString(ext)] = make([]uint8, len(ext))
 			copy(base[arrayToString(ext)], ext)
 		}
 	}
 }
 
-func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
+func (s *Solver) calculateDeltas(population [][]uint8) ([]float64, [][]uint8) {
 	var delta float64
 	var err error
 	deltas := make([]float64, len(population))
-	matches := make([][]int, 0)
+	matches := make([][]uint8, 0)
 	for i := range population {
 		delta = calculateScore(population[i], s.p.Weights) - s.target
 		//for delta == 0 {
 		for math.Abs(delta) <= pgs.ErrorMargin {
-			match := make([]int, len(population[i]))
+			match := make([]uint8, len(population[i]))
 			copy(match, population[i])
 			matches = append(matches, match)
 			//fmt.Printf("Found match: %s %f\n", arrayToString(match), calculateScore(match, s.p.Weights)-s.target)
@@ -303,7 +359,7 @@ func (s *Solver) calculateDeltas(population [][]int) ([]float64, [][]int) {
 //	return score
 //}
 
-func calculateScore(snps []int, weights []float64) float64 {
+func calculateScore(snps []uint8, weights []float64) float64 {
 	score := 0.0
 	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
 		for j := 0; j < pgs.NumHaplotypes; j++ {
@@ -320,12 +376,12 @@ func calculateScore(snps []int, weights []float64) float64 {
 	return score
 }
 
-func (s *Solver) crossover(population [][]int) [][]int {
+func (s *Solver) crossover(population [][]uint8) [][]uint8 {
 	parents := tools.Shuffle(population)
-	splice := func(first, second int) [][]int {
-		children := make([][]int, len(parents[first])/2)
+	splice := func(first, second int) [][]uint8 {
+		children := make([][]uint8, len(parents[first])/2)
 		for k := 0; k < len(children); k++ {
-			children[k] = make([]int, len(parents[first]))
+			children[k] = make([]uint8, len(parents[first]))
 			copy(children[k][:k*pgs.NumHaplotypes], parents[first][:k*pgs.NumHaplotypes])
 			copy(children[k][k*pgs.NumHaplotypes:], parents[second][k*pgs.NumHaplotypes:])
 		}
@@ -335,16 +391,16 @@ func (s *Solver) crossover(population [][]int) [][]int {
 		}
 		fitness := deltasToFitness(deltas)
 		pickedIndex := tools.SampleFromDistribution(fitness)
-		return [][]int{children[pickedIndex]}
+		return [][]uint8{children[pickedIndex]}
 	}
-	offspring := make([][]int, 0, len(parents))
+	offspring := make([][]uint8, 0, len(parents))
 	for i := 0; i < (len(parents)/2)*2; i += 2 {
 		offspring = append(offspring, splice(i, i+1)...)
 	}
 	return offspring
 }
 
-func tournament(population [][]int, deltas []float64, populationSize int) [][]int {
+func tournament(population [][]uint8, deltas []float64, populationSize int) [][]uint8 {
 	fitness := deltasToFitness(deltas)
 	scores := make([]float64, len(population))
 	var opponentIdx int
@@ -363,11 +419,11 @@ func tournament(population [][]int, deltas []float64, populationSize int) [][]in
 	return population[:populationSize]
 }
 
-func (s *Solver) mutate(ctx context.Context, popChan chan [][]int, deltaChan chan []float64) {
+func (s *Solver) mutate(ctx context.Context, popChan chan [][]uint8, deltaChan chan []float64) {
 	timeout := 1 * time.Second
 	t := time.NewTimer(timeout)
 	for {
-		var population [][]int
+		var population [][]uint8
 		select {
 		case <-ctx.Done():
 			return
@@ -378,7 +434,7 @@ func (s *Solver) mutate(ctx context.Context, popChan chan [][]int, deltaChan cha
 			t.Reset(timeout)
 		}
 		deltas := <-deltaChan
-		mutated := make([][]int, 0, len(population))
+		mutated := make([][]uint8, 0, len(population))
 		for j, original := range population {
 			result := s.p.MutateGenome(original, deltas[j])
 			mutated = append(mutated, result...)
@@ -409,7 +465,7 @@ func deltasToFitness(deltas []float64) []float64 {
 //	return acc / float64(len(solution))
 //}
 
-func accuracy(solution []int, target []int) float64 {
+func accuracy(solution []uint8, target []uint8) float64 {
 	if len(solution) != len(target) {
 		return 0.0
 	}
@@ -422,7 +478,7 @@ func accuracy(solution []int, target []int) float64 {
 	return acc * pgs.NumHaplotypes / float64(len(solution))
 }
 
-func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map[string][]int {
+func findComplements(solutions map[string][]uint8, p *pgs.PGS, numThreads int) map[string][]uint8 {
 	// Find which positions have the same weight, hence can be swapped
 	weightGroups := make(map[float64][]int)
 	for i, weight := range p.Weights {
@@ -466,8 +522,9 @@ func findComplements(solutions map[string][]int, p *pgs.PGS, numThreads int) map
 	return mutexed.RetrieveMapOnly()
 }
 
-func explore(source []int, positions [][]int, saver *MutexMap) {
-	var leftPos, rightPos, leftVal, rightVal int
+func explore(source []uint8, positions [][]int, saver *MutexMap) {
+	var leftPos, rightPos int
+	var leftVal, rightVal uint8
 	//fmt.Printf("Exploring %s\n", arrayToString(source))
 	//fmt.Printf("Num positions: %d\n", len(positions[0]))
 	if len(positions) > 1 {
@@ -484,7 +541,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 			switch {
 			case leftVal != rightVal:
 				// first, simple swapping
-				swapped := make([]int, len(source))
+				swapped := make([]uint8, len(source))
 				copy(swapped, source)
 				swapped[leftPos*pgs.NumHaplotypes], swapped[rightPos*pgs.NumHaplotypes] =
 					swapped[rightPos*pgs.NumHaplotypes], swapped[leftPos*pgs.NumHaplotypes]
@@ -496,7 +553,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 				}
 				// second, splitting 2 + 0 into 1 + 1
 				if (leftVal == 2 && rightVal == 0) || (leftVal == 0 && rightVal == 2) {
-					split := make([]int, len(source))
+					split := make([]uint8, len(source))
 					copy(split, source)
 					split[leftPos*pgs.NumHaplotypes], split[leftPos*pgs.NumHaplotypes+1] = 1, 0
 					split[rightPos*pgs.NumHaplotypes], split[rightPos*pgs.NumHaplotypes+1] = 0, 1
@@ -507,7 +564,7 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 				}
 			//	converting 1 + 1 into 2 + 0 and 0 + 2
 			case leftVal == 1 && rightVal == 1:
-				leftPushed, rightPushed := make([]int, len(source)), make([]int, len(source))
+				leftPushed, rightPushed := make([]uint8, len(source)), make([]uint8, len(source))
 				copy(leftPushed, source)
 				copy(rightPushed, source)
 				leftPushed[leftPos*pgs.NumHaplotypes], leftPushed[leftPos*pgs.NumHaplotypes+1] = 1, 1
@@ -525,27 +582,27 @@ func explore(source []int, positions [][]int, saver *MutexMap) {
 			}
 		}
 	}
-	if len(positions[0]) < 3 {
-		return
-	}
-	triplets := getTriplets(positions[0])
-	for _, triplet := range triplets {
-		values := []int{source[triplet[0]*pgs.NumHaplotypes] + source[triplet[0]*pgs.NumHaplotypes+1],
-			source[triplet[1]*pgs.NumHaplotypes] + source[triplet[1]*pgs.NumHaplotypes+1],
-			source[triplet[2]*pgs.NumHaplotypes] + source[triplet[2]*pgs.NumHaplotypes+1]}
-		sortInts(triplet, values)
-		if values[0] == 0 && values[1] == 0 && values[2] == 2 {
-			distributed := make([]int, len(source))
-			copy(distributed, source)
-			distributed[triplet[0]*pgs.NumHaplotypes], distributed[triplet[0]*pgs.NumHaplotypes+1] = 0, 1
-			distributed[triplet[1]*pgs.NumHaplotypes], distributed[triplet[1]*pgs.NumHaplotypes+1] = 0, 1
-			distributed[triplet[2]*pgs.NumHaplotypes], distributed[triplet[2]*pgs.NumHaplotypes+1] = 0, 0
-			saver.Put(arrayToString(distributed), distributed)
-			if len(positions) > 1 {
-				explore(distributed, positions[1:], saver)
-			}
-		}
-	}
+	//if len(positions[0]) < 3 {
+	//	return
+	//}
+	//triplets := getTriplets(positions[0])
+	//for _, triplet := range triplets {
+	//	values := []int{source[triplet[0]*pgs.NumHaplotypes] + source[triplet[0]*pgs.NumHaplotypes+1],
+	//		source[triplet[1]*pgs.NumHaplotypes] + source[triplet[1]*pgs.NumHaplotypes+1],
+	//		source[triplet[2]*pgs.NumHaplotypes] + source[triplet[2]*pgs.NumHaplotypes+1]}
+	//	sortInts(triplet, values)
+	//	if values[0] == 0 && values[1] == 0 && values[2] == 2 {
+	//		distributed := make([]uint8, len(source))
+	//		copy(distributed, source)
+	//		distributed[triplet[0]*pgs.NumHaplotypes], distributed[triplet[0]*pgs.NumHaplotypes+1] = 0, 1
+	//		distributed[triplet[1]*pgs.NumHaplotypes], distributed[triplet[1]*pgs.NumHaplotypes+1] = 0, 1
+	//		distributed[triplet[2]*pgs.NumHaplotypes], distributed[triplet[2]*pgs.NumHaplotypes+1] = 0, 0
+	//		saver.Put(arrayToString(distributed), distributed)
+	//		if len(positions) > 1 {
+	//			explore(distributed, positions[1:], saver)
+	//		}
+	//	}
+	//}
 }
 
 func sortInts(positions []int, values []int) {
@@ -574,7 +631,7 @@ func getTriplets(nums []int) [][]int {
 	return triplets
 }
 
-func arrayToString(array []int) string {
+func arrayToString(array []uint8) string {
 	str := make([]string, len(array)/2)
 	for i := 0; i < len(array); i += pgs.NumHaplotypes {
 		str[i/2] = fmt.Sprint(array[i] + array[i+1])
@@ -590,9 +647,9 @@ func arrayToStringDiploid(array []int) string {
 	return strings.Join(str, "")
 }
 
-func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
+func sortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
 	i := 0
-	flattened := make([][]int, len(solutions))
+	flattened := make([][]uint8, len(solutions))
 	accuracies := make([]float64, len(solutions))
 	for _, solution := range solutions {
 		flattened[i] = solution
@@ -603,7 +660,7 @@ func sortByAccuracy(solutions map[string][]int, target []int) [][]int {
 	return flattened
 }
 
-func sortBy(items [][]int, properties []float64) {
+func sortBy(items [][]uint8, properties []float64) {
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
 			if properties[i] < properties[j] {

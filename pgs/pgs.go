@@ -37,7 +37,7 @@ const (
 	ErrorMargin   = 1e-14
 )
 
-var GENOTYPES = []int{0, 1}
+var GENOTYPES = []uint8{0, 1}
 
 type Variant struct {
 	fields map[string]interface{}
@@ -296,10 +296,10 @@ func (p *PGS) LoadMAF() {
 	}
 }
 
-func (p *PGS) MutateGenome(original []int, delta float64) [][]int {
-	mutations := make([]int, len(original))
+func (p *PGS) MutateGenome(original []uint8, delta float64) [][]uint8 {
+	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	mutated := make([][]int, 0, 1)
+	mutated := make([][]uint8, 0, 1)
 	tmp := 0.0
 	for i := 0; i < len(original)/NumHaplotypes; i++ {
 		for j := 0; j < NumHaplotypes; j++ {
@@ -310,7 +310,7 @@ func (p *PGS) MutateGenome(original []int, delta float64) [][]int {
 				}
 				//if tmp+float64(v)*p.Weights[i] == 0 {
 				if math.Abs(tmp+float64(v)*p.Weights[i]) <= ErrorMargin {
-					match := make([]int, len(original))
+					match := make([]uint8, len(original))
 					copy(match, original)
 					match[NumHaplotypes*i+j] = v
 					mutated = append(mutated, match)
@@ -333,15 +333,15 @@ func (p *PGS) MutateGenome(original []int, delta float64) [][]int {
 }
 
 // Sample according to the MAF
-func (p *PGS) SampleFromPopulation() ([]int, error) {
-	sample := make([]int, p.VariantCount*NumHaplotypes)
+func (p *PGS) SampleFromPopulation() ([]uint8, error) {
+	sample := make([]uint8, p.VariantCount*NumHaplotypes)
 	// Initial sample based on individual priors
 	for i := range p.Loci {
 		for j := 0; j < NumHaplotypes; j++ {
 			maf := p.Maf[i]
 			ind := tools.SampleFromDistribution(maf)
 			sample[i*NumHaplotypes+j] = GENOTYPES[ind]
-			if sample[i*NumHaplotypes+j] == -1 {
+			if sample[i*NumHaplotypes+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -349,13 +349,13 @@ func (p *PGS) SampleFromPopulation() ([]int, error) {
 	return sample, nil
 }
 
-func (p *PGS) SampleUniform() ([]int, error) {
-	sample := make([]int, p.VariantCount*NumHaplotypes)
+func (p *PGS) SampleUniform() ([]uint8, error) {
+	sample := make([]uint8, p.VariantCount*NumHaplotypes)
 	// Initial sample based on individual priors
 	for i := range p.Loci {
 		for j := 0; j < NumHaplotypes; j++ {
 			sample[i*NumHaplotypes+j] = tools.SampleUniform(GENOTYPES)
-			if sample[i*NumHaplotypes+j] == -1 {
+			if sample[i*NumHaplotypes+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -363,7 +363,7 @@ func (p *PGS) SampleUniform() ([]int, error) {
 	return sample, nil
 }
 
-func (p *PGS) CalculateSequenceLikelihood(sequence []int) float64 {
+func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
 	likelihood := 1.0
 	for i := range p.Loci {
 		for j := 0; j < NumHaplotypes; j++ {

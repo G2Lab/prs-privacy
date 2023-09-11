@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=solve                   # Job name
-#SBATCH --mem=64G                          # Job memory request. Different units can be specified using the suffix [K|M|G|T]
+#SBATCH --mem=80G                          # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log              # Standard output and error log
 #SBATCH --cpus-per-task=2                  # Number of CPUs per task
 #SBATCH --time=01:00:00                    # Time limit hrs:min:sec

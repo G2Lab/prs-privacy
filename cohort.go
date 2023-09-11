@@ -4,18 +4,18 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/nikirill/prs/pgs"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
 )
 
 type Individual struct {
-	Genotype []int
+	Genotype []uint8
 	Score    float64
 }
 
@@ -23,7 +23,7 @@ type Cohort map[string]*Individual
 
 func NewIndividual() *Individual {
 	return &Individual{
-		Genotype: make([]int, 0),
+		Genotype: make([]uint8, 0),
 		Score:    0.0,
 	}
 }
@@ -142,7 +142,7 @@ func (c Cohort) SaveScores(filename string) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf("%.17f", c[ind].Score)})
+		writer.Write([]string{ind, fmt.Sprintf("%g", c[ind].Score)})
 	}
 	writer.Flush()
 	return nil

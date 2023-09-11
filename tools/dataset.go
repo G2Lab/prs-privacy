@@ -93,16 +93,16 @@ func NormalizeSnp(snp string) (string, error) {
 	}
 }
 
-func SnpToPair(snp string) ([]int, error) {
+func SnpToPair(snp string) ([]uint8, error) {
 	switch snp {
 	case "0|0":
-		return []int{0, 0}, nil
+		return []uint8{0, 0}, nil
 	case "0|1":
-		return []int{0, 1}, nil
+		return []uint8{0, 1}, nil
 	case "1|0":
-		return []int{1, 0}, nil
+		return []uint8{1, 0}, nil
 	case "1|1":
-		return []int{1, 1}, nil
+		return []uint8{1, 1}, nil
 	default:
 		return nil, fmt.Errorf("invalid snp value: %s", snp)
 	}

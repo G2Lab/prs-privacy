@@ -19,7 +19,7 @@ func SampleFromDistribution(distribution []float64) int {
 	return -1
 }
 
-func SampleUniform(values []int) int {
+func SampleUniform(values []uint8) uint8 {
 	cumulative := 1.0
 	r := rand.Float64() * cumulative
 	for k := range values {
@@ -28,7 +28,7 @@ func SampleUniform(values []int) int {
 			return values[k]
 		}
 	}
-	return -1
+	return 255
 }
 
 func SampleFromMap(distribution map[string]float64) string {
@@ -46,7 +46,7 @@ func SampleFromMap(distribution map[string]float64) string {
 	return ""
 }
 
-func ShuffleWithLabels(values [][]int, labels []float64) ([][]int, []float64) {
+func ShuffleWithLabels(values [][]uint8, labels []float64) ([][]uint8, []float64) {
 	for i := len(values) - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
 		values[i], values[j] = values[j], values[i]
@@ -55,8 +55,8 @@ func ShuffleWithLabels(values [][]int, labels []float64) ([][]int, []float64) {
 	return values, labels
 }
 
-func Shuffle(values [][]int) [][]int {
-	shuffled := make([][]int, len(values))
+func Shuffle(values [][]uint8) [][]uint8 {
+	shuffled := make([][]uint8, len(values))
 	copy(shuffled, values)
 	for i := len(values) - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
