@@ -39,19 +39,19 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -73,6 +73,7 @@ func main() {
 	//	log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
 	//	return
 	//}
+
 	numThreads := 1
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,40 +98,54 @@ func main() {
 }
 
 func (s *Solver) dp(numThreads int) map[string][]uint8 {
-	//errorMargin := math.Pow(10, -(float64(s.p.WeightPrecision) - 3))
-	errorMargin := 0.0
-	target := s.target
-	minWeight := findMin(s.p.Weights)
+	multiplier := math.Pow(10, float64(s.p.WeightPrecision))
 
-	fmt.Printf("Target: %g\n", target)
-	fmt.Printf("Weights: %v\n", s.p.Weights)
+	errorMargin := int64(math.Pow(10, float64(s.p.WeightPrecision/4)))
+	target := int64(s.target * multiplier)
+	weights := make([]int64, len(s.p.Weights))
+	for i, w := range s.p.Weights {
+		weights[i] = int64(w * multiplier)
+	}
+	minWeight := findMin(weights)
+	negativeTotal := sumUpNegatives(weights)
+
+	fmt.Printf("Target: %d±%d\n", target, errorMargin)
+	fmt.Printf("Weights: %v\n", weights)
 
 	// Fill the dp table using dynamic programming
-	table := make(map[float64][]uint8)
+	table := make(map[int64][]uint16)
 	// add the zero weight
-	table[0.0] = make([]uint8, 0)
-	var prevSum, nextSum float64
-	for i := 0; i < len(s.p.Weights); i++ {
-		fmt.Printf("Position %d/%d\n", i+1, len(s.p.Weights))
-		existingSums := make([]float64, 0, len(table))
+	table[0] = make([]uint16, 0)
+	var lowerBound int64
+	if negativeTotal == 0 {
+		lowerBound = target - errorMargin - minWeight
+	} else {
+		lowerBound = target + errorMargin - negativeTotal
+	}
+	targetLeft := target - errorMargin
+	targetRight := target + errorMargin
+	var prevSum, nextSum int64
+	for i := 0; i < len(weights); i++ {
+		fmt.Printf("Position %d/%d\n", i+1, len(weights))
+		existingSums := make([]int64, 0, len(table))
 		for w := range table {
 			existingSums = append(existingSums, w)
 		}
 		for _, prevSum = range existingSums {
 			for k := 1; k <= pgs.NumHaplotypes; k++ {
-				nextSum = prevSum + float64(k)*s.p.Weights[i]
-				if nextSum <= target+errorMargin-minWeight || (nextSum >= target-errorMargin && nextSum <= target+errorMargin) {
+				nextSum = prevSum + int64(k)*weights[i]
+				if nextSum <= lowerBound || (nextSum >= targetLeft && nextSum <= targetRight) {
 					if _, ok := table[nextSum]; !ok {
-						table[nextSum] = make([]uint8, 0)
+						table[nextSum] = make([]uint16, 0)
 					}
-					table[nextSum] = append(table[nextSum], uint8(pgs.NumHaplotypes*i+k-1))
+					table[nextSum] = append(table[nextSum], uint16(pgs.NumHaplotypes*i+k-1))
 				}
 			}
 		}
 	}
 
 	solutions := make(map[string][]uint8)
-	addToSolutions := func(path []uint8) {
+	addToSolutions := func(path []uint16) {
 		sol := make([]uint8, len(s.p.Weights)*pgs.NumHaplotypes)
 		for _, pos := range path {
 			sol[pos] = 1
@@ -141,25 +156,28 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		solutions[arrayToString(sol)] = sol
 	}
 	fmt.Printf("Number of weights in the table %d\n", len(table))
+	//fmt.Printf("%d: %v\n", target, table[target])
 
 	//backtracking
-	var weight float64
-	var backtrack func(float64, []uint8)
-	backtrack = func(sum float64, path []uint8) {
+	//var prevLen int
+	var weight int64
+	var backtrack func(int64, []uint16)
+	backtrack = func(sum int64, path []uint16) {
 		pointers, ok := table[sum]
-		if math.Abs(sum) <= errorMargin {
+		if int64(math.Abs(float64(sum))) <= errorMargin {
 			addToSolutions(path)
-			if len(solutions)%10 == 0 {
-				fmt.Printf("Found %d solutions\n", len(solutions))
-			}
+			//if len(solutions)%10 == 0 && len(solutions) != prevLen {
+			//	fmt.Printf("Found %d solutions\n", len(solutions))
+			//}
+			//prevLen = len(solutions)
 			return
 		}
 		if !ok {
-			pointers = make([]uint8, 0)
+			pointers = make([]uint16, 0)
 			// Due to the loss of precision, sometimes the sum in the table is slightly different
-			for w := range table {
-				if math.Abs(w-sum) < errorMargin {
-					for _, p := range table[w] {
+			for w := sum - errorMargin; w <= sum+errorMargin; w++ {
+				if pos, exists := table[w]; exists {
+					for _, p := range pos {
 						pointers = append(pointers, p)
 					}
 				}
@@ -170,14 +188,14 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 			if isNotPermitted(p, path) {
 				continue
 			}
-			newPath := make([]uint8, len(path)+1)
+			newPath := make([]uint16, len(path)+1)
 			copy(newPath, path)
 			newPath[len(path)] = p
-			weight = s.p.Weights[p/2] * (1 + float64(p%2))
+			weight = weights[p/2] * (1 + int64(p%2))
 			backtrack(sum-weight, newPath)
 		}
 	}
-	backtrack(target, make([]uint8, 0))
+	backtrack(target, make([]uint16, 0))
 
 	//var printer func(float64)
 	//printer = func(w float64) {
@@ -196,7 +214,7 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 	return solutions
 }
 
-func isNotPermitted(v uint8, array []uint8) bool {
+func isNotPermitted(v uint16, array []uint16) bool {
 	for _, a := range array {
 		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
 			return true
@@ -205,14 +223,24 @@ func isNotPermitted(v uint8, array []uint8) bool {
 	return false
 }
 
-func findMin(values []float64) float64 {
-	min := values[0]
+func findMin(values []int64) int64 {
+	minV := values[0]
 	for _, v := range values {
-		if v < min {
-			min = v
+		if v < minV {
+			minV = v
 		}
 	}
-	return min
+	return minV
+}
+
+func sumUpNegatives(values []int64) int64 {
+	sum := int64(0)
+	for _, v := range values {
+		if v < 0 {
+			sum += v
+		}
+	}
+	return sum
 }
 
 //func (s *Solver) recursive(numThreads int) map[string][]int {

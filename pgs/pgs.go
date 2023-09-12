@@ -173,6 +173,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 		p.Weights[i] = p.Variants[loc].GetWeight()
 	}
 	p.WeightPrecision = maxPrecision
+	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	if err := scanner.Err(); err != nil {
 		return err

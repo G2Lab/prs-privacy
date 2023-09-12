@@ -28,20 +28,20 @@ func NewIndividual() *Individual {
 	}
 }
 
-func NewCohort(pgs *pgs.PGS) Cohort {
+func NewCohort(p *pgs.PGS) Cohort {
 	c := make(Cohort)
-	c.Populate(pgs)
+	c.Populate(p)
 	return c
 }
 
-func (c Cohort) Populate(pgs *pgs.PGS) {
-	filename := fmt.Sprintf("%s.json", pgs.PgsID)
+func (c Cohort) Populate(p *pgs.PGS) {
+	filename := fmt.Sprintf("%s.json", p.PgsID)
 	// If the file doesn't exist, calculate the PRS and save it
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		c.CalculatePRS(pgs)
+		c.CalculatePRS(p)
 		c.SaveToDisk(filename)
-		if _, err := os.Stat(fmt.Sprintf("%s.scores", pgs.PgsID)); os.IsNotExist(err) {
-			c.SaveScores(fmt.Sprintf("%s.scores", pgs.PgsID))
+		if _, err := os.Stat(fmt.Sprintf("%s.scores", p.PgsID)); os.IsNotExist(err) {
+			c.SaveScores(fmt.Sprintf("%s.scores", p.PgsID), p.WeightPrecision)
 		}
 		// Save scores separately for the ease of reading
 		return
@@ -50,8 +50,8 @@ func (c Cohort) Populate(pgs *pgs.PGS) {
 	c.LoadFromDisk(filename)
 }
 
-func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
-	for i, locus := range pgs.Loci {
+func (c Cohort) CalculatePRS(p *pgs.PGS) {
+	for i, locus := range p.Loci {
 		chr, position := tools.SplitLocus(locus)
 		query, args := tools.IndividualSnpsQuery(chr, position)
 		cmd := exec.Command(query, args...)
@@ -85,7 +85,7 @@ func (c Cohort) CalculatePRS(pgs *pgs.PGS) {
 			}
 			//c[individ].Genotype = append(c[individ].Genotype, allele[0]+allele[1])
 			c[individ].Genotype = append(c[individ].Genotype, allele...)
-			c[individ].Score += float64(allele[0]+allele[1]) * pgs.Weights[i]
+			c[individ].Score += float64(allele[0]+allele[1]) * p.Weights[i]
 		}
 	}
 }
@@ -133,7 +133,7 @@ func (c Cohort) LoadFromDisk(filename string) {
 	}
 }
 
-func (c Cohort) SaveScores(filename string) error {
+func (c Cohort) SaveScores(filename string, precision int) error {
 	sortedInd := c.SortByScore()
 	file, err := os.Create(filename)
 	if err != nil {
@@ -142,7 +142,7 @@ func (c Cohort) SaveScores(filename string) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf("%g", c[ind].Score)})
+		writer.Write([]string{ind, fmt.Sprintf(fmt.Sprintf("%%.%df", precision), c[ind].Score)})
 	}
 	writer.Flush()
 	return nil
