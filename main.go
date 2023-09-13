@@ -39,8 +39,8 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	INDIVIDUAL := "NA18595"
-	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
@@ -184,7 +184,7 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 			}
 		}
 		for _, p := range pointers {
-			// Make sure if we do not have paths with two values for the same snp
+			// Make sure that we do not have paths with two values for the same snp
 			if isNotPermitted(p, path) {
 				continue
 			}
