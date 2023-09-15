@@ -6,8 +6,6 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,8 +41,8 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
@@ -52,9 +50,9 @@ func main() {
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
@@ -65,19 +63,19 @@ func main() {
 	p.LoadStats()
 	cohort := NewCohort(p)
 
-	numThreadsEnv := os.Getenv(numCpusEnv)
-	var numThreads int
-	if numThreadsEnv != "" {
-		numThreads, err = strconv.Atoi(numThreadsEnv)
-		if err != nil {
-			log.Printf("Error parsing numCpus %s: %v\n", numCpusEnv, err)
-			return
-		}
-	} else {
-		log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
-		return
-	}
-	//numThreads := 1
+	//numThreadsEnv := os.Getenv(numCpusEnv)
+	//var numThreads int
+	//if numThreadsEnv != "" {
+	//	numThreads, err = strconv.Atoi(numThreadsEnv)
+	//	if err != nil {
+	//		log.Printf("Error parsing numCpus %s: %v\n", numCpusEnv, err)
+	//		return
+	//	}
+	//} else {
+	//	log.Printf("Could not read numCpus env %s: %v\n", numCpusEnv, err)
+	//	return
+	//}
+	numThreads := 1
 
 	ctx, cancel := context.WithCancel(context.Background())
 	solver := NewSolver(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
@@ -91,6 +89,17 @@ func main() {
 	fmt.Printf("\nTrue:\n%s -- %f, %f\n", arrayToString(cohort[INDIVIDUAL].Genotype),
 		cohort[INDIVIDUAL].Score-calculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
 		p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
+	sum := int64(0)
+	multiplier := math.Pow(10, precisionsLimit)
+	for i := 0; i < 2*len(p.Weights); i++ {
+		switch cohort[INDIVIDUAL].Genotype[i] {
+		case 0:
+			continue
+		case 1:
+			sum += int64(p.Weights[i/2] * multiplier)
+		}
+	}
+	fmt.Printf("True sum: %d\n", sum)
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
 		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", arrayToString(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
@@ -121,10 +130,10 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		multiplier = math.Pow(10, float64(s.p.WeightPrecision))
 	}
 
-	target := int64(math.Round(s.target * multiplier))
+	target := int64(s.target * multiplier)
 	weights := make([]int64, len(s.p.Weights))
 	for i, w := range s.p.Weights {
-		weights[i] = int64(math.Round(w * multiplier))
+		weights[i] = int64(w * multiplier)
 	}
 	maxRemainingPositive, maxRemainingNegative := getMaxTotal(weights)
 	upperBound := target + errorMargin - maxRemainingNegative
@@ -183,7 +192,7 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		solutions[arrayToString(sol)] = sol
 		solMutex.Unlock()
 	}
-	//fmt.Println(roundedMode, preciseTarget, preciseWeights, preciseMultiplier, preciseErrorMargin)
+	//fmt.Println(roundedMode, preciseTarget, preciseWeights, preciseMultiplier)
 	fmt.Printf("Number of weights in the table %d\n", len(table))
 	//fmt.Printf("%d: %v\n", target, table[target])
 
@@ -216,7 +225,7 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		}
 		for j, p := range pointers {
 			// Make sure that we do not have paths with two values for the same snp
-			if alreadyInSlice(p, path) {
+			if alreadyInSlice(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
 				continue
 			}
 			if firstLevel {
@@ -245,20 +254,6 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 	}
 	backtrack(target, make([]uint8, 0), true, numThreads)
 	wg.Wait()
-
-	//var printer func(float64)
-	//printer = func(w float64) {
-	//	fmt.Printf("%g: ", w)
-	//	for _, pos := range table[w] {
-	//		fmt.Printf("%d ", pos)
-	//	}
-	//	fmt.Println()
-	//	for _, pos := range table[w] {
-	//		fmt.Printf("%d: ", pos)
-	//		weight = s.p.Weights[pos/2] * (1 + float64(pos%2))
-	//		printer(w - weight)
-	//	}
-	//}
 
 	return solutions
 }
