@@ -16,7 +16,10 @@ import (
 
 const ITERATIONS = 5000
 const numCpusEnv = "SLURM_CPUS_PER_TASK"
-const precisionsLimit = 8
+const (
+	precisionsLimit = 8
+	floatPrecision  = 13
+)
 
 type Solver struct {
 	target          float64
@@ -41,19 +44,19 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 }
 
 func main() {
-	INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -99,7 +102,7 @@ func main() {
 			sum += int64(p.Weights[i/2] * multiplier)
 		}
 	}
-	fmt.Printf("True sum: %d\n", sum)
+	//fmt.Printf("True sum: %d\n", sum)
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
 		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", arrayToString(solution), accuracy(solution, cohort[INDIVIDUAL].Genotype),
@@ -112,6 +115,7 @@ func main() {
 func (s *Solver) dp(numThreads int) map[string][]uint8 {
 	var roundedMode = false
 	var multiplier float64
+	var roundingError int64 = 0
 	var errorMargin int64 = 0
 	var preciseTarget int64
 	var preciseWeights []int64
@@ -125,7 +129,10 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 			preciseWeights[i] = int64(w * preciseMultiplier)
 		}
 		roundedMode = true
-		errorMargin = 1e2
+		roundingError = int64(s.p.VariantCount) * 4 / 5
+		if s.p.WeightPrecision > floatPrecision {
+			errorMargin = 1e2
+		}
 	} else {
 		multiplier = math.Pow(10, float64(s.p.WeightPrecision))
 	}
@@ -135,20 +142,23 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 	for i, w := range s.p.Weights {
 		weights[i] = int64(w * multiplier)
 	}
-	maxRemainingPositive, maxRemainingNegative := getMaxTotal(weights)
-	upperBound := target + errorMargin - maxRemainingNegative
-	lowerBound := target - errorMargin - maxRemainingPositive
-	nextMinValues := findNextPositiveMins(weights)
+	targetLeft := target - roundingError
+	targetRight := target
+	maxTotalPositive, maxTotalNegative := getMaxTotal(weights)
+	upperBound := targetRight - maxTotalNegative
+	lowerBound := targetLeft - maxTotalPositive
+	//remainingMinValues := findNextPositiveMins(weights)
 
-	fmt.Printf("Target: %d±%d\n", target, errorMargin)
+	fmt.Printf("Target: %d±%d\n", target, roundingError)
 	fmt.Printf("Weights: %v\n", weights)
+	//fmt.Printf("Upper bound: %d\n", maxTotalPositive)
+	//fmt.Printf("Lower bound: %d\n", maxTotalNegative)
+	//fmt.Printf("Next mins: %v\n", remainingMinValues)
 
 	// Fill the dp table using dynamic programming
 	table := make(map[int64][]uint8)
 	// add the zero weight
 	table[0] = make([]uint8, 0)
-	targetLeft := target - errorMargin
-	targetRight := target + errorMargin
 	var prevSum, nextSum int64
 	for i := 0; i < len(weights); i++ {
 		fmt.Printf("Position %d/%d\n", i+1, len(weights))
@@ -164,7 +174,8 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		for _, prevSum = range existingSums {
 			for k := 1; k <= pgs.NumHaplotypes; k++ {
 				nextSum = prevSum + int64(k)*weights[i]
-				if (nextSum <= upperBound-nextMinValues[i] && nextSum >= lowerBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
+				//if (nextSum <= upperBound-remainingMinValues[i] && nextSum >= lowerBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
+				if (nextSum <= upperBound && nextSum >= lowerBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
 					if _, ok := table[nextSum]; !ok {
 						table[nextSum] = make([]uint8, 0)
 					}
@@ -192,63 +203,64 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 		solutions[arrayToString(sol)] = sol
 		solMutex.Unlock()
 	}
-	//fmt.Println(roundedMode, preciseTarget, preciseWeights, preciseMultiplier)
 	fmt.Printf("Number of weights in the table %d\n", len(table))
-	//fmt.Printf("%d: %v\n", target, table[target])
 
 	//backtracking
 	var wg sync.WaitGroup
 	var weight int64
 	var backtrack func(int64, []uint8, bool, int)
 	backtrack = func(sum int64, path []uint8, firstLevel bool, threadsAvailable int) {
-		pointers := make([]uint8, 0)
-		pointers, ok := table[sum]
-		if int64(math.Abs(float64(sum))) <= errorMargin {
+		if int64(math.Abs(float64(sum))) <= roundingError {
 			addToSolutions(path)
 			return
 		}
+		stage := make(map[int64][]uint8)
+		pointers, ok := table[sum]
+		if ok {
+			stage[sum] = pointers
+		}
 		// Due to the loss of precision, sometimes the sum in the table is slightly different
 		if !ok || (firstLevel && roundedMode) {
-			for w := sum - errorMargin; w <= sum+errorMargin; w++ {
+			if pointers == nil {
+				pointers = make([]uint8, 0)
+			}
+			for w := sum - roundingError; w <= sum+roundingError; w++ {
+				if w == sum {
+					continue
+				}
 				if pos, exists := table[w]; exists {
-					for _, p := range pos {
-						if !alreadyInSlice(p, pointers) {
-							pointers = append(pointers, p)
-						}
-					}
+					stage[w] = pos
 				}
 			}
 		}
-		if firstLevel {
-			fmt.Println(pointers)
-			fmt.Printf("Pointers: ")
-		}
-		for j, p := range pointers {
-			// Make sure that we do not have paths with two values for the same snp
-			if alreadyInSlice(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
-				continue
-			}
-			if firstLevel {
-				fmt.Printf("%d/%d ", j+1, len(pointers))
-			}
-			newPath := make([]uint8, len(path)+1)
-			copy(newPath, path)
-			newPath[len(path)] = p
-			weight = weights[p/2] * (1 + int64(p%2))
-			if firstLevel && threadsAvailable > 1 {
-				threadMutex.Lock()
-				threadsAvailable -= 1
-				threadMutex.Unlock()
-				wg.Add(1)
-				go func(t int64) {
-					defer wg.Done()
-					backtrack(t, newPath, false, threadsAvailable)
+		for w, pts := range stage {
+			for j, p := range pts {
+				// Make sure that we do not have paths with two values for the same snp
+				if locusAlreadyInSlice(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
+					continue
+				}
+				if firstLevel {
+					fmt.Printf("%d/%d ", j+1, len(pts))
+				}
+				newPath := make([]uint8, len(path)+1)
+				copy(newPath, path)
+				newPath[len(path)] = p
+				weight = weights[p/2] * (1 + int64(p%2))
+				if firstLevel && threadsAvailable > 1 {
 					threadMutex.Lock()
-					threadsAvailable += 1
+					threadsAvailable -= 1
 					threadMutex.Unlock()
-				}(sum - weight)
-			} else {
-				backtrack(sum-weight, newPath, false, threadsAvailable)
+					wg.Add(1)
+					go func(t int64) {
+						defer wg.Done()
+						backtrack(t, newPath, false, threadsAvailable)
+						threadMutex.Lock()
+						threadsAvailable += 1
+						threadMutex.Unlock()
+					}(w - weight)
+				} else {
+					backtrack(w-weight, newPath, false, threadsAvailable)
+				}
 			}
 		}
 	}
@@ -258,7 +270,7 @@ func (s *Solver) dp(numThreads int) map[string][]uint8 {
 	return solutions
 }
 
-func alreadyInSlice(v uint8, array []uint8) bool {
+func locusAlreadyInSlice(v uint8, array []uint8) bool {
 	for _, a := range array {
 		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
 			return true
@@ -271,7 +283,7 @@ func findNextPositiveMins(values []int64) []int64 {
 	mins := make([]int64, len(values))
 	j := len(values) - 1
 	for {
-		if values[j] > 0 || j == 0 {
+		if values[j] > 0 || j == 1 {
 			mins[j] = values[j]
 			j--
 			break
@@ -318,15 +330,23 @@ func getScore(snps []uint8, weights []int64) int64 {
 	return score
 }
 
-//func findMin(values []int64) int64 {
-//	minV := values[0]
-//	for _, v := range values {
-//		if v < minV {
-//			minV = v
-//		}
-//	}
-//	return minV
-//}
+func findPositiveMin(values []int64) int64 {
+	minV := values[0]
+	j := 0
+	for {
+		if values[j] >= 0 {
+			minV = values[j]
+			break
+		}
+		j++
+	}
+	for _, v := range values {
+		if v > 0 && v < minV {
+			minV = v
+		}
+	}
+	return minV
+}
 
 //func (s *Solver) recursive(numThreads int) map[string][]int {
 //	var wg sync.WaitGroup
