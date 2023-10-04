@@ -1,9 +1,10 @@
-package main
+package solver
 
 import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/nikirill/prs/params"
 	"log"
 	"os"
 	"os/exec"
@@ -35,13 +36,13 @@ func NewCohort(p *pgs.PGS) Cohort {
 }
 
 func (c Cohort) Populate(p *pgs.PGS) {
-	filename := fmt.Sprintf("%s.json", p.PgsID)
+	filename := fmt.Sprintf("%s/%s.json", params.DataFolder, p.PgsID)
 	// If the file doesn't exist, calculate the PRS and save it
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		c.CalculatePRS(p)
 		c.SaveToDisk(filename)
-		if _, err := os.Stat(fmt.Sprintf("%s.scores", p.PgsID)); os.IsNotExist(err) {
-			c.SaveScores(fmt.Sprintf("%s.scores", p.PgsID), p.WeightPrecision)
+		if _, err := os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
+			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID), p.WeightPrecision)
 		}
 		// Save scores separately for the ease of reading
 		return

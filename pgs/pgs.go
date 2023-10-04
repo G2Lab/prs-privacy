@@ -5,9 +5,11 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"github.com/nikirill/prs/params"
 	"log"
 	"math"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 
@@ -108,7 +110,7 @@ func NewPGS() *PGS {
 }
 
 func (p *PGS) LoadCatalogFile(inputFile string) error {
-	file, err := os.Open(inputFile)
+	file, err := os.Open(path.Join(params.DataFolder, inputFile))
 	if err != nil {
 		return err
 	}
@@ -222,7 +224,7 @@ func (p *PGS) LoadStats() {
 }
 
 func (p *PGS) LoadMAF() {
-	filename := fmt.Sprintf("%s.maf", p.PgsID)
+	filename := fmt.Sprintf("%s/%s.maf", params.DataFolder, p.PgsID)
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
 		file, err := os.Create(filename)
