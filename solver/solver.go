@@ -40,8 +40,8 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	var roundedMode = false
 	var multiplier float64
-	var roundingError int64 = 0
-	var errorMargin int64 = 0
+	var roundingError int64 = 1
+	var errorMargin int64 = 1
 	var preciseTarget int64
 	var preciseWeights []int64
 	var preciseMultiplier float64
@@ -74,8 +74,8 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	lowerBound := targetLeft - maxTotalPositive
 	//remainingMinValues := findNextPositiveMins(weights)
 
-	fmt.Printf("Target: %d±%d\n", target, roundingError)
-	fmt.Printf("Weights: %v\n", weights)
+	//fmt.Printf("Target: %d±%d\n", target, roundingError)
+	//fmt.Printf("Weights: %v\n", weights)
 	//fmt.Printf("Upper bound: %d\n", maxTotalPositive)
 	//fmt.Printf("Lower bound: %d\n", maxTotalNegative)
 	//fmt.Printf("Next mins: %v\n", remainingMinValues)
@@ -86,7 +86,7 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	table[0] = make([]uint16, 0)
 	var prevSum, nextSum int64
 	for i := 0; i < len(weights); i++ {
-		fmt.Printf("Position %d/%d\n", i+1, len(weights))
+		//fmt.Printf("Position %d/%d\n", i+1, len(weights))
 		if weights[i] > 0 {
 			lowerBound += pgs.NumHaplotypes * weights[i]
 		} else {
@@ -138,7 +138,7 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		solutions[ArrayToString(sol)] = sol
 		solMutex.Unlock()
 	}
-	fmt.Printf("Number of weights in the table %d\n", len(table))
+	//fmt.Printf("Number of weights in the table %d\n", len(table))
 
 	//backtracking
 	var wg sync.WaitGroup
@@ -166,14 +166,14 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 			}
 		}
 		for w, pts := range stage {
-			for j, p := range pts {
+			for _, p := range pts {
 				// Make sure that we do not have paths with two values for the same snp
 				if locusAlreadyInSlice(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
 					continue
 				}
-				if firstLevel {
-					fmt.Printf("%d: %d/%d ", w, j+1, len(pts))
-				}
+				//if firstLevel {
+				//	fmt.Printf("%d: %d/%d ", w, j+1, len(pts))
+				//}
 				newPath := make([]uint16, len(path)+1)
 				copy(newPath, path)
 				newPath[len(path)] = p
@@ -722,6 +722,19 @@ func SortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
 		i++
 	}
 	sortBy(flattened, accuracies)
+	return flattened
+}
+
+func SortByLikelihood(solutions map[string][]uint8, p *pgs.PGS) [][]uint8 {
+	i := 0
+	flattened := make([][]uint8, len(solutions))
+	likelihoods := make([]float64, len(solutions))
+	for _, solution := range solutions {
+		flattened[i] = solution
+		likelihoods[i] = p.CalculateSequenceLikelihood(solution)
+		i++
+	}
+	sortBy(flattened, likelihoods)
 	return flattened
 }
 
