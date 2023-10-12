@@ -375,3 +375,21 @@ func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
 	}
 	return likelihood
 }
+
+func (p *PGS) AllMajorSample() []uint8 {
+	sample := make([]uint8, 2*len(p.Weights))
+	//for i := 0; i < len(p.Weights); i++ {
+	//	fmt.Printf("%.4f ", p.Maf[i][0])
+	//}
+	//fmt.Println()
+	for i := 0; i < len(p.Weights); i++ {
+		if p.Maf[i][0] > 0.5 {
+			sample[2*i] = 0
+			sample[2*i+1] = 0
+		} else {
+			sample[2*i] = 1
+			sample[2*i+1] = 1
+		}
+	}
+	return sample
+}

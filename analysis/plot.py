@@ -41,6 +41,28 @@ def score_distribution(filepath):
     # plt.savefig('score_distribution.png', dpi=300)
 
 
+def solution_ranking(filepath):
+    accuracies, positions = [], []
+    likelihoods = []
+    with open(filepath, 'r') as file:
+        reader = csv.reader(file)
+        next(reader)
+        for row in reader:
+            accuracies.append(1-float(row[1]))
+            positions.append(float(row[2])/float(row[3]))
+            likelihoods.append(float(row[6])/float(row[5]))
+
+    plt.hist(accuracies, bins=50, histtype='step', label="Inverse accuracy")
+    plt.hist(positions, bins=50, histtype='step', label="Relative position")
+    plt.hist(likelihoods, bins=50, histtype='step', label="Likelihood ratio")
+    plt.xlabel("Ratio")
+    plt.ylabel("Count")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
-    score_distribution("PGS000040.scores")
+    # score_distribution("PGS000040.scores")
+    solution_ranking("PGS000639.csv")
