@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -56,9 +55,9 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 			preciseWeights[i] = int64(w * preciseMultiplier)
 		}
 		roundedMode = true
-		roundingError = int64(s.p.VariantCount) * 4 / 5
+		roundingError = int64(s.p.VariantCount)
 		if s.p.WeightPrecision > params.FloatPrecision {
-			errorMargin = 1e2
+			errorMargin = 1e3
 		}
 	} else {
 		multiplier = math.Pow(10, float64(s.p.WeightPrecision))
@@ -70,11 +69,12 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		weights[i] = int64(w * multiplier)
 	}
 	targetLeft := target - roundingError
-	targetRight := target + roundingError
+	//targetRight := target + roundingError
+	targetRight := target
 	maxTotalPositive, maxTotalNegative := getMaxTotal(weights)
 	upperBound := targetRight - maxTotalNegative
 	lowerBound := targetLeft - maxTotalPositive
-	//remainingMinValues := findNextPositiveMins(weights)
+	remainingMinValues := findNextPositiveMins(weights)
 
 	//fmt.Printf("Target: %d±%d\n", target, roundingError)
 	//fmt.Printf("Weights: %v\n", weights)
@@ -101,8 +101,8 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		for _, prevSum = range existingSums {
 			for k := 1; k <= pgs.NumHaplotypes; k++ {
 				nextSum = prevSum + int64(k)*weights[i]
-				//if (nextSum <= upperBound-remainingMinValues[i] && nextSum >= lowerBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
-				if (nextSum >= lowerBound && nextSum <= upperBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
+				if (nextSum <= upperBound-remainingMinValues[i] && nextSum >= lowerBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
+					//if (nextSum >= lowerBound && nextSum <= upperBound) || (nextSum >= targetLeft && nextSum <= targetRight) {
 					if _, ok := table[nextSum]; !ok {
 						table[nextSum] = make([]uint16, 0)
 					}
@@ -113,9 +113,8 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	}
 	//fmt.Printf("Number of weights in the table %d\n", len(table))
 
-	rejected := 0
-	result := make(chan []uint8)
-	constructSolution := func(path []uint16) {
+	results := make(chan []uint8)
+	validateSolution := func(path []uint16) {
 		sol := make([]uint8, len(s.p.Weights)*pgs.NumHaplotypes)
 		for _, pos := range path {
 			sol[pos] = 1
@@ -125,36 +124,25 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		}
 		//// If we are in the roundedMode mode, check that the precise weights add up to the target
 		if roundedMode && int64(math.Abs(float64(getScore(sol, preciseWeights)-preciseTarget))) > errorMargin {
-			rejected++
 			return
 		}
-		result <- sol
+		results <- sol
 	}
-
-	type state struct {
-		currentSum     int64
-		savedPositions []uint16
-		isRoot         bool
-	}
-	tasks := make(chan state)
 
 	//backtracking
-	var wg sync.WaitGroup
 	var weight int64
-	var backtrack func(int64, []uint16, bool)
-	backtrack = func(sum int64, path []uint16, firstLevel bool) {
+	var backtrack func(int64, []uint16)
+	backtrack = func(sum int64, path []uint16) {
+		var ok bool
 		if int64(math.Abs(float64(sum))) <= roundingError {
-			constructSolution(path)
+			validateSolution(path)
 			return
 		}
 		tail := make(map[int64][]uint16)
-		pointers, ok := table[sum]
-		if ok {
-			tail[sum] = pointers
-		}
-		// Due to the loss of precision with either rounding or floating point, the sum in the table might be
-		// slightly different.
-		if !ok || (firstLevel && roundedMode) {
+		tail[sum], ok = table[sum]
+		if !ok {
+			// Due to the loss of precision with either rounding or floating point, the sum in the table might be
+			// slightly different.
 			for w := sum - roundingError; w < sum+roundingError; w++ {
 				if w == sum {
 					continue
@@ -170,44 +158,84 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 				if locusAlreadyInSlice(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
 					continue
 				}
-				if slices.Equal(path, []uint16{54}) ||
-					slices.Equal(path, []uint16{54, 48}) ||
-					slices.Equal(path, []uint16{54, 48, 45}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32, 30}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32, 30, 26}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32, 30, 26, 25}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32, 30, 26, 25, 11}) ||
-					slices.Equal(path, []uint16{54, 48, 45, 34, 32, 30, 26, 25, 11, 4}) {
-					fmt.Printf("Found path: %v + %d, sum %d\n", path, p, w)
-				}
 				newPath := make([]uint16, len(path)+1)
 				copy(newPath, path)
 				newPath[len(path)] = p
 				weight = weights[p/2] * (1 + int64(p%2))
-				tasks <- state{currentSum: w - weight, savedPositions: newPath, isRoot: false}
-				//backtrack(w-weight, newPath, false)
+				backtrack(w-weight, newPath)
 			}
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	backtrack(target, make([]uint16, 0), true)
-	//backtrack(125234066, make([]uint16, 0), true, numThreads)
-	wg.Wait()
-	fmt.Printf("Rejected %d solutions\n", rejected)
 
-	//sf, err := os.OpenFile(fmt.Sprintf("solutions_%s.txt", s.p.PgsID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	//if err != nil {
-	//	log.Printf("Error opening solutions file: %v\n", err)
-	//	return nil
-	//}
-	//defer sf.Close()
-	//_, err = sf.WriteString(fmt.Sprintf("%s\n", ArrayToString(sol)))
-	//if err != nil {
-	//	log.Printf("Error writing %s to solutions file: %v\n", ArrayToString(sol), err)
-	//}
+	var wg sync.WaitGroup
+	type state struct {
+		sum       int64
+		positions []uint16
+	}
+	taskChan := make(chan state)
+	traverser := func(tasks <-chan state) {
+		for task := range tasks {
+			backtrack(task.sum, task.positions)
+			wg.Done()
+		}
+	}
+
+	for i := 0; i < numThreads; i++ {
+		go traverser(taskChan)
+	}
+
+	start := make(map[int64][]uint16)
+	count := 0
+	pointers, exists := table[target]
+	if exists {
+		start[target] = pointers
+		count += len(pointers)
+	}
+	if !exists || roundedMode {
+		//for w := target - roundingError; w < target+roundingError; w++ {
+		for w := target - roundingError; w < target; w++ {
+			//if w == target {
+			//	continue
+			//}
+			if pos, exists := table[w]; exists {
+				start[w] = pos
+				count += len(pos)
+			}
+		}
+	}
+	fmt.Println(start)
+	go func() {
+		if target != 0 {
+			wg.Add(count)
+			for w, pts := range start {
+				for _, p := range pts {
+					taskChan <- state{sum: w - weights[p/2]*(1+int64(p%2)), positions: []uint16{p}}
+				}
+			}
+		} else {
+			wg.Add(1)
+			taskChan <- state{sum: target, positions: []uint16{}}
+		}
+		wg.Wait()
+		close(results)
+		close(taskChan)
+	}()
+
 	solutions := make(map[string][]uint8)
+	for res := range results {
+		//sf, err := os.OpenFile(fmt.Sprintf("solutions_%s.txt", s.p.PgsID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		//if err != nil {
+		//	log.Printf("Error opening solutions file: %v\n", err)
+		//	return nil
+		//}
+		//defer sf.Close()
+		//_, err = sf.WriteString(fmt.Sprintf("%s\n", ArrayToString(sol)))
+		//if err != nil {
+		//	log.Printf("Error writing %s to solutions file: %v\n", ArrayToString(sol), err)
+		//}
+		solutions[ArrayToString(res)] = res
+	}
+
 	return solutions
 }
 

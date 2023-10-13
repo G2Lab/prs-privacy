@@ -16,17 +16,18 @@ import (
 )
 
 func main() {
-	//likelihoodEffect()
+	likelihoodEffect()
 	//samples()
 	//distribution()
-	findAllSolutions()
+	//findAllSolutions()
 }
 
 func likelihoodEffect() {
 	p := pgs.NewPGS()
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -35,16 +36,21 @@ func likelihoodEffect() {
 	p.LoadStats()
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
-	samples := cohort.SortByScore()
-	//samples := allSamples()
+	//samples := cohort.SortByScore()
+	samples := allSamples()
 	//
-	chunkNum := 0
-	chunkSize := 200
-	if len(os.Args) > 1 {
+	var chunkNum, chunkSize = 0, 0
+	if len(os.Args) > 2 {
 		chunkNum, err = strconv.Atoi(os.Args[1])
 		if err != nil {
-			log.Fatalf("Error parsing chunkNum number %s: %v", os.Args[1], err)
+			log.Fatalf("Error parsing chunkNum %s: %v", os.Args[1], err)
 		}
+		chunkSize, err = strconv.Atoi(os.Args[2])
+		if err != nil {
+			log.Fatalf("Error parsing chunkSize %s: %v", os.Args[2], err)
+		}
+	} else {
+		chunkSize = len(samples)
 	}
 	// Create csv result file
 	filename := fmt.Sprintf("%s-%d.csv", p.PgsID, chunkNum)
@@ -158,15 +164,16 @@ func findAllSolutions() {
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
 	//
-	INDIVIDUAL := "HG01029"
+	INDIVIDUAL := "HG00266"
+	//INDIVIDUAL := "NA18613"
 
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(catalogFile)
 	if err != nil {
@@ -222,11 +229,9 @@ func getNumThreads() int {
 		if err != nil {
 			log.Fatalf("Error parsing numCpus %s: %v\n", params.NumCpusEnv, err)
 		}
-		num = 1
 	} else {
 		//log.Printf("Could not read numCpus env %s\n", params.NumCpusEnv)
-		//num = 16
-		num = 1
+		num = 16
 	}
 	return num
 }
