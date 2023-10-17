@@ -40,7 +40,7 @@ func NewSolver(ctx context.Context, target float64, p *pgs.PGS, numThreads int) 
 func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	var roundedMode = false
 	var multiplier float64
-	var roundingError int64 = 1
+	var roundingError int64 = 0
 	var errorMargin int64 = 1
 	var preciseTarget int64
 	var preciseWeights []int64
@@ -68,13 +68,19 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 	for i, w := range s.p.Weights {
 		weights[i] = int64(w * multiplier)
 	}
-	targetLeft := target - roundingError
-	//targetRight := target + roundingError
-	targetRight := target
 	maxTotalPositive, maxTotalNegative := getMaxTotal(weights)
+	targetLeft := target - roundingError
+	var targetRight int64
+	var remainingMinValues []int64
+	if maxTotalNegative < 0 {
+		targetRight = target + roundingError
+		remainingMinValues = make([]int64, len(weights))
+	} else {
+		targetRight = target
+		remainingMinValues = findNextPositiveMins(weights)
+	}
 	upperBound := targetRight - maxTotalNegative
 	lowerBound := targetLeft - maxTotalPositive
-	remainingMinValues := findNextPositiveMins(weights)
 
 	//fmt.Printf("Target: %d±%d\n", target, roundingError)
 	//fmt.Printf("Weights: %v\n", weights)
@@ -94,6 +100,7 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		} else {
 			upperBound += pgs.NumHaplotypes * weights[i]
 		}
+		//fmt.Printf("%d) upper: %d, lower: %d, min: %d\n", i, upperBound, lowerBound, remainingMinValues[i])
 		existingSums := make([]int64, 0, len(table))
 		for w := range table {
 			existingSums = append(existingSums, w)
@@ -192,11 +199,11 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 		count += len(pointers)
 	}
 	if !exists || roundedMode {
-		//for w := target - roundingError; w < target+roundingError; w++ {
-		for w := target - roundingError; w < target; w++ {
-			//if w == target {
-			//	continue
-			//}
+		for w := targetLeft; w < targetRight; w++ {
+			//for w := target - roundingError; w < target; w++ {
+			if w == target {
+				continue
+			}
 			if pos, exists := table[w]; exists {
 				start[w] = pos
 				count += len(pos)
@@ -238,6 +245,30 @@ func (s *Solver) DP(numThreads int) map[string][]uint8 {
 
 	return solutions
 }
+
+//if (i == 0 && k == 1 && nextSum == weights[i]) ||
+//(i == 1 && k == 2 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 3 && k == 1 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 4 && k == 1 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 6 && k == 1 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 7 && k == 2 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 8 && k == 1 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 9 && k == 2 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 13 && k == 2 && nextSum == example+weights[i]*int64(k)) ||
+//(i == 14 && k == 1 && nextSum == example+weights[i]*int64(k)) {
+//fmt.Printf("\t%da Adding %d: %d\n", i, nextSum, uint16(pgs.NumHaplotypes*i+k-1))
+//}
+
+//if slices.Equal(newPath, []uint16{28}) ||
+//slices.Equal(newPath, []uint16{28, 27}) ||
+//slices.Equal(newPath, []uint16{28, 27, 19}) ||
+//slices.Equal(newPath, []uint16{29, 27, 19, 16}) ||
+//slices.Equal(newPath, []uint16{29, 27, 19, 16, 14}) ||
+//slices.Equal(newPath, []uint16{29, 27, 19, 16, 14, 12}) ||
+//slices.Equal(newPath, []uint16{29, 27, 19, 16, 14, 12, 10}) ||
+//slices.Equal(newPath, []uint16{29, 27, 19, 16, 14, 12, 10, 7}) {
+//fmt.Printf("Path: %v\n", newPath)
+//}
 
 func locusAlreadyInSlice(v uint16, array []uint16) bool {
 	for _, a := range array {

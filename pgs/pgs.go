@@ -393,3 +393,8 @@ func (p *PGS) AllMajorSample() []uint8 {
 	}
 	return sample
 }
+
+func (p *PGS) AllZeroSample() []uint8 {
+	sample := make([]uint8, 2*len(p.Weights))
+	return sample
+}
