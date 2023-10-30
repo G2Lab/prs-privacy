@@ -1,5 +1,6 @@
 import csv
 import fnmatch
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -128,24 +129,128 @@ def score_to_likelihood(pgs_id, num_snps):
         with open(filepath, 'r') as file:
             reader = csv.reader(file)
             for row in reader:
+                if len(row) < 3:
+                    continue
                 label, score, likelihood, *distro = row
                 labels.append(label)
                 scores.append(float(score))
                 likelihoods.append(float(likelihood))
-                distribution.append(list(map(lambda x: float(x), distro)))
+                if len(distro) > 0:
+                    distribution.append(list(map(lambda x: float(x) if x else 0.0, distro)))
+                else:
+                    distribution.append([])
 
+    print("Number of samples: ", len(scores))
+    transparency = 1
+    marker_size = 0.5
     plt.scatter(scores, likelihoods, color='black', s=1, label="Correct solutions")
-    plt.scatter([scores[0] for x in range(0, len(distribution[0]))], distribution[0], alpha=0.05, color='moccasin',
-                s=0.2, label="Incorrect solutions")
+    plt.scatter([scores[0] for x in range(0, len(distribution[0]))], distribution[0], alpha=transparency, color='moccasin',
+                s=marker_size, label="Incorrect solutions")
     for i in range(1, len(scores)):
-        plt.scatter([scores[i] for x in range(0, len(distribution[i]))], distribution[i], alpha=0.05, color='moccasin',
-                    s=0.2)
-    plt.title(pgs_id + f" ({num_snps} SNPs)")
+        plt.scatter([scores[i] for x in range(0, len(distribution[i]))], distribution[i], alpha=transparency, color='moccasin',
+                    s=marker_size)
+    plt.title(pgs_id + f" ({num_snps} variants)")
     plt.xlabel("Score")
     plt.ylabel("Solution likelihood")
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+
+def score_to_likelihood_position(pgs_id, num_snps):
+    directory = "results/scoreLikelihood/"
+    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+                 fnmatch.fnmatch(filename, f"*{pgs_id}*")]
+    labels = []
+    scores = []
+    likelihoods = []
+    distribution = []
+    for filepath in filepaths:
+        with open(filepath, 'r') as file:
+            reader = csv.reader(file)
+            for row in reader:
+                if len(row) < 3:
+                    continue
+                label, score, likelihood, *distro = row
+                labels.append(label)
+                scores.append(float(score))
+                likelihoods.append(float(likelihood))
+                if len(distro) > 0:
+                    distribution.append(list(map(lambda x: float(x) if x else 0.0, distro)))
+                else:
+                    distribution.append([])
+
+    print("Number of samples: ", len(scores))
+    proximity = []
+    for i in range(0, len(scores)):
+        if len(distribution[i]) > 0:
+            position = bisect(sorted(distribution[i], reverse=True), likelihoods[i])
+        else:
+            position = 0
+        proximity.append(float(position)*100/float(len(distribution[i])+1))
+        # print(f"{position}/{len(distribution[i])+1}", end=" ")
+
+    plt.scatter(scores, proximity, color='sandybrown', s=1, label="Correct solutions")
+    plt.title(pgs_id + f" ({num_snps} variants)")
+    plt.xlabel("Score")
+    plt.ylabel("True solution in the top X% by likelihood")
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig(pgs_id + '-pos.pdf')
+
+
+def bisect(array, value):
+    for i in range(0, len(array)):
+        if array[i] <= value:
+            return i
+    return len(array)
+
+
+def accuracy_likelihood(pgs_id):
+    directory = "results/accuracyLikelihood/"
+    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+                 fnmatch.fnmatch(filename, f"*{pgs_id}-s-eaf*")]
+    scores, accuracies, likelihoods = [], [], []
+    chosen_acc, chosen_like = [], []
+    true_like = []
+    lowest_index = 0
+    lowest_like, lowest_like_acc = [], []
+    for filepath in filepaths:
+        with open(filepath, 'r') as file:
+            for row in file:
+                row = row.strip()
+                data = json.loads(row)
+                scores.append(float(data["Score"]))
+                chosen_acc.append(float(data["Accuracies"][0]))
+                chosen_like.append(float(data["Likelihoods"][0]))
+                acc = list(map(lambda x: float(x), data["Accuracies"]))
+                true_like.append(float(data["Likelihoods"][acc.index(1.0)]))
+                lowest_index = acc.index(min(acc))
+                lowest_like.append(float(data["Likelihoods"][lowest_index]))
+                lowest_like_acc.append(float(data["Accuracies"][lowest_index]))
+                # if len(data["Accuracies"]) > 1:
+                #     accuracies.append(list(map(lambda x: float(x), data["Accuracies"][1:])))
+                #     likelihoods.append(list(map(lambda x: float(x), data["Likelihoods"][1:])))
+                # else:
+                #     accuracies.append([])
+                #     likelihoods.append([])
+
+    plt.scatter(chosen_like, chosen_acc, color='black', s=1, label="Chosen solutions")
+    # plt.scatter(true_like, [1.0 for x in range(0, len(true_like))], color='turquoise', alpha=0.2, s=0.5, label="True solutions")
+    # plt.scatter(lowest_like, lowest_like_acc, color='salmon', alpha=0.2, s=0.5, label="Lowest-likelihood solutions")
+    plt.scatter(true_like, [1.0 for x in range(0, len(true_like))], color='turquoise', alpha=0.5, s=1, label="True solutions")
+    plt.scatter(lowest_like, lowest_like_acc, color='salmon', alpha=0.5, s=1, label="Lowest-likelihood solutions")
+    # for i in range(0, len(scores)):
+    #     plt.scatter(likelihoods[i], accuracies[i], alpha=0.05, color='moccasin', s=0.1)
+    plt.title(pgs_id)
+    plt.xlabel("Likelihood")
+    plt.ylabel("Accuracy")
+    lgnd = plt.legend()
+    for i in range(0, len(lgnd.legend_handles)):
+        lgnd.legend_handles[i].set_sizes([10])
+    plt.tight_layout()
+    plt.show()
+    # plt.savefig(pgs_id + '-eaf.pdf')
 
 
 if __name__ == "__main__":
@@ -156,4 +261,16 @@ if __name__ == "__main__":
     # solution_ranking("PGS000073")
     # solution_ranking("PGS000037")
     # score_to_likelihood("PGS000037", 15)
-    score_to_likelihood("PGS000639", 20)
+    # score_to_likelihood("PGS000073", 10)
+    # score_to_likelihood("PGS000639", 20)
+    # score_to_likelihood("PGS002302", 28)
+    # score_to_likelihood("PGS001827", 33)
+    # score_to_likelihood_position("PGS002302", 28)
+    # score_to_likelihood_position("PGS000073", 10)
+    # score_to_likelihood_position("PGS000037", 15)
+    # score_to_likelihood_position("PGS000639", 20)
+    # score_to_likelihood_position("PGS001827", 33)
+    # accuracy_likelihood("PGS000639")
+    # accuracy_likelihood("PGS000073")
+    # accuracy_likelihood("PGS000037")
+    accuracy_likelihood("PGS002302")

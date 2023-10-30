@@ -16,12 +16,15 @@ import (
 
 const (
 	numCPUs       = 22
-	readBatchSize = 10000
+	readBatchSize = 50000
 )
 
 var alleleVariants = []string{"0", "1"}
 
-const MAJOR_ALLELE = "0"
+const (
+	MajorAllele = "0"
+	MinorAllele = "1"
+)
 
 func getAllChromosomePositions(chr int) ([]string, error) {
 	// Get all the SNP positions for this chromosome
@@ -37,6 +40,7 @@ func getAllChromosomePositions(chr int) ([]string, error) {
 	return positions[:len(positions)-1], nil
 }
 
+// Calculate Minor Allele Frequency (effect allele) for each SNP
 func calculateMAF() {
 	// first we send a command without -r and obtain all the positions in the file
 	// then we query row by row and compute frequencies for each allele
@@ -52,7 +56,7 @@ func calculateMAF() {
 			}
 			writer := csv.NewWriter(file)
 			// Write header
-			err = writer.Write([]string{"position", "major allele likelihood"})
+			err = writer.Write([]string{"position", "minor allele likelihood"})
 			if err != nil {
 				log.Fatalf("Error writing header to file chr%d.csv: %v\n", chr, err)
 			}
@@ -102,7 +106,7 @@ func calculateMAF() {
 						}
 					}
 					err = writer.Write(append([]string{fmt.Sprintf("%s", positions[i+k])}, fmt.Sprintf("%.5f",
-						float64(counts[MAJOR_ALLELE])/float64(total))))
+						float64(counts[MinorAllele])/float64(total))))
 					if err != nil {
 						log.Printf("Error writing to file chr%d.csv: %v\n", chr, err)
 						return
@@ -114,6 +118,7 @@ func calculateMAF() {
 			if err != nil {
 				log.Printf("Error closing file chr%d.csv: %v\n", chr, err)
 			}
+			fmt.Printf("Chromosome %d complete\n", chr)
 			wg.Done()
 		}(chromosome)
 		if nRoutines++; nRoutines == numCPUs {

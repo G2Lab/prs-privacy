@@ -8,6 +8,7 @@ import (
 	"github.com/nikirill/prs/params"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"path"
 	"strconv"
@@ -35,8 +36,9 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	NumHaplotypes = 2
-	ErrorMargin   = 1e-14
+	NumHaplotypes                 = 2
+	ErrorMargin                   = 1e-14
+	MissingEffectAlleleLikelihood = 0.0004
 )
 
 var GENOTYPES = []uint8{0, 1}
@@ -55,6 +57,14 @@ func NewVariant(fields map[string]interface{}) *Variant {
 			fields["effect_weight"] = value
 		} else {
 			log.Printf("Error parsing weight %s: %s", weight, err)
+		}
+	}
+
+	if frequency, ok := fields["allelefrequency_effect"].(string); ok {
+		if value, err := strconv.ParseFloat(frequency, 64); err == nil {
+			fields["allelefrequency_effect"] = value
+		} else {
+			log.Printf("Error parsing frequency %s: %s", frequency, err)
 		}
 	}
 
@@ -87,6 +97,14 @@ func (v *Variant) GetWeight() float64 {
 	return 0.0
 }
 
+func (v *Variant) GetEffectAlleleFrequency() float64 {
+	if eaf, ok := v.fields["allelefrequency_effect"].(float64); ok {
+		return eaf
+	}
+	//log.Fatalf("EAF not found for variant %s", v.GetLocus())
+	return 0.0
+}
+
 type PGS struct {
 	PgsID           string
 	TraitName       string
@@ -100,7 +118,8 @@ type PGS struct {
 	Loci            []string
 	Weights         []float64
 	WeightPrecision int
-	Maf             [][]float64
+	Maf             [][]float64 // [major, minor] allele frequency from the population
+	Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
 }
 
 func NewPGS() *PGS {
@@ -171,8 +190,10 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 		return err
 	}
 	p.Weights = make([]float64, len(p.Loci))
+	p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()
+		p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
 	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
@@ -220,56 +241,14 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 }
 
 func (p *PGS) LoadStats() {
-	p.LoadMAF()
+	p.loadMAF()
 }
 
-func (p *PGS) LoadMAF() {
+func (p *PGS) loadMAF() {
 	filename := fmt.Sprintf("%s/%s.maf", params.DataFolder, p.PgsID)
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
-		file, err := os.Create(filename)
-		if err != nil {
-			log.Printf("Error creating priors file: %v", err)
-			return
-		}
-		defer file.Close()
-		writer := csv.NewWriter(file)
-		writer.Write([]string{"chromosome", "position", "MAF"})
-		for _, locus := range p.Loci {
-			chr, pos := tools.SplitLocus(locus)
-			f, err := os.Open(fmt.Sprintf("data/prior/chr%s.csv", chr))
-			if err != nil {
-				log.Printf("Error opening file chr%s.csv: %s", chr, err)
-				continue
-			}
-			reader := csv.NewReader(f)
-			// Read header
-			_, err = reader.Read()
-			if err != nil {
-				fmt.Printf("Error reading MAF file chr%s.csv: %v", chr, err)
-				continue
-			}
-			found := false
-			for {
-				row, err := reader.Read()
-				if err != nil {
-					break // Reached end of file or encountered an error
-				}
-				if row[0] != pos {
-					continue
-				}
-				writer.Write([]string{chr, pos, row[1]})
-				found = true
-				break
-			}
-			if !found {
-				writer.Write([]string{chr, pos, "0.99999"})
-				log.Printf("No MAF found for locus %s", locus)
-			}
-			f.Close()
-			writer.Flush()
-		}
-		file.Close()
+		p.retrieveMAF(filename)
 	}
 	mafFile, err := os.Open(filename)
 	if err != nil {
@@ -290,52 +269,125 @@ func (p *PGS) LoadMAF() {
 		if err != nil {
 			break // Reached end of file or encountered an error
 		}
-		likelihood, err := strconv.ParseFloat(row[2], 64)
+		effectLikelihood, err := strconv.ParseFloat(row[2], 64)
 		if err != nil {
 			log.Printf("Error converting %s to float: %v", row[2], err)
 			continue
 		}
-		p.Maf = append(p.Maf, []float64{likelihood, 1 - likelihood})
+		if effectLikelihood == 0 {
+			effectLikelihood = MissingEffectAlleleLikelihood
+		}
+		p.Maf = append(p.Maf, []float64{1 - effectLikelihood, effectLikelihood})
 	}
 }
 
-func (p *PGS) MutateGenome(original []uint8, delta float64) [][]uint8 {
+// Retrieve Minor-Allele Frequency for each variant from the database
+func (p *PGS) retrieveMAF(filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Error creating priors file: %v", err)
+		return
+	}
+	defer file.Close()
+	writer := csv.NewWriter(file)
+	writer.Write([]string{"chromosome", "position", "MAF"})
+	for _, locus := range p.Loci {
+		chr, pos := tools.SplitLocus(locus)
+		f, err := os.Open(fmt.Sprintf("data/prior/chr%s.csv", chr))
+		if err != nil {
+			log.Printf("Error opening file chr%s.csv: %s", chr, err)
+			continue
+		}
+		reader := csv.NewReader(f)
+		// Read header
+		_, err = reader.Read()
+		if err != nil {
+			fmt.Printf("Error reading MAF file chr%s.csv: %v", chr, err)
+			continue
+		}
+		found := false
+		for {
+			row, err := reader.Read()
+			if err != nil {
+				break // Reached end of file or encountered an error
+			}
+			if row[0] != pos {
+				continue
+			}
+			writer.Write([]string{chr, pos, row[1]})
+			found = true
+			break
+		}
+		if !found {
+			writer.Write([]string{chr, pos, "0.00000"})
+			log.Printf("No MAF found for locus %s", locus)
+		}
+		f.Close()
+		writer.Flush()
+	}
+	file.Close()
+}
+
+func (p *PGS) MutateGenome(original []uint8, delta float64) ([]uint8, float64) {
+	indices := p.ShuffleIndicesByLikelihood(original)
+	if len(indices) != len(original) {
+		log.Fatalf("Error shuffling indices: %d != %d", len(indices), len(original))
+	}
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	mutated := make([][]uint8, 0, 1)
-	tmp := 0.0
-	for i := 0; i < len(original)/NumHaplotypes; i++ {
+	newDelta := 0.0
+	for _, i := range indices {
+		for _, v := range GENOTYPES {
+			if v == original[i] {
+				continue
+			}
+			// If new SNP = 0 and original SNP = 1, delta = delta - weight.
+			// If new SNP = 1 and original SNP = 0, delta = delta + weight.
+			newDelta = delta + float64(v-original[i])*p.Weights[i/NumHaplotypes]
+			if math.Abs(newDelta) <= ErrorMargin {
+				original[i] = v
+				return original, newDelta
+			}
+			probabilities[i] = 1 / math.Abs(newDelta)
+			mutations[i] = v
+		}
+	}
+	mutationId := tools.SampleFromDistribution(probabilities)
+	newDelta = delta + float64(mutations[mutationId]-original[mutationId])*p.Weights[mutationId/NumHaplotypes]
+	original[mutationId] = mutations[mutationId]
+	return original, newDelta
+}
+
+// ShuffleIndicesByLikelihood shuffles index order by the likelihood of alternative allele.
+// It ensures that if there are several solutions away from the current delta, we tend to pick the one with the highest
+// likelihood, but it is still randomized.
+func (p *PGS) ShuffleIndicesByLikelihood(original []uint8) []int {
+	var lkl float64
+	weightedIndices := make([]int, 0)
+	for i, maf := range p.Maf {
 		for j := 0; j < NumHaplotypes; j++ {
-			tmp = delta - float64(original[NumHaplotypes*i+j])*p.Weights[i]
-			for _, v := range GENOTYPES {
-				if v == original[NumHaplotypes*i+j] {
-					continue
-				}
-				//if tmp+float64(v)*p.Weights[i] == 0 {
-				if math.Abs(tmp+float64(v)*p.Weights[i]) <= ErrorMargin {
-					match := make([]uint8, len(original))
-					copy(match, original)
-					match[NumHaplotypes*i+j] = v
-					mutated = append(mutated, match)
-					continue
-				}
-				//probabilities[NumHaplotypes*i+j] = 1 / math.Abs(tmp+float64(v)*p.Weights[i])
-				probabilities[NumHaplotypes*i+j] = p.Maf[i][v]
-				mutations[NumHaplotypes*i+j] = v
+			weightedIndices = append(weightedIndices, NumHaplotypes*i+j)
+			lkl = 1 - maf[original[NumHaplotypes*i+j]]
+			for k := 0; k < int(lkl*100); k++ {
+				weightedIndices = append(weightedIndices, NumHaplotypes*i+j)
 			}
 		}
 	}
-	if len(mutated) > 0 {
-		// we found solutions so no need to sample
-		return mutated
+	rand.Shuffle(len(weightedIndices), func(i, j int) {
+		weightedIndices[i], weightedIndices[j] = weightedIndices[j], weightedIndices[i]
+	})
+	indices := make([]int, 0, len(original))
+	unique := make(map[int]struct{})
+	for _, v := range weightedIndices {
+		if _, exists := unique[v]; !exists {
+			indices = append(indices, v)
+			unique[v] = struct{}{}
+		}
 	}
-	mutationId := tools.SampleFromDistribution(probabilities)
-	original[mutationId] = mutations[mutationId]
-	mutated = append(mutated, original)
-	return mutated
+	return indices
 }
 
-// Sample according to the MAF
+// SampleFromPopulation samples a candidate according to the MAF
 func (p *PGS) SampleFromPopulation() ([]uint8, error) {
 	sample := make([]uint8, p.VariantCount*NumHaplotypes)
 	// Initial sample based on individual priors
@@ -367,11 +419,21 @@ func (p *PGS) SampleUniform() ([]uint8, error) {
 }
 
 func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
-	likelihood := 1.0
+	//likelihood := 1.0
+	likelihood := 0.0
 	for i := range p.Loci {
 		for j := 0; j < NumHaplotypes; j++ {
 			likelihood += math.Log(p.Maf[i][sequence[i*NumHaplotypes+j]])
+			//likelihood += math.Log(p.Eaf[i][sequence[i*NumHaplotypes+j]])
 		}
+	}
+	return likelihood
+}
+
+func (p *PGS) SnpLikelihood(sequence []uint8, i int) float64 {
+	likelihood := 0.0
+	for j := 0; j < NumHaplotypes; j++ {
+		likelihood += math.Log(p.Maf[i][sequence[i*NumHaplotypes+j]])
 	}
 	return likelihood
 }
@@ -391,10 +453,5 @@ func (p *PGS) AllMajorSample() []uint8 {
 			sample[2*i+1] = 1
 		}
 	}
-	return sample
-}
-
-func (p *PGS) AllZeroSample() []uint8 {
-	sample := make([]uint8, 2*len(p.Weights))
 	return sample
 }
