@@ -2,12 +2,14 @@ package pgs
 
 import (
 	"fmt"
+	"github.com/nikirill/prs/params"
+	"path"
 	"testing"
 )
 
 func TestPGSLoad(t *testing.T) {
 	p := NewPGS()
-	err := p.LoadCatalogFile("PGS000073_hmPOS_GRCh38.txt")
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, "PGS000073_hmPOS_GRCh38.txt"))
 	if err != nil {
 		fmt.Println("Error:", err)
 		return

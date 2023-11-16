@@ -253,6 +253,64 @@ def accuracy_likelihood(pgs_id):
     # plt.savefig(pgs_id + '-eaf.pdf')
 
 
+def true_position_cdf(pgs_ids):
+    colors = ['dodgerblue', 'limegreen', 'tomato', 'blueviolet']
+    directory = "results/accuracyLikelihood/"
+    positions = []
+    for pgs in pgs_ids:
+        filepath = os.path.join(directory, pgs+".json")
+        with open(filepath, 'r') as file:
+            for row in file:
+                row = row.strip()
+                data = json.loads(row)
+                accuracy = list(map(lambda x: float(x), data["Accuracies"]))
+                positions.append(float(accuracy.index(1.0))/float(len(accuracy)))
+
+        spos = [pos*100 for pos in np.sort(positions)]
+        cdf = np.arange(1, len(spos) + 1) / len(spos)
+        plt.plot(spos, cdf, label=pgs, linewidth=2, color=colors[pgs_ids.index(pgs)])
+
+    # plt.title("CDF for the likelihood position of the true solution")
+    plt.xlabel("Selected solution in the top X% by likelihood", fontsize=16)
+    plt.ylabel("Fraction", fontsize=16)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.legend()
+    plt.tight_layout()
+    plt.grid(True)
+    # plt.show()
+    plt.savefig('cdf.pdf')
+
+
+def accuracy_cdf(pgs_ids):
+    colors = ['firebrick', 'sandybrown', 'forestgreen', 'mediumorchid']
+    directory = "results/accuracyLikelihood/"
+    accuracy = []
+    for pgs in pgs_ids:
+        filepath = os.path.join(directory, pgs+".json")
+        with open(filepath, 'r') as file:
+            for row in file:
+                row = row.strip()
+                data = json.loads(row)
+                accuracy.append(float(data["Accuracies"][0]))
+
+        spos = [pos for pos in np.sort(accuracy)]
+        cdf = np.arange(1, len(spos) + 1) / len(spos)
+        plt.plot(spos, cdf, label=pgs, linewidth=2, color=colors[pgs_ids.index(pgs)])
+
+    # plt.title("CDF for the likelihood position of the true solution")
+    plt.xlabel("Top-solution accuracy", fontsize=16)
+    plt.ylabel("Fraction", fontsize=16)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.gca().invert_xaxis()
+    plt.legend()
+    plt.tight_layout()
+    plt.grid(True)
+    # plt.show()
+    plt.savefig('accuracy.pdf')
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -273,4 +331,6 @@ if __name__ == "__main__":
     # accuracy_likelihood("PGS000639")
     # accuracy_likelihood("PGS000073")
     # accuracy_likelihood("PGS000037")
-    accuracy_likelihood("PGS002302")
+    # accuracy_likelihood("PGS002302")
+    # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
+    accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])

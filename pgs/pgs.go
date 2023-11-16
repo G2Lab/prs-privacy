@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 
@@ -129,7 +128,7 @@ func NewPGS() *PGS {
 }
 
 func (p *PGS) LoadCatalogFile(inputFile string) error {
-	file, err := os.Open(path.Join(params.DataFolder, inputFile))
+	file, err := os.Open(inputFile)
 	if err != nil {
 		return err
 	}
@@ -138,6 +137,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	headerInProgress := true
 	maxPrecision := 0
 	scanner := bufio.NewScanner(file)
+scannerLoop:
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -164,19 +164,36 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 					log.Printf("Error parsing variants number %s: %s", fields[1], err)
 				}
 			}
-			continue
+			continue scannerLoop
 		}
 
 		// Specified variant fields
 		if headerInProgress {
 			p.Fieldnames = strings.Split(line, "\t")
 			headerInProgress = false
-			continue
+			continue scannerLoop
 		}
 
 		fields := make(map[string]interface{})
 		values := strings.Split(line, "\t")
 		for i, value := range values {
+			if p.Fieldnames[i] == "hm_chr" {
+				if strings.Contains(value, "_") {
+					value = strings.Split(value, "_")[0]
+					if value == "Un" {
+						for j := 0; j < len(p.Fieldnames); j++ {
+							if p.Fieldnames[j] == "chr_name" {
+								value = values[j]
+								break
+							}
+						}
+					}
+				}
+				//// If there is no mapping, we skip the variant
+				//if len(value) == 0 {
+				//	continue scannerLoop
+				//}
+			}
 			fields[p.Fieldnames[i]] = value
 		}
 		if maxPrecision < getPrecision(fields["effect_weight"].(string)) {
@@ -196,7 +213,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 		p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
-	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
+	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	if err := scanner.Err(); err != nil {
 		return err
@@ -206,6 +223,15 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 }
 
 func getPrecision(value string) int {
+	if strings.Contains(value, "e") {
+		exp := len(strings.Split(value, "e")[0]) - 1
+		mnt, err := strconv.Atoi(strings.Split(value, "e")[1][1:])
+		if err != nil {
+			log.Printf("Error parsing mantissa %s: %v", value, err)
+			return 0
+		}
+		return exp + mnt
+	}
 	return len(strings.Split(value, ".")[1])
 }
 
@@ -218,13 +244,13 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 		minIndex := i
 		minChr, minPos, err := tools.ParseLocus(sortedLoc[minIndex])
 		if err != nil {
-			log.Printf("Error parsing locus %s: %v", sortedLoc[minIndex], err)
+			log.Printf("Error parsing initial locus %s: %v", sortedLoc[minIndex], err)
 			return nil, err
 		}
 		for j := i + 1; j < len(sortedLoc); j++ {
 			chr, pos, err := tools.ParseLocus(sortedLoc[j])
 			if err != nil {
-				log.Printf("Error parsing locus %s: %v", sortedLoc[minIndex], err)
+				log.Printf("Error parsing locus %s: %v", sortedLoc[j], err)
 				return nil, err
 			}
 			if chr < minChr || (chr == minChr && pos < minPos) {
@@ -248,7 +274,7 @@ func (p *PGS) loadMAF() {
 	filename := fmt.Sprintf("%s/%s.maf", params.DataFolder, p.PgsID)
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
-		p.retrieveMAF(filename)
+		p.assembleMAF(filename)
 	}
 	mafFile, err := os.Open(filename)
 	if err != nil {
@@ -282,7 +308,7 @@ func (p *PGS) loadMAF() {
 }
 
 // Retrieve Minor-Allele Frequency for each variant from the database
-func (p *PGS) retrieveMAF(filename string) {
+func (p *PGS) assembleMAF(filename string) {
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating priors file: %v", err)
@@ -322,40 +348,9 @@ func (p *PGS) retrieveMAF(filename string) {
 			writer.Write([]string{chr, pos, "0.00000"})
 			log.Printf("No MAF found for locus %s", locus)
 		}
-		f.Close()
 		writer.Flush()
+		f.Close()
 	}
-	file.Close()
-}
-
-func (p *PGS) MutateGenome(original []uint8, delta float64) ([]uint8, float64) {
-	indices := p.ShuffleIndicesByLikelihood(original)
-	if len(indices) != len(original) {
-		log.Fatalf("Error shuffling indices: %d != %d", len(indices), len(original))
-	}
-	mutations := make([]uint8, len(original))
-	probabilities := make([]float64, len(original))
-	newDelta := 0.0
-	for _, i := range indices {
-		for _, v := range GENOTYPES {
-			if v == original[i] {
-				continue
-			}
-			// If new SNP = 0 and original SNP = 1, delta = delta - weight.
-			// If new SNP = 1 and original SNP = 0, delta = delta + weight.
-			newDelta = delta + float64(v-original[i])*p.Weights[i/NumHaplotypes]
-			if math.Abs(newDelta) <= ErrorMargin {
-				original[i] = v
-				return original, newDelta
-			}
-			probabilities[i] = 1 / math.Abs(newDelta)
-			mutations[i] = v
-		}
-	}
-	mutationId := tools.SampleFromDistribution(probabilities)
-	newDelta = delta + float64(mutations[mutationId]-original[mutationId])*p.Weights[mutationId/NumHaplotypes]
-	original[mutationId] = mutations[mutationId]
-	return original, newDelta
 }
 
 // ShuffleIndicesByLikelihood shuffles index order by the likelihood of alternative allele.

@@ -157,3 +157,13 @@ func diploidToSum(diploid []int) []int {
 	}
 	return sum
 }
+
+func findMin(values []float64) float64 {
+	minV := values[0]
+	for _, v := range values {
+		if v < minV {
+			minV = v
+		}
+	}
+	return minV
+}

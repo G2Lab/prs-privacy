@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"log"
 	"math/rand"
 )
 
@@ -16,6 +17,7 @@ func SampleFromDistribution(distribution []float64) int {
 			return k
 		}
 	}
+	log.Printf("Unsuccessful sampling from distribution: %v", distribution)
 	return -1
 }
 
