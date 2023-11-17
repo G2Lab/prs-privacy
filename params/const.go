@@ -8,5 +8,5 @@ const NumCpusEnv = "SLURM_CPUS_PER_TASK"
 
 const (
 	PrecisionsLimit = 8
-	FloatPrecision  = 13
+	FloatPrecision  = 14
 )

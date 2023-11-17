@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -20,11 +21,11 @@ func main() {
 	//scoreToLikelihoodDistribution()
 	//scoreToLikelihood()
 	//accuracyLikelihood()
-	//findAllSolutions()
+	findAllSolutions()
 	//samples()
 	//distribution()
 	//evaluateReferences()
-	evaluateGA()
+	//evaluateGA()
 }
 
 type Result struct {
@@ -480,9 +481,9 @@ func distribution() {
 }
 
 func findAllSolutions() {
-	//INDIVIDUAL := "NA18595"
+	INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
-	INDIVIDUAL := "HG02215" // highest score for PGS000040
+	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
@@ -493,9 +494,9 @@ func findAllSolutions() {
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
@@ -514,9 +515,9 @@ func findAllSolutions() {
 	ctx, cancel := context.WithCancel(context.Background())
 	slv := solver.NewDP(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
 
-	majorReference := p.AllMajorSample()
-	fmt.Printf("Accuracy with major: %f\n",
-		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
+	//majorReference := p.AllMajorSample()
+	//fmt.Printf("Accuracy with major: %f\n",
+	//	solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
 
 	solmap := slv.Solve(numThreads)
 	//solmap := slv.solve(numThreads)
@@ -528,30 +529,31 @@ func findAllSolutions() {
 	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
 	//	p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Major likelihood: %f\n", p.CalculateSequenceLikelihood(majorReference))
-	//sum := int64(0)
-	//multiplier := math.Pow(10, params.PrecisionsLimit)
-	//for i := 0; i < 2*len(p.Weights); i++ {
-	//	switch cohort[INDIVIDUAL].Genotype[i] {
-	//	case 0:
-	//		continue
-	//	case 1:
-	//		sum += int64(p.Weights[i/2] * multiplier)
-	//	}
-	//}
+	sum := int64(0)
+	multiplier := math.Pow(10, params.PrecisionsLimit)
+	for i := 0; i < 2*len(p.Weights); i++ {
+		switch cohort[INDIVIDUAL].Genotype[i] {
+		case 0:
+			continue
+		case 1:
+			sum += int64(p.Weights[i/2] * multiplier)
+		}
+	}
 	//fmt.Printf("True sum: %d\n", sum)
-	//fmt.Printf("Guessed %d:\n", len(solutions))
-	////fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
-	////	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
-	////	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
-	//for _, solution := range solutions {
-	//	fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-	//		cohort[INDIVIDUAL].Score-solver.CalculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
-	//}
 	fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	fmt.Printf("Guessed %d:\n", len(solutions))
+	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
+	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
+	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
 	for _, solution := range solutions {
-		fmt.Printf("%s (acc %.3f)\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype))
+		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			cohort[INDIVIDUAL].Score-solver.CalculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
 	}
+	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
+	//fmt.Printf("Guessed %d:\n", len(solutions))
+	//for _, solution := range solutions {
+	//	fmt.Printf("%s (acc %.3f)\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype))
+	//}
 }
 
 func getNumThreads() int {
