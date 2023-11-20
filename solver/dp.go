@@ -73,7 +73,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	if rounder.RoundedMode && (maxTotalNegativeLeft < 0 || maxTotalNegativeRight < 0) {
 		roundingErrorRight = roundingErrorLeft
 	}
-	//fmt.Println(roundingErrorRight)
+	fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
+	fmt.Printf("Multiplier: %f\n", multiplier)
+	fmt.Printf("Target: %d\n", target)
 
 	tableLeft := calculateSubsetSumsTable(betasLeft, target-maxTotalNegativeRight, target-maxTotalPositiveRight-maxTotalPositiveLeft)
 	tableRight := calculateSubsetSumsTable(betasRight, target-maxTotalNegativeLeft, target-maxTotalPositiveLeft-maxTotalPositiveRight)
@@ -102,10 +104,20 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 				//for _, beta := range tableLeft[t-rightSum] {
 				//	fmt.Printf("[%d, %d] ", beta.Pos, beta.Weight)
 				//}
-				start := make([]uint16, 0)
-				rightHalfSolutions := backtrack(start, rightSum, tableRight, false, rounder)
+				right, left := make([]uint16, 0), make([]uint16, 0)
+				rightHalfSolutions := backtrack(right, rightSum, tableRight, rounder)
+				leftHalfSolutions := backtrack(left, t-rightSum, tableLeft, rounder)
 				for _, rightHalfSolution := range rightHalfSolutions {
-					subsets = append(subsets, backtrack(rightHalfSolution, t-rightSum, tableLeft, true, rounder)...)
+					for _, leftHalfSolution := range leftHalfSolutions {
+						joint := append(leftHalfSolution, rightHalfSolution...)
+						if rounder.RoundedMode {
+							preciseSum := lociToScore(joint, rounder.Weights)
+							if int64(math.Abs(float64(preciseSum-rounder.Target))) > rounder.ErrorMargin {
+								continue
+							}
+						}
+						subsets = append(subsets, joint)
+					}
 				}
 			}
 		}
@@ -117,44 +129,6 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		solutions[ArrayToString(sol)] = sol
 	}
 	return solutions
-
-	////backtracking
-	//var weight int64
-	//var backtrack func(int64, []uint16)
-	//backtrack = func(sum int64, path []uint16) {
-	//	var ok bool
-	//	if int64(math.Abs(float64(sum))) <= roundingError {
-	//		validateSolution(path)
-	//		return
-	//	}
-	//	tail := make(map[int64][]uint16)
-	//	tail[sum], ok = table[sum]
-	//	if !ok {
-	//		// Due to the loss of precision with either rounding or floating point, the sum in the table might be
-	//		// slightly different.
-	//		for w := sum - roundingError; w < sum+roundingError; w++ {
-	//			if w == sum {
-	//				continue
-	//			}
-	//			if pos, exists := table[w]; exists {
-	//				tail[w] = pos
-	//			}
-	//		}
-	//	}
-	//	for w, pts := range tail {
-	//		for _, p := range pts {
-	//			// Make sure that we do not have paths with two values for the same snp
-	//			if locusAlreadyExists(p, path) || (len(path) > 0 && p > path[len(path)-1]) {
-	//				continue
-	//			}
-	//			newPath := make([]uint16, len(path)+1)
-	//			copy(newPath, path)
-	//			newPath[len(path)] = p
-	//			weight = weights[p/2] * (1 + int64(p%2))
-	//			backtrack(w-weight, newPath)
-	//		}
-	//	}
-	//}
 
 	//var wg sync.WaitGroup
 	//type state struct {
@@ -233,7 +207,7 @@ func calculateSubsetSumsTable(betas []*Beta, upperBound, lowerBound int64) map[i
 	table[0] = make([]*Beta, 0)
 	var prevSum, nextSum int64
 	for i := 0; i < len(betas); i += pgs.NumHaplotypes {
-		//fmt.Printf("Position %d/%d\n", i+1, len(betas))
+		fmt.Printf("Position %d/%d\n", i/2+1, len(betas)/2)
 		if betas[i].Weight > 0 {
 			lowerBound += betas[i].Weight
 		}
@@ -256,14 +230,8 @@ func calculateSubsetSumsTable(betas []*Beta, upperBound, lowerBound int64) map[i
 	return table
 }
 
-func backtrack(path []uint16, sum int64, table map[int64][]*Beta, validation bool, rounder *Rounder) [][]uint16 {
+func backtrack(path []uint16, sum int64, table map[int64][]*Beta, rounder *Rounder) [][]uint16 {
 	if int64(math.Abs(float64(sum))) <= rounder.RounderError {
-		if validation && rounder.RoundedMode {
-			preciseSum := lociToScore(path, rounder.Weights)
-			if int64(math.Abs(float64(preciseSum-rounder.Target))) > rounder.ErrorMargin {
-				return nil
-			}
-		}
 		return [][]uint16{path}
 	}
 	output := make([][]uint16, 0)
@@ -274,7 +242,7 @@ func backtrack(path []uint16, sum int64, table map[int64][]*Beta, validation boo
 		newState := make([]uint16, len(path)+1)
 		copy(newState, path)
 		newState[len(path)] = beta.Pos
-		if res := backtrack(newState, sum-beta.Weight, table, validation, rounder); res != nil {
+		if res := backtrack(newState, sum-beta.Weight, table, rounder); res != nil {
 			output = append(output, res...)
 		}
 	}

@@ -59,13 +59,13 @@ func NewVariant(fields map[string]interface{}) *Variant {
 		}
 	}
 
-	if frequency, ok := fields["allelefrequency_effect"].(string); ok {
-		if value, err := strconv.ParseFloat(frequency, 64); err == nil {
-			fields["allelefrequency_effect"] = value
-		} else {
-			log.Printf("Error parsing frequency %s: %s", frequency, err)
-		}
-	}
+	//if frequency, ok := fields["allelefrequency_effect"].(string); ok {
+	//	if value, err := strconv.ParseFloat(frequency, 64); err == nil {
+	//		fields["allelefrequency_effect"] = value
+	//	} else {
+	//		log.Printf("Error parsing frequency %s: %s", frequency, err)
+	//	}
+	//}
 
 	for _, field := range ALL_FIELDS {
 		if _, exists := fields[field]; !exists {
@@ -118,7 +118,7 @@ type PGS struct {
 	Weights         []float64
 	WeightPrecision int
 	Maf             [][]float64 // [major, minor] allele frequency from the population
-	Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
+	//Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
 }
 
 func NewPGS() *PGS {
@@ -189,10 +189,10 @@ scannerLoop:
 						}
 					}
 				}
-				//// If there is no mapping, we skip the variant
-				//if len(value) == 0 {
-				//	continue scannerLoop
-				//}
+				// If there is no mapping, we skip the variant
+				if len(value) == 0 {
+					continue scannerLoop
+				}
 			}
 			fields[p.Fieldnames[i]] = value
 		}
@@ -202,15 +202,16 @@ scannerLoop:
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
-	p.Loci, err = p.GetSortedVariantLoci()
-	if err != nil {
-		return err
-	}
+	p.Loci = p.GetUnSortedVariantLoci()
+	//p.Loci, err = p.GetSortedVariantLoci()
+	//if err != nil {
+	//	return err
+	//}
 	p.Weights = make([]float64, len(p.Loci))
-	p.Eaf = make([][]float64, len(p.Loci))
+	//p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()
-		p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
+		//p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
 	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
@@ -224,13 +225,16 @@ scannerLoop:
 
 func getPrecision(value string) int {
 	if strings.Contains(value, "e") {
-		exp := len(strings.Split(value, "e")[0]) - 1
-		mnt, err := strconv.Atoi(strings.Split(value, "e")[1][1:])
+		expLen := len(strings.Split(value, "e")[0]) - 1
+		mntLen, err := strconv.Atoi(strings.Split(value, "e")[1][1:])
 		if err != nil {
 			log.Printf("Error parsing mantissa %s: %v", value, err)
 			return 0
 		}
-		return exp + mnt
+		return expLen + mntLen
+	}
+	if !strings.Contains(value, ".") {
+		return 0
 	}
 	return len(strings.Split(value, ".")[1])
 }
@@ -264,6 +268,14 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 		}
 	}
 	return sortedLoc, nil
+}
+
+func (p *PGS) GetUnSortedVariantLoci() []string {
+	loci := make([]string, 0, len(p.Variants))
+	for locus := range p.Variants {
+		loci = append(loci, locus)
+	}
+	return loci
 }
 
 func (p *PGS) LoadStats() {

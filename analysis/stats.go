@@ -37,6 +37,7 @@ func listFiles(folderPath string) ([]string, error) {
 }
 
 func main() {
+	var err error
 	catalog := "catalog"
 	fileNames, err := listFiles(catalog)
 	if err != nil {
@@ -44,14 +45,26 @@ func main() {
 		return
 	}
 	//fmt.Println(fileNames[:10])
-	//N := 100
+	N := 1000
 	numVariants := make([]float64, 0)
-	for _, fileName := range fileNames {
+	for _, fileName := range fileNames[:N] {
 		fmt.Println(fileName)
 		p := pgs.NewPGS()
-		p.LoadCatalogFile(filepath.Join(catalog, fileName))
+		err = p.LoadCatalogFile(filepath.Join(catalog, fileName))
+		if err != nil {
+			log.Println("Error:", err)
+			return
+		}
 		numVariants = append(numVariants, float64(p.VariantCount))
 	}
-	median, err := stats.Median(numVariants)
-	fmt.Printf("Median number of SNPs per PGS: %d\n", int(median))
+	var mean, median float64
+	median, err = stats.Median(numVariants)
+	if err != nil {
+		log.Println("Median error:", err)
+	}
+	mean, err = stats.Mean(numVariants)
+	if err != nil {
+		log.Println("Mean error:", err)
+	}
+	fmt.Printf("Median and mean number of SNPs per PGS: %d, %d\n", int(median), int(mean))
 }
