@@ -45,9 +45,9 @@ func main() {
 		return
 	}
 	//fmt.Println(fileNames[:10])
-	N := 1000
+	//N := 1000
 	numVariants := make([]float64, 0)
-	for _, fileName := range fileNames[:N] {
+	for _, fileName := range fileNames {
 		fmt.Println(fileName)
 		p := pgs.NewPGS()
 		err = p.LoadCatalogFile(filepath.Join(catalog, fileName))

@@ -2,9 +2,11 @@ package solver
 
 import (
 	"fmt"
-	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/params"
 	"log"
 	"strings"
+
+	"github.com/nikirill/prs/pgs"
 )
 
 type Solver interface {
@@ -139,7 +141,7 @@ func SortByLikelihood(solutions map[string][]uint8, p *pgs.PGS) [][]uint8 {
 	return flattened
 }
 
-func sortBy(items [][]uint8, properties []float64) {
+func sortBy[T, P params.Ordered](items [][]T, properties []P) {
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
 			if properties[i] < properties[j] {

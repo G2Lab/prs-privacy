@@ -202,11 +202,11 @@ scannerLoop:
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
-	p.Loci = p.GetUnSortedVariantLoci()
-	//p.Loci, err = p.GetSortedVariantLoci()
-	//if err != nil {
-	//	return err
-	//}
+	//p.Loci = p.GetUnSortedVariantLoci()
+	p.Loci, err = p.GetSortedVariantLoci()
+	if err != nil {
+		return err
+	}
 	p.Weights = make([]float64, len(p.Loci))
 	//p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
