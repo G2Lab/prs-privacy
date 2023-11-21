@@ -2,10 +2,11 @@ package solver
 
 import (
 	"fmt"
-	"github.com/nikirill/prs/params"
 	"log"
+	"math/big"
 	"strings"
 
+	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 )
 
@@ -13,32 +14,15 @@ type Solver interface {
 	Solve(numThreads int) map[string][]uint8
 }
 
-//func CalculateScore(snps []int, weights []float64) float64 {
-//	score := 0.0
-//	for i := 0; i < len(snps); i++ {
-//			switch snps[i] {
-//			case 0:
-//				continue
-//			case 1:
-//				score += weights[i]
-//			case 2:
-//				score += weights[i] + weights[i]
-//			default:
-//				log.Printf("Invalid alelle value: %d", snps[i])
-//			}
-//	}
-//	return score
-//}
-
-func CalculateScore(snps []uint8, weights []float64) float64 {
-	score := 0.0
+func CalculateScore(snps []uint8, weights []*big.Rat) *big.Rat {
+	score := new(big.Rat).SetInt64(0)
 	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
 		for j := 0; j < pgs.NumHaplotypes; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
 			case 1:
-				score += weights[i/2]
+				score.Add(score, weights[i/2])
 			default:
 				log.Printf("Invalid alelle value: %d", snps[i+j])
 			}
@@ -46,19 +30,6 @@ func CalculateScore(snps []uint8, weights []float64) float64 {
 	}
 	return score
 }
-
-//func Accuracy(solution []int, target []int) float64 {
-//	if len(solution) != len(target) {
-//		return 0.0
-//	}
-//	acc := 0.0
-//	for i := 0; i < len(solution); i++ {
-//		if solution[i] == target[i] {
-//			acc++
-//		}
-//	}
-//	return acc / float64(len(solution))
-//}
 
 func Accuracy(solution []uint8, target []uint8) float64 {
 	if len(solution) != len(target) {

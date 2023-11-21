@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
+	"math/big"
 	"os"
 	"path"
 	"strconv"
@@ -35,10 +35,10 @@ type Result struct {
 	Likelihoods []string
 }
 
-func NewResult(ind string, score float64) *Result {
+func NewResult(ind string, score *big.Rat) *Result {
 	return &Result{
 		Individual:  ind,
-		Score:       fmt.Sprintf("%.3f", score),
+		Score:       score.FloatString(3),
 		Accuracies:  make([]string, 0),
 		Likelihoods: make([]string, 0),
 	}
@@ -51,65 +51,65 @@ type Reference struct {
 	Accuracies []string
 }
 
-func NewReference(id string, score float64, likelihood float64) *Reference {
+func NewReference(id string, score *big.Rat, likelihood float64) *Reference {
 	return &Reference{
 		ID:         id,
-		Score:      fmt.Sprintf("%.3f", score),
+		Score:      score.FloatString(15),
 		Likelihood: fmt.Sprintf("%.3f", likelihood),
 		Accuracies: make([]string, 0),
 	}
 }
 
-func evaluateGA() {
-	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
-	//INDIVIDUAL := "HG02215" // highest score for PGS000040
-	//INDIVIDUAL := "HG02728" // middle 648
-	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
-	//
-	//INDIVIDUAL := "HG01028"
-	//INDIVIDUAL := "NA18531"
-	//INDIVIDUAL := "NA20872"
-
-	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
-	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
-	if err != nil {
-		log.Printf("Error loading catalog file: %v\n", err)
-		return
-	}
-	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
-	p.LoadStats()
-	cohort := solver.NewCohort(p)
-
-	slv := solver.NewGenetic(cohort[INDIVIDUAL].Score, cohort[INDIVIDUAL].Genotype, p)
-
-	solmap := slv.Solve(1)
-	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
-		cohort[INDIVIDUAL].Score-solver.CalculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
-		p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
-	fmt.Printf("Major:\n%s -- %f, %f\n", solver.ArrayToString(p.AllMajorSample()),
-		cohort[INDIVIDUAL].Score-solver.CalculateScore(p.AllMajorSample(), p.Weights),
-		p.CalculateSequenceLikelihood(p.AllMajorSample()))
-	fmt.Printf("Guessed %d:\n", len(solutions))
-	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
-	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
-	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
-	for _, solution := range solutions {
-		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			cohort[INDIVIDUAL].Score-solver.CalculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
-	}
-}
+//func evaluateGA() {
+//	//INDIVIDUAL := "NA18595"
+//	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+//	//INDIVIDUAL := "HG02215" // highest score for PGS000040
+//	//INDIVIDUAL := "HG02728" // middle 648
+//	//INDIVIDUAL := "NA19780" // high 648
+//	//INDIVIDUAL := "HG00551" // low 648
+//	//
+//	//INDIVIDUAL := "HG01028"
+//	//INDIVIDUAL := "NA18531"
+//	//INDIVIDUAL := "NA20872"
+//
+//	p := pgs.NewPGS()
+//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
+//	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+//	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+//	if err != nil {
+//		log.Printf("Error loading catalog file: %v\n", err)
+//		return
+//	}
+//	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
+//	p.LoadStats()
+//	cohort := solver.NewCohort(p)
+//
+//	slv := solver.NewGenetic(cohort[INDIVIDUAL].Score, cohort[INDIVIDUAL].Genotype, p)
+//
+//	solmap := slv.Solve(1)
+//	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
+//	fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
+//		cohort[INDIVIDUAL].Score-solver.CalculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
+//		p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
+//	fmt.Printf("Major:\n%s -- %f, %f\n", solver.ArrayToString(p.AllMajorSample()),
+//		cohort[INDIVIDUAL].Score-solver.CalculateScore(p.AllMajorSample(), p.Weights),
+//		p.CalculateSequenceLikelihood(p.AllMajorSample()))
+//	fmt.Printf("Guessed %d:\n", len(solutions))
+//	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
+//	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
+//	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
+//	for _, solution := range solutions {
+//		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
+//			cohort[INDIVIDUAL].Score-solver.CalculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+//	}
+//}
 
 func evaluateReferences() {
 	resFolder := "results"
@@ -262,76 +262,76 @@ func scoreToLikelihood() {
 	cancel()
 }
 
-func scoreToLikelihoodDistribution() {
-	resFolder := "results/scoreLikelihood"
-	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
-	if err != nil {
-		log.Printf("Error loading catalog file: %v\n", err)
-		return
-	}
-	p.LoadStats()
-	//fmt.Printf("%s\n", p.PgsID)
-	cohort := solver.NewCohort(p)
-	sorted := cohort.SortByScore()
-	numSamples := 5 * 2
-	step := (cohort[sorted[len(sorted)-1]].Score - cohort[sorted[0]].Score) / (float64(numSamples) * 10 / 6)
-	samples := make([]string, 0, numSamples)
-	for i := 0; i < len(sorted); i++ {
-		if len(samples) == numSamples {
-			break
-		}
-		if cohort[sorted[i]].Score >= cohort[sorted[0]].Score+float64(len(samples))*step {
-			samples = append(samples, sorted[i])
-			score := cohort[sorted[i]].Score
-			for {
-				i++
-				if i >= len(sorted) {
-					break
-				}
-				if cohort[sorted[i]].Score != score {
-					samples = append(samples, sorted[i])
-					break
-				}
-			}
-		}
-	}
-	for _, sample := range samples {
-		fmt.Printf("%s(%.3f) ", sample, cohort[sample].Score)
-	}
-	// Create csv result file
-	filepath := path.Join(resFolder, fmt.Sprintf("%s-distro.csv", p.PgsID))
-	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Error opening result file: %v", err)
-	}
-	defer resFile.Close()
-	writer := csv.NewWriter(resFile)
-	defer writer.Flush()
-	ctx, cancel := context.WithCancel(context.Background())
-	numThreads := getNumThreads()
-	for _, sample := range samples {
-		fmt.Printf("%s\n", sample)
-		output := []string{sample, fmt.Sprintf("%.3f", cohort[sample].Score)}
-		slv := solver.NewDP(ctx, cohort[sample].Score, p, numThreads)
-		solmap := slv.Solve(numThreads)
-		solutions := solver.SortByAccuracy(solmap, cohort[sample].Genotype)
-		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[sample].Genotype) != 1.0 {
-			fmt.Printf("No solution for %s: %s, %.3f\n", sample, solver.ArrayToString(solutions[0]),
-				solver.Accuracy(solutions[0], cohort[sample].Genotype))
-			continue
-		}
-		for _, solution := range solutions {
-			output = append(output, fmt.Sprintf("%.3f", p.CalculateSequenceLikelihood(solution)))
-		}
-		writer.Write(output)
-	}
-	cancel()
-}
+//func scoreToLikelihoodDistribution() {
+//	resFolder := "results/scoreLikelihood"
+//	p := pgs.NewPGS()
+//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+//	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+//	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+//	if err != nil {
+//		log.Printf("Error loading catalog file: %v\n", err)
+//		return
+//	}
+//	p.LoadStats()
+//	//fmt.Printf("%s\n", p.PgsID)
+//	cohort := solver.NewCohort(p)
+//	sorted := cohort.SortByScore()
+//	numSamples := 5 * 2
+//	step := (cohort[sorted[len(sorted)-1]].Score - cohort[sorted[0]].Score) / (float64(numSamples) * 10 / 6)
+//	samples := make([]string, 0, numSamples)
+//	for i := 0; i < len(sorted); i++ {
+//		if len(samples) == numSamples {
+//			break
+//		}
+//		if cohort[sorted[i]].Score >= cohort[sorted[0]].Score+float64(len(samples))*step {
+//			samples = append(samples, sorted[i])
+//			score := cohort[sorted[i]].Score
+//			for {
+//				i++
+//				if i >= len(sorted) {
+//					break
+//				}
+//				if cohort[sorted[i]].Score != score {
+//					samples = append(samples, sorted[i])
+//					break
+//				}
+//			}
+//		}
+//	}
+//	for _, sample := range samples {
+//		fmt.Printf("%s(%.3f) ", sample, cohort[sample].Score)
+//	}
+//	// Create csv result file
+//	filepath := path.Join(resFolder, fmt.Sprintf("%s-distro.csv", p.PgsID))
+//	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+//	if err != nil {
+//		log.Fatalf("Error opening result file: %v", err)
+//	}
+//	defer resFile.Close()
+//	writer := csv.NewWriter(resFile)
+//	defer writer.Flush()
+//	ctx, cancel := context.WithCancel(context.Background())
+//	numThreads := getNumThreads()
+//	for _, sample := range samples {
+//		fmt.Printf("%s\n", sample)
+//		output := []string{sample, fmt.Sprintf("%.3f", cohort[sample].Score)}
+//		slv := solver.NewDP(ctx, cohort[sample].Score, p, numThreads)
+//		solmap := slv.Solve(numThreads)
+//		solutions := solver.SortByAccuracy(solmap, cohort[sample].Genotype)
+//		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[sample].Genotype) != 1.0 {
+//			fmt.Printf("No solution for %s: %s, %.3f\n", sample, solver.ArrayToString(solutions[0]),
+//				solver.Accuracy(solutions[0], cohort[sample].Genotype))
+//			continue
+//		}
+//		for _, solution := range solutions {
+//			output = append(output, fmt.Sprintf("%.3f", p.CalculateSequenceLikelihood(solution)))
+//		}
+//		writer.Write(output)
+//	}
+//	cancel()
+//}
 
 func likelihoodEffect() {
 	resFolder := "results"
@@ -399,13 +399,14 @@ func likelihoodEffect() {
 			}
 		}
 		if acc != 1.0 {
+			diff := new(big.Rat)
 			fmt.Printf("\nNo solution for %s\n", samples[i])
-			fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[samples[i]].Genotype),
-				cohort[samples[i]].Score-solver.CalculateScore(cohort[samples[i]].Genotype, p.Weights),
+			fmt.Printf("\nTrue:\n%s -- %s, %f\n", solver.ArrayToString(cohort[samples[i]].Genotype),
+				diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(cohort[samples[i]].Genotype, p.Weights)).FloatString(12),
 				p.CalculateSequenceLikelihood(cohort[samples[i]].Genotype))
 			for _, sol := range solutions {
-				fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(sol), solver.Accuracy(sol, cohort[samples[i]].Genotype),
-					cohort[samples[i]].Score-solver.CalculateScore(sol, p.Weights), p.CalculateSequenceLikelihood(sol))
+				fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(sol), solver.Accuracy(sol, cohort[samples[i]].Genotype),
+					diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(sol, p.Weights)).FloatString(12), p.CalculateSequenceLikelihood(sol))
 			}
 		}
 	}
@@ -494,8 +495,8 @@ func findAllSolutions() {
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
@@ -529,25 +530,16 @@ func findAllSolutions() {
 	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(cohort[INDIVIDUAL].Genotype, p.Weights),
 	//	p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Major likelihood: %f\n", p.CalculateSequenceLikelihood(majorReference))
-	sum := int64(0)
-	multiplier := math.Pow(10, params.PrecisionsLimit)
-	for i := 0; i < 2*len(p.Weights); i++ {
-		switch cohort[INDIVIDUAL].Genotype[i] {
-		case 0:
-			continue
-		case 1:
-			sum += int64(p.Weights[i/2] * multiplier)
-		}
-	}
-	//fmt.Printf("True sum: %d\n", sum)
+
 	fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
 	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
 	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
 	for _, solution := range solutions {
-		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			cohort[INDIVIDUAL].Score-solver.CalculateScore(solution, p.Weights), p.CalculateSequenceLikelihood(solution))
+		diff := new(big.Rat)
+		fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			diff.Sub(cohort[INDIVIDUAL].Score, solver.CalculateScore(solution, p.Weights)).FloatString(12), p.CalculateSequenceLikelihood(solution))
 	}
 	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Guessed %d:\n", len(solutions))

@@ -4,20 +4,20 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/nikirill/prs/params"
 	"log"
+	"math/big"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
+	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
 )
 
 type Individual struct {
 	Genotype []uint8
-	Score    float64
+	Score    *big.Rat
 }
 
 type Cohort map[string]*Individual
@@ -25,7 +25,7 @@ type Cohort map[string]*Individual
 func NewIndividual() *Individual {
 	return &Individual{
 		Genotype: make([]uint8, 0),
-		Score:    0.0,
+		Score:    new(big.Rat).SetInt64(0),
 	}
 }
 
@@ -86,7 +86,12 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 			}
 			//c[individ].Genotype = append(c[individ].Genotype, allele[0]+allele[1])
 			c[individ].Genotype = append(c[individ].Genotype, allele...)
-			c[individ].Score += float64(allele[0]+allele[1]) * p.Weights[i]
+			if allele[0]+allele[1] > 0 {
+				c[individ].Score.Add(c[individ].Score, p.Weights[i])
+				if allele[0]+allele[1] == 2 {
+					c[individ].Score.Add(c[individ].Score, p.Weights[i])
+				}
+			}
 		}
 	}
 }
@@ -99,7 +104,7 @@ func (c Cohort) SortByScore() []string {
 	for i := 0; i < len(sortedInd)-1; i++ {
 		minIndex := i
 		for j := i + 1; j < len(sortedInd); j++ {
-			if c[sortedInd[j]].Score < c[sortedInd[minIndex]].Score {
+			if c[sortedInd[j]].Score.Cmp(c[sortedInd[minIndex]].Score) == -1 {
 				minIndex = j
 			}
 		}
@@ -143,7 +148,8 @@ func (c Cohort) SaveScores(filename string, precision int) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		writer.Write([]string{ind, fmt.Sprintf(fmt.Sprintf("%%.%df", precision), c[ind].Score)})
+		//writer.Write([]string{ind, fmt.Sprintf(fmt.Sprintf("%%.%df", precision), c[ind].Score)})
+		writer.Write([]string{ind, c[ind].Score.FloatString(precision)})
 	}
 	writer.Flush()
 	return nil
@@ -164,7 +170,8 @@ func (c Cohort) LoadScores(filename string) error {
 		name := record[0]
 		score := record[1]
 		c[name] = NewIndividual()
-		if v, err := strconv.ParseFloat(score, 64); err == nil {
+		v := new(big.Rat)
+		if _, ok := v.SetString(score); ok {
 			c[name].Score = v
 		} else {
 			return err

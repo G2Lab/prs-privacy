@@ -5,14 +5,15 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"github.com/nikirill/prs/params"
 	"log"
 	"math"
+	"math/big"
 	"math/rand"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/tools"
 )
 
@@ -52,10 +53,11 @@ func NewVariant(fields map[string]interface{}) *Variant {
 	}
 
 	if weight, ok := fields["effect_weight"].(string); ok {
-		if value, err := strconv.ParseFloat(weight, 64); err == nil {
+		value := new(big.Rat)
+		if _, ok := value.SetString(weight); ok {
 			fields["effect_weight"] = value
 		} else {
-			log.Printf("Error parsing weight %s: %s", weight, err)
+			log.Printf("Error parsing weight %s: %s", weight, value.RatString())
 		}
 	}
 
@@ -89,11 +91,11 @@ func (v *Variant) GetLocus() string {
 	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
-func (v *Variant) GetWeight() float64 {
-	if weight, ok := v.fields["effect_weight"].(float64); ok {
+func (v *Variant) GetWeight() *big.Rat {
+	if weight, ok := v.fields["effect_weight"].(*big.Rat); ok {
 		return weight
 	}
-	return 0.0
+	return nil
 }
 
 func (v *Variant) GetEffectAlleleFrequency() float64 {
@@ -115,7 +117,7 @@ type PGS struct {
 	Fieldnames      []string
 	Variants        map[string]*Variant
 	Loci            []string
-	Weights         []float64
+	Weights         []*big.Rat
 	WeightPrecision int
 	Maf             [][]float64 // [major, minor] allele frequency from the population
 	//Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
@@ -207,7 +209,7 @@ scannerLoop:
 	if err != nil {
 		return err
 	}
-	p.Weights = make([]float64, len(p.Loci))
+	p.Weights = make([]*big.Rat, len(p.Loci))
 	//p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i] = p.Variants[loc].GetWeight()

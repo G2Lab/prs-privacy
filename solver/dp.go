@@ -7,15 +7,16 @@ import (
 	"github.com/nikirill/prs/pgs"
 	"log"
 	"math"
+	"math/big"
 	"sort"
 )
 
 type DP struct {
-	target float64
+	target *big.Rat
 	p      *pgs.PGS
 }
 
-func NewDP(ctx context.Context, target float64, p *pgs.PGS, numThreads int) *DP {
+func NewDP(ctx context.Context, target *big.Rat, p *pgs.PGS, numThreads int) *DP {
 	s := &DP{
 		target: target,
 		p:      p,
@@ -37,35 +38,23 @@ func newBeta(pos int, weight int64) *Beta {
 
 type Rounder struct {
 	RoundedMode  bool
-	Weights      []int64
-	Target       int64
-	ErrorMargin  int64
 	RounderError int64
 }
 
 func (s *DP) Solve(numThreads int) map[string][]uint8 {
-	var multiplier float64
 	var roundingErrorLeft, roundingErrorRight int64 = 0, 0
 	rounder := new(Rounder)
+	//var multiplier float64
+	multiplier := new(big.Rat).SetFloat64(math.Pow(10, float64(s.p.WeightPrecision)))
 	if s.p.WeightPrecision > params.PrecisionsLimit {
-		multiplier = math.Pow(10, params.PrecisionsLimit)
+		multiplier.SetFloat64(math.Pow(10, params.PrecisionsLimit))
 		roundingErrorLeft = int64(s.p.VariantCount)
-		preciseMultiplier := math.Pow(10, float64(s.p.WeightPrecision))
 		rounder.RoundedMode = true
-		rounder.Target = int64(s.target * preciseMultiplier)
-		rounder.Weights = make([]int64, len(s.p.Weights))
 		rounder.RounderError = roundingErrorLeft
-		for i, w := range s.p.Weights {
-			rounder.Weights[i] = int64(w * preciseMultiplier)
-		}
-		if s.p.WeightPrecision > params.FloatPrecision {
-			rounder.ErrorMargin = 1e3
-		}
-	} else {
-		multiplier = math.Pow(10, float64(s.p.WeightPrecision))
 	}
 
-	target := int64(s.target * multiplier)
+	tf, _ := new(big.Rat).Mul(s.target, multiplier).Float64()
+	target := int64(tf)
 	betasLeft := betasFromWeights(s.p.Weights[:len(s.p.Weights)/2], 0, multiplier)
 	betasRight := betasFromWeights(s.p.Weights[len(s.p.Weights)/2:], pgs.NumHaplotypes*(len(s.p.Weights)/2), multiplier)
 	maxTotalPositiveLeft, maxTotalNegativeLeft := getMaxTotal(betasLeft)
@@ -74,7 +63,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		roundingErrorRight = roundingErrorLeft
 	}
 	fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
-	fmt.Printf("Multiplier: %d\n", int64(multiplier))
+	//fmt.Printf("Multiplier: %f, \n", multiplier.Float64())
 	fmt.Printf("Target: %d\n", target)
 
 	tableLeft := calculateSubsetSumsTable(betasLeft, target-maxTotalNegativeRight-maxTotalNegativeLeft,
@@ -94,9 +83,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		}
 	}
 	fmt.Printf("Target: %d\n", target)
-	lowestAbsoluteLikelihood := math.MaxFloat64
+	//lowestAbsoluteLikelihood := math.MaxFloat64
+	//var lkl float64
 	subsets := make([][]uint16, 0)
-	var lkl float64
 	for rightSum := range tableRight {
 		for _, t := range targets {
 			if _, ok := tableLeft[t-rightSum]; ok {
@@ -107,16 +96,17 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 					for _, leftHalfSolution := range leftHalfSolutions {
 						joint := append(leftHalfSolution, rightHalfSolution...)
 						if rounder.RoundedMode {
-							preciseSum := lociToScore(joint, rounder.Weights)
-							if int64(math.Abs(float64(preciseSum-rounder.Target))) > rounder.ErrorMargin {
+							preciseSum := lociToScore(joint, s.p.Weights)
+							if preciseSum.Cmp(s.target) != 0 {
 								continue
 							}
 						}
-						lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
-						if lkl <= lowestAbsoluteLikelihood {
-							subsets = append(subsets, joint)
-							lowestAbsoluteLikelihood = lkl
-						}
+						subsets = append(subsets, joint)
+						//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+						//if lkl <= lowestAbsoluteLikelihood {
+						//	subsets = append(subsets, joint)
+						//	lowestAbsoluteLikelihood = lkl
+						//}
 					}
 				}
 			}
@@ -313,12 +303,13 @@ func getMaxTotal(betas []*Beta) (int64, int64) {
 	return lower, upper
 }
 
-func betasFromWeights(weights []float64, startIdx int, multiplier float64) []*Beta {
+func betasFromWeights(weights []*big.Rat, startIdx int, multiplier *big.Rat) []*Beta {
 	indices := sortedIndices(weights)
 	betas := make([]*Beta, len(weights)*pgs.NumHaplotypes)
 	for i, pos := range indices {
 		for j := 0; j < pgs.NumHaplotypes; j++ {
-			betas[pgs.NumHaplotypes*i+j] = newBeta(startIdx+pgs.NumHaplotypes*pos+j, int64(j+1)*int64(weights[pos]*multiplier))
+			tmp, _ := new(big.Rat).Mul(weights[pos], multiplier).Float64()
+			betas[pgs.NumHaplotypes*i+j] = newBeta(startIdx+pgs.NumHaplotypes*pos+j, int64(j+1)*int64(tmp))
 		}
 	}
 	return betas
@@ -337,12 +328,12 @@ func betasToScore(betas []*Beta, weights []int64) int64 {
 	return score
 }
 
-func lociToScore(loci []uint16, weights []int64) int64 {
-	var score int64 = 0
+func lociToScore(loci []uint16, weights []*big.Rat) *big.Rat {
+	score := new(big.Rat).SetInt64(0)
 	for _, locus := range loci {
-		score += weights[locus/2]
+		score.Add(score, weights[locus/2])
 		if locus%pgs.NumHaplotypes == 1 {
-			score += weights[locus/2]
+			score.Add(score, weights[locus/2])
 		}
 	}
 	return score
@@ -359,7 +350,7 @@ func lociToGenotype(loci []uint16, total int) []uint8 {
 	return sol
 }
 
-func sortedIndices(values []float64) []int {
+func sortedIndices(values []*big.Rat) []int {
 	// Create a slice of indices.
 	indices := make([]int, len(values))
 	for i := range indices {
@@ -368,7 +359,11 @@ func sortedIndices(values []float64) []int {
 
 	// Sort the indices based on the values.
 	sort.Slice(indices, func(i, j int) bool {
-		return values[indices[i]] < values[indices[j]]
+		if values[indices[i]].Cmp(values[indices[j]]) < 0 {
+			return true
+		} else {
+			return false
+		}
 	})
 
 	return indices
