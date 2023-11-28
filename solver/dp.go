@@ -83,8 +83,8 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		}
 	}
 	fmt.Printf("Target: %d\n", target)
-	//lowestAbsoluteLikelihood := math.MaxFloat64
-	//var lkl float64
+	lowestAbsoluteLikelihood := math.MaxFloat64
+	var lkl float64
 	subsets := make([][]uint16, 0)
 	for rightSum := range tableRight {
 		for _, t := range targets {
@@ -101,12 +101,12 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 								continue
 							}
 						}
-						subsets = append(subsets, joint)
-						//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
-						//if lkl <= lowestAbsoluteLikelihood {
-						//	subsets = append(subsets, joint)
-						//	lowestAbsoluteLikelihood = lkl
-						//}
+						//subsets = append(subsets, joint)
+						lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+						if lkl <= lowestAbsoluteLikelihood {
+							subsets = append(subsets, joint)
+							lowestAbsoluteLikelihood = lkl
+						}
 					}
 				}
 			}
