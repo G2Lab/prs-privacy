@@ -88,8 +88,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	//lowestAbsoluteLikelihood := math.MaxFloat64
 	//var lkl float64
 	subsets := make([][]uint16, 0)
-	for rightSum := range table {
-		for _, t := range targets {
+	for j, t := range targets {
+		fmt.Printf("Target %d/%d\n", j+1, len(targets))
+		for rightSum := range table {
 			if _, ok := table[t-rightSum]; ok {
 				right, left := make([]uint16, 0), make([]uint16, 0)
 				rightHalfSolutions := backtrack(right, rightSum, table, betas, rounder)
@@ -198,7 +199,7 @@ func calculateSubsetSumsTable(betas []int64, upperBound, lowerBound int64) map[i
 		}
 		for _, prevSum = range existingSums {
 			nextSum = prevSum + betas[i]
-			if nextSum <= upperBound && nextSum >= lowerBound {
+			if nextSum >= lowerBound && nextSum <= upperBound {
 				if _, ok := table[nextSum]; !ok {
 					table[nextSum] = make([]uint16, 0)
 				}
@@ -216,7 +217,6 @@ func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights []int
 	output := make([][]uint16, 0)
 	for _, ptr := range table[sum] {
 		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
-			//if locusAlreadyExists(ptr, path) {
 			continue
 		}
 		newState := make([]uint16, len(path)+1)
