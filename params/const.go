@@ -7,6 +7,6 @@ const ITERATIONS = 5000
 const NumCpusEnv = "SLURM_CPUS_PER_TASK"
 
 const (
-	PrecisionsLimit = 8
-	FloatPrecision  = 14
+	PrecisionsLimit     = 8
+	PrecisionLimitPrime = 99999989
 )

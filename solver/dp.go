@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"github.com/nikirill/prs/params"
@@ -44,7 +45,6 @@ type Rounder struct {
 func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	var roundingErrorLeft, roundingErrorRight int64 = 0, 0
 	rounder := new(Rounder)
-	//var multiplier float64
 	multiplier := new(big.Rat).SetFloat64(math.Pow(10, float64(s.p.WeightPrecision)))
 	if s.p.WeightPrecision > params.PrecisionsLimit {
 		multiplier.SetFloat64(math.Pow(10, params.PrecisionsLimit))
@@ -55,22 +55,24 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 
 	tf, _ := new(big.Rat).Mul(s.target, multiplier).Float64()
 	target := int64(tf)
-	betasLeft := betasFromWeights(s.p.Weights[:len(s.p.Weights)/2], 0, multiplier)
-	betasRight := betasFromWeights(s.p.Weights[len(s.p.Weights)/2:], pgs.NumHaplotypes*(len(s.p.Weights)/2), multiplier)
-	maxTotalPositiveLeft, maxTotalNegativeLeft := getMaxTotal(betasLeft)
-	maxTotalPositiveRight, maxTotalNegativeRight := getMaxTotal(betasRight)
-	if rounder.RoundedMode && (maxTotalNegativeLeft < 0 || maxTotalNegativeRight < 0) {
+	betas := betasFromWeights(s.p.Weights, multiplier)
+	maxTotalPositive, maxTotalNegative := getMaxTotal(betas)
+	if rounder.RoundedMode && maxTotalNegative < 0 {
 		roundingErrorRight = roundingErrorLeft
 	}
 	fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
-	//fmt.Printf("Multiplier: %f, \n", multiplier.Float64())
 	fmt.Printf("Target: %d\n", target)
 
-	tableLeft := calculateSubsetSumsTable(betasLeft, target-maxTotalNegativeRight-maxTotalNegativeLeft,
-		target-maxTotalPositiveRight-maxTotalPositiveLeft)
-	tableRight := calculateSubsetSumsTable(betasRight, target-maxTotalNegativeLeft-maxTotalNegativeRight,
-		target-maxTotalPositiveLeft-maxTotalPositiveRight)
-	fmt.Printf("%d, %d\n", len(tableLeft), len(tableRight))
+	//splitIdx := len(s.p.Weights) / 2
+	//betasLeft, betasRight := betas[:splitIdx], betas[splitIdx:]
+	//tableLeft := calculateSubsetSumsTable(betasLeft, target-maxTotalNegative,
+	//	target-maxTotalPositive)
+	//tableRight := calculateSubsetSumsTable(betasRight, target-maxTotalNegative,
+	//	target-maxTotalPositive)
+	//fmt.Printf("%d, %d\n", len(tableLeft), len(tableRight))
+
+	table := calculateSubsetSumsTable(betas, target-maxTotalNegative, target-maxTotalPositive)
+	fmt.Printf("%d\n", len(table))
 
 	// Combine and backtrack
 	targets := []int64{target}
@@ -82,16 +84,18 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 			targets = append(targets, w)
 		}
 	}
-	fmt.Printf("Target: %d\n", target)
-	lowestAbsoluteLikelihood := math.MaxFloat64
-	var lkl float64
+
+	//lowestAbsoluteLikelihood := math.MaxFloat64
+	//var lkl float64
 	subsets := make([][]uint16, 0)
-	for rightSum := range tableRight {
+	for rightSum := range table {
 		for _, t := range targets {
-			if _, ok := tableLeft[t-rightSum]; ok {
+			if _, ok := table[t-rightSum]; ok {
 				right, left := make([]uint16, 0), make([]uint16, 0)
-				rightHalfSolutions := backtrack(right, rightSum, tableRight, rounder)
-				leftHalfSolutions := backtrack(left, t-rightSum, tableLeft, rounder)
+				rightHalfSolutions := backtrack(right, rightSum, table, betas, rounder)
+				rightHalfSolutions = selectTopLikelihoodCandidates(rightHalfSolutions, len(s.p.Weights), s.p, 50)
+				leftHalfSolutions := backtrack(left, t-rightSum, table, betas, rounder)
+				leftHalfSolutions = selectTopLikelihoodCandidates(leftHalfSolutions, len(s.p.Weights), s.p, 50)
 				for _, rightHalfSolution := range rightHalfSolutions {
 					for _, leftHalfSolution := range leftHalfSolutions {
 						joint := append(leftHalfSolution, rightHalfSolution...)
@@ -101,12 +105,12 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 								continue
 							}
 						}
-						//subsets = append(subsets, joint)
-						lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
-						if lkl <= lowestAbsoluteLikelihood {
-							subsets = append(subsets, joint)
-							lowestAbsoluteLikelihood = lkl
-						}
+						subsets = append(subsets, joint)
+						//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+						//if lkl <= lowestAbsoluteLikelihood {
+						//	subsets = append(subsets, joint)
+						//	lowestAbsoluteLikelihood = lkl
+						//}
 					}
 				}
 			}
@@ -175,64 +179,120 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumsTable(betas []*Beta, upperBound, lowerBound int64) map[int64][]*Beta {
+func calculateSubsetSumsTable(betas []int64, upperBound, lowerBound int64) map[int64][]uint16 {
 	// Fill out the table using dynamic programming
-	table := make(map[int64][]*Beta)
+	table := make(map[int64][]uint16)
 	// add the zero weight
-	table[0] = make([]*Beta, 0)
+	table[0] = make([]uint16, 0)
 	var prevSum, nextSum int64
-	for i := 0; i < len(betas); i += pgs.NumHaplotypes {
-		fmt.Printf("Position %d/%d\n", i/2+1, len(betas)/2)
-		if betas[i].Weight > 0 {
-			lowerBound += betas[i].Weight
+	for i := 0; i < len(betas); i++ {
+		fmt.Printf("Position %d/%d\n", i+1, len(betas))
+		if betas[i] > 0 {
+			lowerBound += betas[i]
 		} else {
-			upperBound += betas[i].Weight
+			upperBound += betas[i]
 		}
 		existingSums := make([]int64, 0, len(table))
 		for s := range table {
 			existingSums = append(existingSums, s)
 		}
-		for k := 0; k < pgs.NumHaplotypes; k++ {
-			for _, prevSum = range existingSums {
-				nextSum = prevSum + betas[i+k].Weight
-				if nextSum <= upperBound && nextSum >= lowerBound {
-					if _, ok := table[nextSum]; !ok {
-						table[nextSum] = make([]*Beta, 0)
-					}
-					table[nextSum] = append(table[nextSum], betas[i+k])
+		for _, prevSum = range existingSums {
+			nextSum = prevSum + betas[i]
+			if nextSum <= upperBound && nextSum >= lowerBound {
+				if _, ok := table[nextSum]; !ok {
+					table[nextSum] = make([]uint16, 0)
 				}
+				table[nextSum] = append(table[nextSum], uint16(i))
 			}
 		}
 	}
 	return table
 }
 
-func backtrack(path []uint16, sum int64, table map[int64][]*Beta, rounder *Rounder) [][]uint16 {
+func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights []int64, rounder *Rounder) [][]uint16 {
 	if int64(math.Abs(float64(sum))) <= rounder.RounderError {
 		return [][]uint16{path}
 	}
 	output := make([][]uint16, 0)
-	for _, beta := range table[sum] {
-		if locusAlreadyExists(beta.Pos, path) {
+	for _, ptr := range table[sum] {
+		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
+			//if locusAlreadyExists(ptr, path) {
 			continue
 		}
 		newState := make([]uint16, len(path)+1)
 		copy(newState, path)
-		newState[len(path)] = beta.Pos
-		if res := backtrack(newState, sum-beta.Weight, table, rounder); res != nil {
+		newState[len(path)] = ptr
+		if res := backtrack(newState, sum-weights[ptr], table, weights, rounder); res != nil {
 			output = append(output, res...)
 		}
 	}
 	return output
 }
 
-func selectWithLowestNegativeLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
+func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
 	likelihoods := make([]float64, len(candidates))
 	for i, candidate := range candidates {
 		likelihoods[i] = calculateNegativeLikelihood(candidate, totalLen, p)
 	}
 	sortBy(candidates, likelihoods)
-	return candidates[len(candidates)*2/3:]
+	return candidates
+}
+
+type candidateWithLikelihood struct {
+	candidate  []uint16
+	likelihood float64
+}
+
+type likelihoodHeap []candidateWithLikelihood
+
+func (lh likelihoodHeap) Len() int { return len(lh) }
+func (lh likelihoodHeap) Less(i, j int) bool {
+	return lh[i].likelihood > lh[j].likelihood
+}
+func (lh likelihoodHeap) Swap(i, j int) {
+	lh[i].candidate, lh[j].candidate = lh[j].candidate, lh[i].candidate
+	lh[i].likelihood, lh[j].likelihood = lh[j].likelihood, lh[i].likelihood
+}
+
+func (lh *likelihoodHeap) Push(x interface{}) {
+	*lh = append(*lh, x.(candidateWithLikelihood))
+}
+
+func (lh *likelihoodHeap) Pop() interface{} {
+	old := *lh
+	n := len(old)
+	x := old[n-1]
+	*lh = old[0 : n-1]
+	return x
+}
+
+func selectTopLikelihoodCandidates(candidates [][]uint16, totalLen int, p *pgs.PGS, top int) [][]uint16 {
+	if len(candidates) <= top {
+		return candidates
+	}
+	h := &likelihoodHeap{}
+	// Push the first N slices onto the heap
+	for i := 0; i < top; i++ {
+		heap.Push(h, candidateWithLikelihood{candidates[i], calculateNegativeLikelihood(candidates[i], totalLen, p)})
+	}
+	var lkl float64
+	// Update the heap with remaining slices
+	for i := top; i < len(candidates); i++ {
+		lkl = calculateNegativeLikelihood(candidates[i], totalLen, p)
+		if lkl > (*h)[0].likelihood {
+			// Replace the minimum element with the current slice
+			heap.Pop(h)
+			heap.Push(h, candidateWithLikelihood{candidates[i], lkl})
+		}
+	}
+
+	// Extract slices from the heap
+	result := make([][]uint16, top)
+	for i := top - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(candidateWithLikelihood).candidate
+	}
+
+	return result
 }
 
 func calculateNegativeLikelihood(sequence []uint16, totalLen int, p *pgs.PGS) float64 {
@@ -241,16 +301,12 @@ func calculateNegativeLikelihood(sequence []uint16, totalLen int, p *pgs.PGS) fl
 	for _, pos := range sequence {
 		indexed[pos] = struct{}{}
 	}
-	for j := 0; j < totalLen; j += pgs.NumHaplotypes {
+	for j := 0; j < totalLen; j++ {
 		if _, ok := indexed[uint16(j)]; ok {
-			likelihood += mafToLikelihood(p.Maf[j/2][0]) + mafToLikelihood(p.Maf[j/2][1])
-			continue
+			likelihood += mafToLikelihood(p.Maf[j/2][1])
+		} else {
+			likelihood += mafToLikelihood(p.Maf[j/2][0])
 		}
-		if _, ok := indexed[uint16(j+1)]; ok {
-			likelihood += pgs.NumHaplotypes * mafToLikelihood(p.Maf[j/2][1])
-			continue
-		}
-		likelihood += pgs.NumHaplotypes * mafToLikelihood(p.Maf[j/2][0])
 	}
 	return likelihood
 }
@@ -261,7 +317,7 @@ func mafToLikelihood(maf float64) float64 {
 
 func locusAlreadyExists(v uint16, array []uint16) bool {
 	for _, a := range array {
-		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
+		if a == v {
 			return true
 		}
 	}
@@ -290,27 +346,37 @@ func findNextPositiveMins(values []int64) []int64 {
 	return mins
 }
 
-func getMaxTotal(betas []*Beta) (int64, int64) {
-	lower, upper := int64(0), int64(0)
-	// Consider the double-allele weights to find the maximum possible
-	for i := 1; i < len(betas); i += 2 {
-		if betas[i].Weight > 0 {
-			lower += betas[i].Weight
+func getMaxTotal(values []int64) (int64, int64) {
+	positive, negative := int64(0), int64(0)
+	for _, v := range values {
+		if v > 0 {
+			positive += pgs.NumHaplotypes * v
 		} else {
-			upper += betas[i].Weight
+			negative += pgs.NumHaplotypes * v
 		}
 	}
-	return lower, upper
+	return positive, negative
 }
 
-func betasFromWeights(weights []*big.Rat, startIdx int, multiplier *big.Rat) []*Beta {
-	indices := sortedIndices(weights)
-	betas := make([]*Beta, len(weights)*pgs.NumHaplotypes)
-	for i, pos := range indices {
-		for j := 0; j < pgs.NumHaplotypes; j++ {
-			tmp, _ := new(big.Rat).Mul(weights[pos], multiplier).Float64()
-			betas[pgs.NumHaplotypes*i+j] = newBeta(startIdx+pgs.NumHaplotypes*pos+j, int64(j+1)*int64(tmp))
-		}
+//func getMaxTotal(betas []*Beta) (int64, int64) {
+//	lower, upper := int64(0), int64(0)
+//	// Consider the double-allele weights to find the maximum possible
+//	for i := 1; i < len(betas); i += 2 {
+//		if betas[i].Weight > 0 {
+//			lower += betas[i].Weight
+//		} else {
+//			upper += betas[i].Weight
+//		}
+//	}
+//	return lower, upper
+//}
+//}
+
+func betasFromWeights(weights []*big.Rat, multiplier *big.Rat) []int64 {
+	betas := make([]int64, len(weights))
+	for i := range betas {
+		tmp, _ := new(big.Rat).Mul(weights[i], multiplier).Float64()
+		betas[i] = int64(tmp)
 	}
 	return betas
 }
@@ -331,10 +397,7 @@ func betasToScore(betas []*Beta, weights []int64) int64 {
 func lociToScore(loci []uint16, weights []*big.Rat) *big.Rat {
 	score := new(big.Rat).SetInt64(0)
 	for _, locus := range loci {
-		score.Add(score, weights[locus/2])
-		if locus%pgs.NumHaplotypes == 1 {
-			score.Add(score, weights[locus/2])
-		}
+		score.Add(score, weights[locus])
 	}
 	return score
 }
@@ -342,9 +405,10 @@ func lociToScore(loci []uint16, weights []*big.Rat) *big.Rat {
 func lociToGenotype(loci []uint16, total int) []uint8 {
 	sol := make([]uint8, total)
 	for _, pos := range loci {
-		sol[pos] = 1
-		if pos%pgs.NumHaplotypes == 1 {
-			sol[pos-1] = 1
+		if sol[pgs.NumHaplotypes*pos] == 0 {
+			sol[pgs.NumHaplotypes*pos] = 1
+		} else {
+			sol[pgs.NumHaplotypes*pos+1] = 1
 		}
 	}
 	return sol
@@ -368,18 +432,6 @@ func sortedIndices(values []*big.Rat) []int {
 
 	return indices
 }
-
-//func getMaxTotal(values []int64) (int64, int64) {
-//	positive, negative := int64(0), int64(0)
-//	for _, v := range values {
-//		if v > 0 {
-//			positive += pgs.NumHaplotypes * v
-//		} else {
-//			negative += pgs.NumHaplotypes * v
-//		}
-//	}
-//	return positive, negative
-//}
 
 func getScore(snps []uint8, weights []int64) int64 {
 	var score int64 = 0
