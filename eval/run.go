@@ -20,8 +20,8 @@ func main() {
 	//likelihoodEffect()
 	//scoreToLikelihoodDistribution()
 	//scoreToLikelihood()
-	accuracyLikelihood()
-	//findAllSolutions()
+	//accuracyLikelihood()
+	findAllSolutions()
 	//samples()
 	//distribution()
 	//evaluateReferences()
@@ -492,15 +492,14 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
 	//INDIVIDUAL := "NA20872"
-	//INDIVIDUAL := "HG00361"
-	//INDIVIDUAL := "HG03352"
-	INDIVIDUAL := "HG00244"
+	INDIVIDUAL := "HG00190"
+	//INDIVIDUAL := "HG00242"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"

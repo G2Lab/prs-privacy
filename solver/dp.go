@@ -3,6 +3,7 @@ package solver
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
@@ -36,6 +37,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	multiplier := new(big.Rat).SetFloat64(math.Pow(10, float64(s.p.WeightPrecision)))
 	if s.p.WeightPrecision > params.PrecisionsLimit {
 		multiplier.SetFloat64(math.Pow(10, params.PrecisionsLimit))
+		//roundingErrorLeft = int64(s.p.VariantCount) * 5 / 4
 		roundingErrorLeft = int64(s.p.VariantCount)
 		rounder.RoundedMode = true
 		rounder.RounderError = roundingErrorLeft
@@ -61,7 +63,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	betas[3] = makeBetaMap(allBetas, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2, len(allBetas))
 	for i := 0; i < numSegments; i++ {
 		tables[i] = calculateSubsetSumsTable(betas[i], target-maxTotalNegative+roundingErrorLeft, target-maxTotalPositive-roundingErrorRight)
-		//fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 	}
 
 	var modulo int64 = 0
@@ -70,7 +72,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	} else {
 		modulo = tools.FindNextSmallerPrime(int64(math.Abs(float64(target))))
 	}
-	//fmt.Printf("Modulo: %d\n", modulo)
+	fmt.Printf("Modulo: %d\n", modulo)
 	moduloMaps := make([]map[int32][]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
 		moduloMaps[i] = buildModuloMap(modulo, tables[i])
