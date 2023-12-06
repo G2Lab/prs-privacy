@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"math/big"
@@ -23,18 +24,6 @@ func NewDP(ctx context.Context, target *big.Rat, p *pgs.PGS, numThreads int) *DP
 		p:      p,
 	}
 	return s
-}
-
-type Beta struct {
-	Pos    uint16
-	Weight int64
-}
-
-func newBeta(pos int, weight int64) *Beta {
-	return &Beta{
-		Pos:    uint16(pos),
-		Weight: weight,
-	}
 }
 
 type Rounder struct {
@@ -55,26 +44,40 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 
 	tf, _ := new(big.Rat).Mul(s.target, multiplier).Float64()
 	target := int64(tf)
-	betas := betasFromWeights(s.p.Weights, multiplier)
-	maxTotalPositive, maxTotalNegative := getMaxTotal(betas)
+	allBetas := betasFromWeights(s.p.Weights, multiplier)
+	maxTotalPositive, maxTotalNegative := getMaxTotal(allBetas)
 	if rounder.RoundedMode && maxTotalNegative < 0 {
 		roundingErrorRight = roundingErrorLeft
 	}
 	fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
 	fmt.Printf("Target: %d\n", target)
 
-	//splitIdx := len(s.p.Weights) / 2
-	//betasLeft, betasRight := betas[:splitIdx], betas[splitIdx:]
-	//tableLeft := calculateSubsetSumsTable(betasLeft, target-maxTotalNegative,
-	//	target-maxTotalPositive)
-	//tableRight := calculateSubsetSumsTable(betasRight, target-maxTotalNegative,
-	//	target-maxTotalPositive)
-	//fmt.Printf("%d, %d\n", len(tableLeft), len(tableRight))
+	numSegments := 4
+	splitIdxHalf := len(s.p.Weights) / 2
+	betas := make([]map[uint16]int64, numSegments)
+	tables := make([]map[int64][]uint16, numSegments)
+	betas[0] = makeBetaMap(allBetas, 0, splitIdxHalf/2)
+	betas[1] = makeBetaMap(allBetas, splitIdxHalf/2, splitIdxHalf)
+	betas[2] = makeBetaMap(allBetas, splitIdxHalf, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2)
+	betas[3] = makeBetaMap(allBetas, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2, len(allBetas))
+	for i := 0; i < numSegments; i++ {
+		tables[i] = calculateSubsetSumsTable(betas[i], target-maxTotalNegative, target-maxTotalPositive)
+		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+	}
 
-	table := calculateSubsetSumsTable(betas, target-maxTotalNegative, target-maxTotalPositive)
-	fmt.Printf("%d\n", len(table))
+	var modulo int64 = 0
+	if math.Abs(float64(target)) >= math.Pow(10, 7) {
+		modulo = tools.FindNextBiggerPrime(int64(math.Sqrt(math.Abs(float64(target)))))
+	} else {
+		modulo = tools.FindNextSmallerPrime(int64(math.Abs(float64(target))))
+	}
+	fmt.Printf("Modulo: %d\n", modulo)
+	moduloMaps := make([]map[int32][]int64, numSegments)
+	for i := 0; i < numSegments; i++ {
+		moduloMaps[i] = buildModuloMap(modulo, tables[i])
+	}
 
-	// Combine and backtrack
+	// If we have rounded the target, search for other targets nearby
 	targets := []int64{target}
 	if rounder.RoundedMode {
 		for w := target + roundingErrorRight; w > target-roundingErrorLeft; w-- {
@@ -85,39 +88,55 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		}
 	}
 
-	//lowestAbsoluteLikelihood := math.MaxFloat64
-	//var lkl float64
+	// Combine and backtrack
+	umodulo := int32(modulo)
 	subsets := make([][]uint16, 0)
-	for j, t := range targets {
-		fmt.Printf("Target %d/%d\n", j+1, len(targets))
-		for rightSum := range table {
-			if _, ok := table[t-rightSum]; ok {
-				right, left := make([]uint16, 0), make([]uint16, 0)
-				rightHalfSolutions := backtrack(right, rightSum, table, betas, rounder)
-				rightHalfSolutions = selectTopLikelihoodCandidates(rightHalfSolutions, len(s.p.Weights), s.p, 50)
-				leftHalfSolutions := backtrack(left, t-rightSum, table, betas, rounder)
-				leftHalfSolutions = selectTopLikelihoodCandidates(leftHalfSolutions, len(s.p.Weights), s.p, 50)
-				for _, rightHalfSolution := range rightHalfSolutions {
-					for _, leftHalfSolution := range leftHalfSolutions {
-						joint := append(leftHalfSolution, rightHalfSolution...)
-						if rounder.RoundedMode {
-							preciseSum := lociToScore(joint, s.p.Weights)
-							if preciseSum.Cmp(s.target) != 0 {
-								continue
+	var midValue, modTarget int32
+	for midValue = 0; midValue < umodulo; midValue++ {
+		combL := allSumCombinations(midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
+			betas[:numSegments/2], rounder)
+		// No pair adds up to this midValue
+		if len(combL) == 0 {
+			continue
+		}
+		for _, t := range targets {
+			modTarget = tools.SubMod(int32(tools.Mod(t, modulo)), midValue, umodulo)
+			combR := allSumCombinations(modTarget, umodulo, moduloMaps[numSegments/2:], tables[numSegments/2:],
+				betas[numSegments/2:], rounder)
+			for sumL, solsL := range combL {
+				for sumR, solsR := range combR {
+					if sumR+sumL != t {
+						continue
+					}
+					//fmt.Printf("Found a solution!\n")
+					//fmt.Println(sumL, sumR, t)
+					//fmt.Println(solsL)
+					//fmt.Println(solsR)
+					//fmt.Println("------")
+					for j := range solsL {
+						for i := range solsR {
+							//joint := make([]uint16, len(solsL[j])+len(solsR[i]))
+							//copy(joint, solsL[j])
+							//copy(joint[len(solsL[j]):], solsR[i])
+							joint := append(solsL[j], solsR[i]...)
+							if rounder.RoundedMode {
+								preciseSum := lociToScore(joint, s.p.Weights)
+								if preciseSum.Cmp(s.target) != 0 {
+									continue
+								}
 							}
+							//fmt.Println(combL)
+							//fmt.Println(combR)
+							//fmt.Println("-----", ArrayToString(lociToGenotype(joint, pgs.NumHaplotypes*len(s.p.Weights))),
+							//	new(big.Rat).Sub(s.target, lociToScore(joint, s.p.Weights)).FloatString(12), sumR+sumL)
+							subsets = append(subsets, joint)
 						}
-						subsets = append(subsets, joint)
-						//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
-						//if lkl <= lowestAbsoluteLikelihood {
-						//	subsets = append(subsets, joint)
-						//	lowestAbsoluteLikelihood = lkl
-						//}
 					}
 				}
 			}
 		}
-	}
 
+	}
 	solutions := make(map[string][]uint8)
 	for _, subset := range subsets {
 		sol := lociToGenotype(subset, pgs.NumHaplotypes*len(s.p.Weights))
@@ -125,108 +144,155 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	}
 	return solutions
 
-	//var wg sync.WaitGroup
-	//type state struct {
-	//	sum       int64
-	//	positions []uint16
+	//lowestAbsoluteLikelihood := math.MaxFloat64
+	//var lkl float64
+	//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+	//if lkl <= lowestAbsoluteLikelihood {
+	//	subsets = append(subsets, joint)
+	//	lowestAbsoluteLikelihood = lkl
 	//}
-	//taskChan := make(chan state)
-	//traverser := func(tasks <-chan state) {
-	//	for task := range tasks {
-	//		backtrack(task.sum, task.positions)
-	//		wg.Done()
-	//	}
-	//}
-	//
-	//for i := 0; i < numThreads; i++ {
-	//	go traverser(taskChan)
-	//}
-	//
-	//start := make(map[int64][]uint16)
-	//count := 0
-	//pointers, exists := table[target]
-	//if exists {
-	//	start[target] = pointers
-	//	count += len(pointers)
-	//}
-	//if !exists || roundedMode {
-	//	for w := targetLeft; w < targetRight; w++ {
-	//		//for w := target - roundingError; w < target; w++ {
-	//		if w == target {
-	//			continue
-	//		}
-	//		if pos, exists := table[w]; exists {
-	//			start[w] = pos
-	//			count += len(pos)
-	//		}
-	//	}
-	//}
-	//go func() {
-	//	if target != 0 {
-	//		wg.Add(count)
-	//		for w, pts := range start {
-	//			for _, p := range pts {
-	//				taskChan <- state{sum: w - weights[p/2]*(1+int64(p%2)), positions: []uint16{p}}
-	//			}
-	//		}
-	//	} else {
-	//		wg.Add(1)
-	//		taskChan <- state{sum: target, positions: []uint16{}}
-	//	}
-	//	wg.Wait()
-	//	close(results)
-	//	close(taskChan)
-	//}()
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumsTable(betas []int64, upperBound, lowerBound int64) map[int64][]uint16 {
+func calculateSubsetSumsTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
 	// Fill out the table using dynamic programming
 	table := make(map[int64][]uint16)
 	// add the zero weight
 	table[0] = make([]uint16, 0)
+	indices := make([]uint16, 0, len(betas))
+	for i := range betas {
+		indices = append(indices, i)
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		return indices[i] < indices[j]
+	})
+	i := 0
 	var prevSum, nextSum int64
-	for i := 0; i < len(betas); i++ {
-		fmt.Printf("Position %d/%d\n", i+1, len(betas))
-		if betas[i] > 0 {
-			lowerBound += betas[i]
+	var k uint16
+	for _, pos := range indices {
+		i++
+		fmt.Printf("Position %d/%d\n", i, len(betas))
+		if betas[pos] > 0 {
+			lowerBound += pgs.NumHaplotypes * betas[pos]
 		} else {
-			upperBound += betas[i]
+			upperBound += pgs.NumHaplotypes * betas[pos]
 		}
 		existingSums := make([]int64, 0, len(table))
 		for s := range table {
 			existingSums = append(existingSums, s)
 		}
 		for _, prevSum = range existingSums {
-			nextSum = prevSum + betas[i]
-			if nextSum >= lowerBound && nextSum <= upperBound {
-				if _, ok := table[nextSum]; !ok {
-					table[nextSum] = make([]uint16, 0)
+			for k = 1; k <= pgs.NumHaplotypes; k++ {
+				nextSum = prevSum + int64(k)*betas[pos]
+				if nextSum >= lowerBound && nextSum <= upperBound {
+					if _, ok := table[nextSum]; !ok {
+						table[nextSum] = make([]uint16, 0)
+					}
+					table[nextSum] = append(table[nextSum], pgs.NumHaplotypes*pos+k-1)
 				}
-				table[nextSum] = append(table[nextSum], uint16(i))
 			}
 		}
 	}
 	return table
 }
 
-func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights []int64, rounder *Rounder) [][]uint16 {
+func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights map[uint16]int64, rounder *Rounder) [][]uint16 {
 	if int64(math.Abs(float64(sum))) <= rounder.RounderError {
 		return [][]uint16{path}
 	}
 	output := make([][]uint16, 0)
+	//newStates := make([][]uint16, 0)
+	//newSums := make([]int64, 0)
+	var weight int64
 	for _, ptr := range table[sum] {
 		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
 			continue
 		}
+		//newStates = append(newStates, append(path, ptr))
+		//newSums = append(newSums, sum-weights[ptr/2]*(1+int64(ptr%2)))
+		//newStates = append(newStates, make([]uint16, len(path)+1))
+		//copy(newStates[len(newStates)-1], path)
+		//newStates[len(newStates)-1][len(path)] = ptr
+		//
+		//
 		newState := make([]uint16, len(path)+1)
 		copy(newState, path)
 		newState[len(path)] = ptr
-		if res := backtrack(newState, sum-weights[ptr], table, weights, rounder); res != nil {
+		weight = weights[ptr/2] * (1 + int64(ptr%2))
+		if res := backtrack(newState, sum-weight, table, weights, rounder); res != nil {
 			output = append(output, res...)
 		}
 	}
+	//path = nil
+	//for i := range newStates {
+	//	if res := backtrack(newStates[i], newSums[i], table, weights, rounder); res != nil {
+	//		output = append(output, res...)
+	//	}
+	//}
 	return output
+}
+
+func buildModuloMap(modulo int64, table map[int64][]uint16) map[int32][]int64 {
+	moduloMap := make(map[int32][]int64)
+	var reduced int32
+	for sum := range table {
+		reduced = int32(tools.Mod(sum, modulo))
+		if _, ok := moduloMap[reduced]; !ok {
+			moduloMap[reduced] = make([]int64, 0)
+		}
+		moduloMap[reduced] = append(moduloMap[reduced], sum)
+	}
+	return moduloMap
+}
+
+func allSumCombinations(modSum, umodulo int32, modTables []map[int32][]int64, fullTables []map[int64][]uint16,
+	betas []map[uint16]int64, rounder *Rounder) map[int64][][]uint16 {
+	combinations := make(map[int64][][]uint16)
+	var valueEntry, valueExit int32
+	var tmpSum int64
+	for valueEntry = range modTables[0] {
+		valueExit = tools.SubMod(modSum, valueEntry, umodulo)
+		if _, ok := modTables[1][valueExit]; !ok {
+			continue
+		}
+		leftSolComb := backtrackedSolutions(modTables[0][valueEntry], fullTables[0], betas[0], rounder)
+		rightSolComb := backtrackedSolutions(modTables[1][valueExit], fullTables[1], betas[1], rounder)
+		for nonModSumL, lSols := range leftSolComb {
+			for nonModSumR, rSols := range rightSolComb {
+				tmpSum = nonModSumL + nonModSumR
+				for i := range lSols {
+					for j := range rSols {
+						if _, ok := combinations[tmpSum]; !ok {
+							combinations[tmpSum] = make([][]uint16, 0)
+						}
+						combinations[tmpSum] = append(combinations[tmpSum], append(lSols[i], rSols[j]...))
+						//joint := make([]uint16, len(lSols[i])+len(rSols[j]))
+						//copy(joint, lSols[i])
+						//copy(joint[len(lSols[i]):], rSols[j])
+						//combinations[tmpSum] = append(combinations[tmpSum], joint)
+					}
+				}
+			}
+		}
+	}
+	return combinations
+}
+
+func backtrackedSolutions(sums []int64, table map[int64][]uint16, betas map[uint16]int64, rounder *Rounder) map[int64][][]uint16 {
+	solutions := make(map[int64][][]uint16)
+	for _, sum := range sums {
+		input := make([]uint16, 0)
+		solutions[sum] = backtrack(input, sum, table, betas, rounder)
+	}
+	return solutions
+}
+
+func makeBetaMap(betas []int64, start, end int) map[uint16]int64 {
+	bmap := make(map[uint16]int64)
+	for i := start; i < end; i++ {
+		bmap[uint16(i)] = betas[i]
+	}
+	return bmap
 }
 
 func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
@@ -317,7 +383,7 @@ func mafToLikelihood(maf float64) float64 {
 
 func locusAlreadyExists(v uint16, array []uint16) bool {
 	for _, a := range array {
-		if a == v {
+		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
 			return true
 		}
 	}
@@ -381,35 +447,29 @@ func betasFromWeights(weights []*big.Rat, multiplier *big.Rat) []int64 {
 	return betas
 }
 
-func betasToScore(betas []*Beta, weights []int64) int64 {
-	var score int64 = 0
-	for _, beta := range betas {
-		switch beta.Pos % pgs.NumHaplotypes {
-		case 0:
-			score += weights[beta.Pos/2]
-		case 1:
-			score += weights[beta.Pos/2] * pgs.NumHaplotypes
-		}
-	}
-	return score
-}
-
 func lociToScore(loci []uint16, weights []*big.Rat) *big.Rat {
 	score := new(big.Rat).SetInt64(0)
 	for _, locus := range loci {
-		score.Add(score, weights[locus])
+		score.Add(score, weights[locus/2])
+		if locus%2 == 1 {
+			score.Add(score, weights[locus/2])
+		}
 	}
 	return score
 }
 
 func lociToGenotype(loci []uint16, total int) []uint8 {
 	sol := make([]uint8, total)
-	for _, pos := range loci {
-		if sol[pgs.NumHaplotypes*pos] == 0 {
-			sol[pgs.NumHaplotypes*pos] = 1
-		} else {
-			sol[pgs.NumHaplotypes*pos+1] = 1
+	for _, locus := range loci {
+		sol[locus] = 1
+		if locus%2 == 1 {
+			sol[locus-1] = 1
 		}
+		//if sol[pgs.NumHaplotypes*locus] == 0 {
+		//	sol[pgs.NumHaplotypes*locus] = 1
+		//} else {
+		//	sol[pgs.NumHaplotypes*locus+1] = 1
+		//}
 	}
 	return sol
 }
