@@ -3,7 +3,6 @@ package solver
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
@@ -49,8 +48,8 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	if rounder.RoundedMode && maxTotalNegative < 0 {
 		roundingErrorRight = roundingErrorLeft
 	}
-	fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
-	fmt.Printf("Target: %d\n", target)
+	//fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
+	//fmt.Printf("Target: %d\n", target)
 
 	numSegments := 4
 	splitIdxHalf := len(s.p.Weights) / 2
@@ -61,8 +60,8 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	betas[2] = makeBetaMap(allBetas, splitIdxHalf, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2)
 	betas[3] = makeBetaMap(allBetas, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2, len(allBetas))
 	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumsTable(betas[i], target-maxTotalNegative, target-maxTotalPositive)
-		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+		tables[i] = calculateSubsetSumsTable(betas[i], target-maxTotalNegative+roundingErrorLeft, target-maxTotalPositive-roundingErrorRight)
+		//fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 	}
 
 	var modulo int64 = 0
@@ -71,7 +70,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	} else {
 		modulo = tools.FindNextSmallerPrime(int64(math.Abs(float64(target))))
 	}
-	fmt.Printf("Modulo: %d\n", modulo)
+	//fmt.Printf("Modulo: %d\n", modulo)
 	moduloMaps := make([]map[int32][]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
 		moduloMaps[i] = buildModuloMap(modulo, tables[i])
@@ -112,13 +111,13 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 					//fmt.Println(sumL, sumR, t)
 					//fmt.Println(solsL)
 					//fmt.Println(solsR)
-					//fmt.Println("------")
+					//fmt.Println("//////////")
 					for j := range solsL {
 						for i := range solsR {
-							//joint := make([]uint16, len(solsL[j])+len(solsR[i]))
-							//copy(joint, solsL[j])
-							//copy(joint[len(solsL[j]):], solsR[i])
-							joint := append(solsL[j], solsR[i]...)
+							joint := make([]uint16, len(solsL[j])+len(solsR[i]))
+							copy(joint, solsL[j])
+							copy(joint[len(solsL[j]):], solsR[i])
+							//joint := append(solsL[j], solsR[i]...)
 							if rounder.RoundedMode {
 								preciseSum := lociToScore(joint, s.p.Weights)
 								if preciseSum.Cmp(s.target) != 0 {
@@ -171,7 +170,7 @@ func calculateSubsetSumsTable(betas map[uint16]int64, upperBound, lowerBound int
 	var k uint16
 	for _, pos := range indices {
 		i++
-		fmt.Printf("Position %d/%d\n", i, len(betas))
+		//fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[pos] > 0 {
 			lowerBound += pgs.NumHaplotypes * betas[pos]
 		} else {
@@ -423,20 +422,6 @@ func getMaxTotal(values []int64) (int64, int64) {
 	}
 	return positive, negative
 }
-
-//func getMaxTotal(betas []*Beta) (int64, int64) {
-//	lower, upper := int64(0), int64(0)
-//	// Consider the double-allele weights to find the maximum possible
-//	for i := 1; i < len(betas); i += 2 {
-//		if betas[i].Weight > 0 {
-//			lower += betas[i].Weight
-//		} else {
-//			upper += betas[i].Weight
-//		}
-//	}
-//	return lower, upper
-//}
-//}
 
 func betasFromWeights(weights []*big.Rat, multiplier *big.Rat) []int64 {
 	betas := make([]int64, len(weights))

@@ -1,8 +1,9 @@
 package tools
 
 import (
-	"github.com/nikirill/prs/params"
 	"math"
+
+	"github.com/nikirill/prs/params"
 )
 
 // Mod function

@@ -20,8 +20,8 @@ func main() {
 	//likelihoodEffect()
 	//scoreToLikelihoodDistribution()
 	//scoreToLikelihood()
-	//accuracyLikelihood()
-	findAllSolutions()
+	accuracyLikelihood()
+	//findAllSolutions()
 	//samples()
 	//distribution()
 	//evaluateReferences()
@@ -155,10 +155,10 @@ func accuracyLikelihood() {
 	resFolder := "results/accuracyLikelihood"
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -167,8 +167,8 @@ func accuracyLikelihood() {
 	p.LoadStats()
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
-	samples := cohort.SortByScore()[len(cohort)-100:]
-	//samples := allSamples()
+	//samples := cohort.SortByScore()[len(cohort)-100:]
+	samples := allSamples()
 	// Create csv result file
 	chunkNum, chunkSize := getChunkInfo(len(samples))
 	filepath := path.Join(resFolder, fmt.Sprintf("%s-%d.json", p.PgsID, chunkNum))
@@ -186,7 +186,7 @@ func accuracyLikelihood() {
 		if i >= len(samples) {
 			break
 		}
-		fmt.Printf("%d ", i)
+		fmt.Printf("%d\n", i)
 		slv := solver.NewDP(ctx, cohort[samples[i]].Score, p, numThreads)
 		solmap := slv.Solve(numThreads)
 		solutions := solver.SortByLikelihood(solmap, p)
@@ -484,7 +484,7 @@ func distribution() {
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
-	INDIVIDUAL := "HG02215" // highest score for PGS000040
+	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
@@ -492,12 +492,15 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
 	//INDIVIDUAL := "NA20872"
+	//INDIVIDUAL := "HG00361"
+	//INDIVIDUAL := "HG03352"
+	INDIVIDUAL := "HG00244"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
