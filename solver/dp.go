@@ -94,6 +94,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	subsets := make([][]uint16, 0)
 	var midValue, modTarget int32
 	for midValue = 0; midValue < umodulo; midValue++ {
+		if midValue%50 == 0 {
+			fmt.Printf("MidValue: %d\n", midValue)
+		}
 		combL := allSumCombinations(midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
 			betas[:numSegments/2], rounder)
 		// No pair adds up to this midValue
@@ -172,7 +175,7 @@ func calculateSubsetSumsTable(betas map[uint16]int64, upperBound, lowerBound int
 	var k uint16
 	for _, pos := range indices {
 		i++
-		//fmt.Printf("Position %d/%d\n", i, len(betas))
+		fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[pos] > 0 {
 			lowerBound += pgs.NumHaplotypes * betas[pos]
 		} else {
