@@ -1,16 +1,15 @@
 package main
 
 import (
-	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"path"
 	"strconv"
 
+	"github.com/ericlagergren/decimal"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/solver"
@@ -35,10 +34,10 @@ type Result struct {
 	Likelihoods []string
 }
 
-func NewResult(ind string, score *big.Rat) *Result {
+func NewResult(ind string, score *decimal.Big) *Result {
 	return &Result{
 		Individual:  ind,
-		Score:       score.FloatString(3),
+		Score:       score.String(),
 		Accuracies:  make([]string, 0),
 		Likelihoods: make([]string, 0),
 	}
@@ -51,10 +50,10 @@ type Reference struct {
 	Accuracies []string
 }
 
-func NewReference(id string, score *big.Rat, likelihood float64) *Reference {
+func NewReference(id string, score *decimal.Big, likelihood float64) *Reference {
 	return &Reference{
 		ID:         id,
-		Score:      score.FloatString(15),
+		Score:      score.String(),
 		Likelihood: fmt.Sprintf("%.3f", likelihood),
 		Accuracies: make([]string, 0),
 	}
@@ -140,7 +139,7 @@ func evaluateReferences() {
 		cohort := solver.NewCohort(p)
 		fmt.Printf("%s\n", p.PgsID)
 		major := p.AllMajorSample()
-		reference := NewReference(p.PgsID, solver.CalculateScore(major, p.Weights), p.CalculateSequenceLikelihood(major))
+		reference := NewReference(p.PgsID, solver.CalculateScore(p.Context, major, p.Weights), p.CalculateSequenceLikelihood(major))
 		for _, sample := range samples {
 			reference.Accuracies = append(reference.Accuracies, fmt.Sprintf("%.3f", solver.Accuracy(major, cohort[sample].Genotype)))
 		}
@@ -178,7 +177,6 @@ func accuracyLikelihood() {
 	}
 	defer resFile.Close()
 	encoder := json.NewEncoder(resFile)
-	ctx, cancel := context.WithCancel(context.Background())
 	numThreads := getNumThreads()
 	var solved bool
 	var acc float64
@@ -187,7 +185,7 @@ func accuracyLikelihood() {
 			break
 		}
 		fmt.Printf("%d\n", i)
-		slv := solver.NewDP(ctx, cohort[samples[i]].Score, p, numThreads)
+		slv := solver.NewDP(cohort[samples[i]].Score, p, numThreads)
 		solmap := slv.Solve(numThreads)
 		solutions := solver.SortByLikelihood(solmap, p)
 		result := NewResult(samples[i], cohort[samples[i]].Score)
@@ -208,7 +206,6 @@ func accuracyLikelihood() {
 			log.Fatal("Cannot encode json", err)
 		}
 	}
-	cancel()
 }
 
 func scoreToLikelihood() {
@@ -237,7 +234,6 @@ func scoreToLikelihood() {
 	}
 	defer resFile.Close()
 	writer := csv.NewWriter(resFile)
-	ctx, cancel := context.WithCancel(context.Background())
 	numThreads := getNumThreads()
 	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
 		if i >= len(samples) {
@@ -245,7 +241,7 @@ func scoreToLikelihood() {
 		}
 		fmt.Printf("%d ", i)
 		output := []string{samples[i], fmt.Sprintf("%.3f", cohort[samples[i]].Score)}
-		slv := solver.NewDP(ctx, cohort[samples[i]].Score, p, numThreads)
+		slv := solver.NewDP(cohort[samples[i]].Score, p, numThreads)
 		solmap := slv.Solve(numThreads)
 		solutions := solver.SortByAccuracy(solmap, cohort[samples[i]].Genotype)
 		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[samples[i]].Genotype) != 1.0 {
@@ -259,7 +255,6 @@ func scoreToLikelihood() {
 		writer.Write(output)
 		writer.Flush()
 	}
-	cancel()
 }
 
 //func scoreToLikelihoodDistribution() {
@@ -364,10 +359,9 @@ func likelihoodEffect() {
 		"first accuracy", "major accuracy",
 		"true position", "total solutions",
 		"first likelihood", "true likelihood", "major likelihood"})
-	ctx, cancel := context.WithCancel(context.Background())
 	numThreads := getNumThreads()
 	majorReference := p.AllMajorSample()
-	majorScore := solver.CalculateScore(majorReference, p.Weights)
+	majorScore := solver.CalculateScore(p.Context, majorReference, p.Weights)
 	majorLikelihood := p.CalculateSequenceLikelihood(majorReference)
 	medianScore := cohort[cohort.SortByScore()[len(cohort)/2]].Score
 	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
@@ -375,7 +369,7 @@ func likelihoodEffect() {
 			break
 		}
 		fmt.Printf("%d ", i)
-		slv := solver.NewDP(ctx, cohort[samples[i]].Score, p, numThreads)
+		slv := solver.NewDP(cohort[samples[i]].Score, p, numThreads)
 		solmap := slv.Solve(numThreads)
 		solutions := solver.SortByLikelihood(solmap, p)
 		firstAcc := 0.0
@@ -389,7 +383,7 @@ func likelihoodEffect() {
 			}
 			acc = solver.Accuracy(solution, cohort[samples[i]].Genotype)
 			if acc == 1.0 {
-				writer.Write([]string{samples[i], fmt.Sprintf("%.3f", solver.CalculateScore(solution, p.Weights)),
+				writer.Write([]string{samples[i], fmt.Sprintf("%.3f", solver.CalculateScore(p.Context, solution, p.Weights)),
 					fmt.Sprintf("%.3f", majorScore), fmt.Sprintf("%.3f", medianScore),
 					fmt.Sprintf("%.3f", firstAcc),
 					fmt.Sprintf("%.3f", solver.Accuracy(majorReference, cohort[samples[i]].Genotype)),
@@ -399,18 +393,17 @@ func likelihoodEffect() {
 			}
 		}
 		if acc != 1.0 {
-			diff := new(big.Rat)
+			diff := decimal.WithContext(p.Context)
 			fmt.Printf("\nNo solution for %s\n", samples[i])
 			fmt.Printf("\nTrue:\n%s -- %s, %f\n", solver.ArrayToString(cohort[samples[i]].Genotype),
-				diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(cohort[samples[i]].Genotype, p.Weights)).FloatString(12),
+				diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(p.Context, cohort[samples[i]].Genotype, p.Weights)).String(),
 				p.CalculateSequenceLikelihood(cohort[samples[i]].Genotype))
 			for _, sol := range solutions {
 				fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(sol), solver.Accuracy(sol, cohort[samples[i]].Genotype),
-					diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(sol, p.Weights)).FloatString(12), p.CalculateSequenceLikelihood(sol))
+					diff.Sub(cohort[samples[i]].Score, solver.CalculateScore(p.Context, sol, p.Weights)).String(), p.CalculateSequenceLikelihood(sol))
 			}
 		}
 	}
-	cancel()
 }
 
 //func samples() {
@@ -450,13 +443,12 @@ func distribution() {
 	cohort := solver.NewCohort(p)
 	sorted := cohort.SortByScore()
 	fmt.Printf("Median score: %g\n", cohort[sorted[len(sorted)/2]].Score)
-	ctx, cancel := context.WithCancel(context.Background())
 	step := 250
 	numThreads := getNumThreads()
 	majorReference := p.AllMajorSample()
-	fmt.Printf("Full major %s: score %f, likelihood %f\n", solver.ArrayToString(majorReference), solver.CalculateScore(majorReference, p.Weights), p.CalculateSequenceLikelihood(majorReference))
+	fmt.Printf("Full major %s: score %f, likelihood %f\n", solver.ArrayToString(majorReference), solver.CalculateScore(p.Context, majorReference, p.Weights), p.CalculateSequenceLikelihood(majorReference))
 	for i := 0; i < len(sorted); i += step {
-		slv := solver.NewDP(ctx, cohort[sorted[i]].Score, p, numThreads)
+		slv := solver.NewDP(cohort[sorted[i]].Score, p, numThreads)
 		solmap := slv.Solve(numThreads)
 		solutions := solver.SortByLikelihood(solmap, p)
 		//fmt.Printf("\n\n%s, %s\n", p.PgsID, sorted[i])
@@ -478,7 +470,6 @@ func distribution() {
 			}
 		}
 	}
-	cancel()
 }
 
 func findAllSolutions() {
@@ -487,20 +478,20 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 	//
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
 	//INDIVIDUAL := "NA20872"
-	//INDIVIDUAL := "NA20507"
+	INDIVIDUAL := "NA20507"
 	//INDIVIDUAL := "HG00242"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
@@ -515,8 +506,7 @@ func findAllSolutions() {
 	cohort := solver.NewCohort(p)
 
 	numThreads := getNumThreads()
-	ctx, cancel := context.WithCancel(context.Background())
-	slv := solver.NewDP(ctx, cohort[INDIVIDUAL].Score, p, numThreads)
+	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, numThreads)
 
 	//majorReference := p.AllMajorSample()
 	//fmt.Printf("Accuracy with major: %f\n",
@@ -525,7 +515,6 @@ func findAllSolutions() {
 	solmap := slv.Solve(numThreads)
 	//solmap := slv.solve(numThreads)
 	//solmap := slv.recursive(numThreads)
-	cancel()
 	//solmap = findComplements(solmap, p, numThreads)
 	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	//fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
@@ -539,9 +528,9 @@ func findAllSolutions() {
 	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
 	//	cohort[INDIVIDUAL].Score-solver.CalculateScore(solutions[0], p.Weights), p.CalculateSequenceLikelihood(solutions[0]))
 	for _, solution := range solutions {
-		diff := new(big.Rat)
+		diff := decimal.WithContext(p.Context)
 		fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			diff.Sub(cohort[INDIVIDUAL].Score, solver.CalculateScore(solution, p.Weights)).FloatString(12), p.CalculateSequenceLikelihood(solution))
+			diff.Sub(cohort[INDIVIDUAL].Score, solver.CalculateScore(p.Context, solution, p.Weights)).String(), p.CalculateSequenceLikelihood(solution))
 	}
 	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Guessed %d:\n", len(solutions))

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/big"
 	"math/rand"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/ericlagergren/decimal"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/tools"
 )
@@ -37,7 +37,6 @@ var ALL_FIELDS = []string{
 
 const (
 	NumHaplotypes                 = 2
-	ErrorMargin                   = 1e-14
 	MissingEffectAlleleLikelihood = 0.0004
 )
 
@@ -52,14 +51,14 @@ func NewVariant(fields map[string]interface{}) *Variant {
 		fields: make(map[string]interface{}),
 	}
 
-	if weight, ok := fields["effect_weight"].(string); ok {
-		value := new(big.Rat)
-		if _, ok := value.SetString(weight); ok {
-			fields["effect_weight"] = value
-		} else {
-			log.Printf("Error parsing weight %s: %s", weight, value.RatString())
-		}
-	}
+	//if weight, ok := fields["effect_weight"].(string); ok {
+	//	value := new(big.Rat)
+	//	if _, ok := value.SetString(weight); ok {
+	//		fields["effect_weight"] = value
+	//	} else {
+	//		log.Printf("Error parsing weight %s: %s", weight, value.RatString())
+	//	}
+	//}
 
 	//if frequency, ok := fields["allelefrequency_effect"].(string); ok {
 	//	if value, err := strconv.ParseFloat(frequency, 64); err == nil {
@@ -91,11 +90,14 @@ func (v *Variant) GetLocus() string {
 	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
-func (v *Variant) GetWeight() *big.Rat {
-	if weight, ok := v.fields["effect_weight"].(*big.Rat); ok {
-		return weight
+func (v *Variant) GetWeight(ctx decimal.Context) (*decimal.Big, error) {
+	if value, ok := v.fields["effect_weight"].(string); ok {
+		weight := decimal.WithContext(ctx)
+		if _, ok = ctx.SetString(weight, value); ok {
+			return weight, nil
+		}
 	}
-	return nil
+	return nil, errors.New("error parsing weight")
 }
 
 func (v *Variant) GetEffectAlleleFrequency() float64 {
@@ -107,19 +109,20 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 }
 
 type PGS struct {
-	PgsID           string
-	TraitName       string
-	TraitEFO        string
-	GenomeBuild     string
-	WeightType      string
-	HmPOSBuild      string
-	VariantCount    int
-	Fieldnames      []string
-	Variants        map[string]*Variant
-	Loci            []string
-	Weights         []*big.Rat
-	WeightPrecision int
-	Maf             [][]float64 // [major, minor] allele frequency from the population
+	PgsID        string
+	TraitName    string
+	TraitEFO     string
+	GenomeBuild  string
+	WeightType   string
+	HmPOSBuild   string
+	VariantCount int
+	Fieldnames   []string
+	Variants     map[string]*Variant
+	Loci         []string
+	Weights      []*decimal.Big
+	Context      decimal.Context
+	//WeightPrecision int
+	Maf [][]float64 // [major, minor] allele frequency from the population
 	//Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
 }
 
@@ -209,13 +212,23 @@ scannerLoop:
 	if err != nil {
 		return err
 	}
-	p.Weights = make([]*big.Rat, len(p.Loci))
+
+	p.Context = decimal.Context{
+		MaxScale:  maxPrecision + 5,
+		MinScale:  -maxPrecision - 5,
+		Precision: maxPrecision + 3,
+	}
+
+	p.Weights = make([]*decimal.Big, len(p.Loci))
 	//p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
-		p.Weights[i] = p.Variants[loc].GetWeight()
+		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
+		if err != nil {
+			log.Fatalf("Variant %s, %v: %v\n", loc, err, p.Variants[loc].fields["effect_weight"])
+		}
 		//p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
-	p.WeightPrecision = maxPrecision
+	//p.WeightPrecision = maxPrecision
 	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	if err := scanner.Err(); err != nil {

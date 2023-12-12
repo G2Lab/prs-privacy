@@ -4,8 +4,8 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/ericlagergren/decimal"
 	"log"
-	"math/big"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,15 +17,15 @@ import (
 
 type Individual struct {
 	Genotype []uint8
-	Score    *big.Rat
+	Score    *decimal.Big
 }
 
 type Cohort map[string]*Individual
 
-func NewIndividual() *Individual {
+func NewIndividual(ctx decimal.Context) *Individual {
 	return &Individual{
 		Genotype: make([]uint8, 0),
-		Score:    new(big.Rat).SetInt64(0),
+		Score:    decimal.WithContext(ctx),
 	}
 }
 
@@ -42,7 +42,7 @@ func (c Cohort) Populate(p *pgs.PGS) {
 		c.CalculatePRS(p)
 		c.SaveToDisk(filename)
 		if _, err := os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
-			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID), p.WeightPrecision)
+			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID))
 		}
 		// Save scores separately for the ease of reading
 		return
@@ -52,6 +52,8 @@ func (c Cohort) Populate(p *pgs.PGS) {
 }
 
 func (c Cohort) CalculatePRS(p *pgs.PGS) {
+	ctx := p.Context
+	var k uint8
 	for i, locus := range p.Loci {
 		chr, position := tools.SplitLocus(locus)
 		query, args := tools.IndividualSnpsQuery(chr, position)
@@ -82,15 +84,11 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 				continue
 			}
 			if _, ok := c[individ]; !ok {
-				c[individ] = NewIndividual()
+				c[individ] = NewIndividual(ctx)
 			}
-			//c[individ].Genotype = append(c[individ].Genotype, allele[0]+allele[1])
 			c[individ].Genotype = append(c[individ].Genotype, allele...)
-			if allele[0]+allele[1] > 0 {
-				c[individ].Score.Add(c[individ].Score, p.Weights[i])
-				if allele[0]+allele[1] == 2 {
-					c[individ].Score.Add(c[individ].Score, p.Weights[i])
-				}
+			for k = 0; k < allele[0]+allele[1]; k++ {
+				ctx.Add(c[individ].Score, c[individ].Score, p.Weights[i])
 			}
 		}
 	}
@@ -139,7 +137,7 @@ func (c Cohort) LoadFromDisk(filename string) {
 	}
 }
 
-func (c Cohort) SaveScores(filename string, precision int) error {
+func (c Cohort) SaveScores(filename string) error {
 	sortedInd := c.SortByScore()
 	file, err := os.Create(filename)
 	if err != nil {
@@ -149,13 +147,13 @@ func (c Cohort) SaveScores(filename string, precision int) error {
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
 		//writer.Write([]string{ind, fmt.Sprintf(fmt.Sprintf("%%.%df", precision), c[ind].Score)})
-		writer.Write([]string{ind, c[ind].Score.FloatString(precision)})
+		writer.Write([]string{ind, c[ind].Score.String()})
 	}
 	writer.Flush()
 	return nil
 }
 
-func (c Cohort) LoadScores(filename string) error {
+func (c Cohort) LoadScores(filename string, ctx decimal.Context) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -169,11 +167,8 @@ func (c Cohort) LoadScores(filename string) error {
 		}
 		name := record[0]
 		score := record[1]
-		c[name] = NewIndividual()
-		v := new(big.Rat)
-		if _, ok := v.SetString(score); ok {
-			c[name].Score = v
-		} else {
+		c[name] = NewIndividual(ctx)
+		if _, ok := c[name].Score.SetString(score); !ok {
 			return err
 		}
 	}

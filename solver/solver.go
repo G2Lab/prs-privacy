@@ -3,9 +3,9 @@ package solver
 import (
 	"fmt"
 	"log"
-	"math/big"
 	"strings"
 
+	"github.com/ericlagergren/decimal"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 )
@@ -14,15 +14,15 @@ type Solver interface {
 	Solve(numThreads int) map[string][]uint8
 }
 
-func CalculateScore(snps []uint8, weights []*big.Rat) *big.Rat {
-	score := new(big.Rat).SetInt64(0)
+func CalculateScore(ctx decimal.Context, snps []uint8, weights []*decimal.Big) *decimal.Big {
+	score := decimal.WithContext(ctx)
 	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
 		for j := 0; j < pgs.NumHaplotypes; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
 			case 1:
-				score.Add(score, weights[i/2])
+				ctx.Add(score, score, weights[i/2])
 			default:
 				log.Printf("Invalid alelle value: %d", snps[i+j])
 			}

@@ -2,23 +2,24 @@ package solver
 
 import (
 	"container/heap"
-	"context"
 	"fmt"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"math/big"
 	"sort"
+
+	"github.com/ericlagergren/decimal"
+	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 )
 
 type DP struct {
-	target *big.Rat
+	target *decimal.Big
 	p      *pgs.PGS
 }
 
-func NewDP(ctx context.Context, target *big.Rat, p *pgs.PGS, numThreads int) *DP {
+func NewDP(target *decimal.Big, p *pgs.PGS, numThreads int) *DP {
 	s := &DP{
 		target: target,
 		p:      p,
@@ -26,115 +27,110 @@ func NewDP(ctx context.Context, target *big.Rat, p *pgs.PGS, numThreads int) *DP
 	return s
 }
 
-type Rounder struct {
-	RoundedMode  bool
-	RounderError int64
-}
-
 func (s *DP) Solve(numThreads int) map[string][]uint8 {
-	var roundingErrorLeft, roundingErrorRight int64 = 0, 0
-	rounder := new(Rounder)
-	multiplier := new(big.Rat).SetFloat64(math.Pow(10, float64(s.p.WeightPrecision)))
-	if s.p.WeightPrecision > params.PrecisionsLimit {
-		multiplier.SetFloat64(math.Pow(10, params.PrecisionsLimit))
-		//roundingErrorLeft = int64(s.p.VariantCount) * 5 / 4
-		roundingErrorLeft = int64(s.p.VariantCount)
-		rounder.RoundedMode = true
-		rounder.RounderError = roundingErrorLeft
-	}
-
-	tf, _ := new(big.Rat).Mul(s.target, multiplier).Float64()
-	target := int64(tf)
-	allBetas := betasFromWeights(s.p.Weights, multiplier)
-	maxTotalPositive, maxTotalNegative := getMaxTotal(allBetas)
-	if rounder.RoundedMode && maxTotalNegative < 0 {
-		roundingErrorRight = roundingErrorLeft
-	}
-	//fmt.Printf("Precision: %d\n", s.p.WeightPrecision)
-	//fmt.Printf("Target: %d\n", target)
+	scale := s.target.Scale()
+	multiplier := decimal.WithContext(s.p.Context).SetMantScale(1, -scale)
+	fmt.Println("Scale:", scale)
+	fmt.Println("Multiplier:", multiplier.String())
+	scaledWeights := scaleWeights(s.p.Context, s.p.Weights, multiplier)
+	scaledTarget := decimal.WithContext(s.p.Context)
+	scaledTarget.Copy(s.target)
+	scaledTarget.Mul(scaledTarget, multiplier)
+	fmt.Println("Scaled target:", scaledTarget.String())
+	fmt.Println("Scaled weights:", scaledWeights)
 
 	numSegments := 4
-	splitIdxHalf := len(s.p.Weights) / 2
-	betas := make([]map[uint16]int64, numSegments)
-	tables := make([]map[int64][]uint16, numSegments)
-	betas[0] = makeBetaMap(allBetas, 0, splitIdxHalf/2)
-	betas[1] = makeBetaMap(allBetas, splitIdxHalf/2, splitIdxHalf)
-	betas[2] = makeBetaMap(allBetas, splitIdxHalf, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2)
-	betas[3] = makeBetaMap(allBetas, splitIdxHalf+(len(allBetas)-splitIdxHalf)/2, len(allBetas))
+	splitIdxHalf := len(scaledWeights) / 2
+	betas := make([]map[uint16]*decimal.Big, numSegments)
+	betas[0] = makeBetaMap(scaledWeights, 0, splitIdxHalf/2)
+	betas[1] = makeBetaMap(scaledWeights, splitIdxHalf/2, splitIdxHalf)
+	betas[2] = makeBetaMap(scaledWeights, splitIdxHalf, splitIdxHalf+(len(scaledWeights)-splitIdxHalf)/2)
+	betas[3] = makeBetaMap(scaledWeights, splitIdxHalf+(len(scaledWeights)-splitIdxHalf)/2, len(scaledWeights))
+
+	tables := make([]map[string][]uint16, numSegments)
+	maxTotalPositive, maxTotalNegative := getMaxTotal(s.p.Context, scaledWeights)
+	upper, lower := decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context)
+	s.p.Context.Sub(upper, scaledTarget, maxTotalNegative)
+	s.p.Context.Sub(lower, scaledTarget, maxTotalPositive)
 	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumsTable(betas[i], target-maxTotalNegative+roundingErrorLeft, target-maxTotalPositive-roundingErrorRight)
+		tables[i] = calculateSubsetSumsTable(s.p.Context, betas[i], upper, lower)
 		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+		fmt.Println(tables[i])
+		fmt.Println(betas[i])
 	}
 
-	var modulo int64 = 0
-	if math.Abs(float64(target)) >= math.Pow(10, 7) {
-		modulo = tools.FindNextBiggerPrime(int64(math.Sqrt(math.Abs(float64(target)))))
+	var umodulo int32
+	if len(s.p.Weights)/3 < params.MaxNumModuloBits {
+		umodulo = int32(tools.FindNextBiggerPrime(uint64(math.Pow(2, float64(len(s.p.Weights)/3)))))
 	} else {
-		modulo = tools.FindNextSmallerPrime(int64(math.Abs(float64(target))))
+		umodulo = params.DefaultPrimeModulo
 	}
-	fmt.Printf("Modulo: %d\n", modulo)
-	moduloMaps := make([]map[int32][]int64, numSegments)
+	modulo := decimal.WithContext(s.p.Context)
+	modulo.SetUint64(uint64(umodulo))
+	fmt.Printf("Modulo: %s\n", modulo.String())
+	moduloMaps := make([]map[int32][]string, numSegments)
 	for i := 0; i < numSegments; i++ {
-		moduloMaps[i] = buildModuloMap(modulo, tables[i])
-	}
-
-	// If we have rounded the target, search for other targets nearby
-	targets := []int64{target}
-	if rounder.RoundedMode {
-		for w := target + roundingErrorRight; w > target-roundingErrorLeft; w-- {
-			if w == target {
-				continue
-			}
-			targets = append(targets, w)
-		}
+		moduloMaps[i] = buildModuloMap(s.p.Context, modulo, tables[i])
+		fmt.Println(moduloMaps[i])
 	}
 
 	// Combine and backtrack
-	umodulo := int32(modulo)
 	subsets := make([][]uint16, 0)
-	var midValue, modTarget int32
+	tmp, ok := tools.BigMod(s.p.Context, scaledTarget, modulo).Int64()
+	if !ok {
+		log.Fatalf("Failed to convert %s to int64", scaledTarget.String())
+	}
+	modTarget := int32(tmp)
+	fmt.Printf("Mod target: %d\n", modTarget)
+	sl, sr, slr := decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context)
+	var midValue, targetDiff int32
 	for midValue = 0; midValue < umodulo; midValue++ {
-		if midValue%50 == 0 {
-			fmt.Printf("MidValue: %d\n", midValue)
-		}
-		combL := allSumCombinations(midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
-			betas[:numSegments/2], rounder)
+		//if midValue%50 == 0 {
+		//	fmt.Printf("MidValue: %d\n", midValue)
+		//}
+		combL := allSumCombinations(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
+			betas[:numSegments/2])
 		// No pair adds up to this midValue
 		if len(combL) == 0 {
 			continue
 		}
-		for _, t := range targets {
-			modTarget = tools.SubMod(int32(tools.Mod(t, modulo)), midValue, umodulo)
-			combR := allSumCombinations(modTarget, umodulo, moduloMaps[numSegments/2:], tables[numSegments/2:],
-				betas[numSegments/2:], rounder)
-			for sumL, solsL := range combL {
-				for sumR, solsR := range combR {
-					if sumR+sumL != t {
-						continue
-					}
-					//fmt.Printf("Found a solution!\n")
-					//fmt.Println(sumL, sumR, t)
-					//fmt.Println(solsL)
-					//fmt.Println(solsR)
-					//fmt.Println("//////////")
-					for j := range solsL {
-						for i := range solsR {
-							joint := make([]uint16, len(solsL[j])+len(solsR[i]))
-							copy(joint, solsL[j])
-							copy(joint[len(solsL[j]):], solsR[i])
-							//joint := append(solsL[j], solsR[i]...)
-							if rounder.RoundedMode {
-								preciseSum := lociToScore(joint, s.p.Weights)
-								if preciseSum.Cmp(s.target) != 0 {
-									continue
-								}
-							}
-							//fmt.Println(combL)
-							//fmt.Println(combR)
-							//fmt.Println("-----", ArrayToString(lociToGenotype(joint, pgs.NumHaplotypes*len(s.p.Weights))),
-							//	new(big.Rat).Sub(s.target, lociToScore(joint, s.p.Weights)).FloatString(12), sumR+sumL)
-							subsets = append(subsets, joint)
-						}
+		targetDiff = tools.SubMod(modTarget, midValue, umodulo)
+		combR := allSumCombinations(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:], tables[numSegments/2:],
+			betas[numSegments/2:])
+		// No pair adds up to targetDiff
+		if len(combR) == 0 {
+			continue
+		}
+		//fmt.Printf("MidValue: %d, TargetDiff %d\n\n", midValue, targetDiff)
+		//fmt.Println(combL)
+		//fmt.Println(combR)
+		for sumL, solsL := range combL {
+			sl.SetUint64(0)
+			s.p.Context.SetString(sl, sumL)
+			for sumR, solsR := range combR {
+				sr.SetUint64(0)
+				s.p.Context.SetString(sr, sumR)
+				s.p.Context.Add(slr, sl, sr)
+				//fmt.Println(sumL, sumR, slr.String(), scaledTarget.String())
+				if slr.Cmp(scaledTarget) != 0 {
+					continue
+				}
+				//fmt.Printf("Found a solution!\n")
+				//fmt.Println(sumL, sumR, s.target.String())
+				//fmt.Println(solsL)
+				//fmt.Println(solsR)
+				//fmt.Println("//////////")
+				for j := range solsL {
+					for i := range solsR {
+						joint := make([]uint16, len(solsL[j])+len(solsR[i]))
+						copy(joint, solsL[j])
+						copy(joint[len(solsL[j]):], solsR[i])
+						//joint := append(solsL[j], solsR[i]...)
+						//fmt.Println(combL)
+						//fmt.Println(combR)
+						//fmt.Println("-----", ArrayToString(lociToGenotype(joint, pgs.NumHaplotypes*len(s.p.Weights))),
+						//	new(big.Rat).Sub(s.scaledTarget, lociToScore(joint, s.p.Weights)).FloatString(12), sumR+sumL)
+						subsets = append(subsets, joint)
 					}
 				}
 			}
@@ -158,11 +154,12 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumsTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
+func calculateSubsetSumsTable(ctx decimal.Context, betas map[uint16]*decimal.Big, upperBoundOG, lowerBoundOG *decimal.Big) map[string][]uint16 {
 	// Fill out the table using dynamic programming
-	table := make(map[int64][]uint16)
+	table := make(map[string][]uint16)
 	// add the zero weight
-	table[0] = make([]uint16, 0)
+	zero := decimal.WithContext(ctx)
+	table[zero.String()] = make([]uint16, 0)
 	indices := make([]uint16, 0, len(betas))
 	for i := range betas {
 		indices = append(indices, i)
@@ -170,106 +167,122 @@ func calculateSubsetSumsTable(betas map[uint16]int64, upperBound, lowerBound int
 	sort.Slice(indices, func(i, j int) bool {
 		return indices[i] < indices[j]
 	})
+	lowerBound, upperBound := decimal.WithContext(ctx), decimal.WithContext(ctx)
+	lowerBound.Copy(lowerBoundOG)
+	upperBound.Copy(upperBoundOG)
+	prevSum, nextSum, weight := decimal.WithContext(ctx), decimal.WithContext(ctx), decimal.WithContext(ctx)
+	existingSums := make([]*decimal.Big, 1)
+	existingSums[0] = zero
 	i := 0
-	var prevSum, nextSum int64
 	var k uint16
+	var nextss string
 	for _, pos := range indices {
 		i++
 		fmt.Printf("Position %d/%d\n", i, len(betas))
-		if betas[pos] > 0 {
-			lowerBound += pgs.NumHaplotypes * betas[pos]
+		if betas[pos].Sign() > 0 {
+			ctx.Add(lowerBound, lowerBound, betas[pos])
+			ctx.Add(lowerBound, lowerBound, betas[pos])
 		} else {
-			upperBound += pgs.NumHaplotypes * betas[pos]
+			ctx.Add(upperBound, upperBound, betas[pos])
+			ctx.Add(upperBound, upperBound, betas[pos])
 		}
-		existingSums := make([]int64, 0, len(table))
-		for s := range table {
-			existingSums = append(existingSums, s)
-		}
+		newSums := make([]*decimal.Big, 0)
 		for _, prevSum = range existingSums {
 			for k = 1; k <= pgs.NumHaplotypes; k++ {
-				nextSum = prevSum + int64(k)*betas[pos]
-				if nextSum >= lowerBound && nextSum <= upperBound {
-					if _, ok := table[nextSum]; !ok {
-						table[nextSum] = make([]uint16, 0)
+				ctx.Mul(weight, betas[pos], decimal.New(int64(k), 0))
+				ctx.Add(nextSum, prevSum, weight)
+				if nextSum.Cmp(lowerBound) >= 0 && nextSum.Cmp(upperBound) <= 0 {
+					nextss = nextSum.String()
+					if _, ok := table[nextss]; !ok {
+						table[nextss] = make([]uint16, 0)
+						newSums = append(newSums, decimal.WithContext(ctx).Copy(nextSum))
 					}
-					table[nextSum] = append(table[nextSum], pgs.NumHaplotypes*pos+k-1)
+					table[nextss] = append(table[nextss], pgs.NumHaplotypes*pos+k-1)
 				}
 			}
 		}
+		existingSums = append(existingSums, newSums...)
 	}
 	return table
 }
 
-func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights map[uint16]int64, rounder *Rounder) [][]uint16 {
-	if int64(math.Abs(float64(sum))) <= rounder.RounderError {
+func backtrack(ctx decimal.Context, path []uint16, sum *decimal.Big, table map[string][]uint16, weights map[uint16]*decimal.Big) [][]uint16 {
+	if sum.Sign() == 0 {
 		return [][]uint16{path}
 	}
 	output := make([][]uint16, 0)
-	//newStates := make([][]uint16, 0)
-	//newSums := make([]int64, 0)
-	var weight int64
-	for _, ptr := range table[sum] {
+	for _, ptr := range table[sum.String()] {
 		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
 			continue
 		}
-		//newStates = append(newStates, append(path, ptr))
-		//newSums = append(newSums, sum-weights[ptr/2]*(1+int64(ptr%2)))
-		//newStates = append(newStates, make([]uint16, len(path)+1))
-		//copy(newStates[len(newStates)-1], path)
-		//newStates[len(newStates)-1][len(path)] = ptr
-		//
-		//
 		newState := make([]uint16, len(path)+1)
 		copy(newState, path)
 		newState[len(path)] = ptr
-		weight = weights[ptr/2] * (1 + int64(ptr%2))
-		if res := backtrack(newState, sum-weight, table, weights, rounder); res != nil {
+		newSum := decimal.WithContext(ctx)
+		newSum.Copy(weights[ptr/2])
+		if ptr%2 == 1 {
+			newSum.Add(newSum, weights[ptr/2])
+		}
+		ctx.Sub(newSum, sum, newSum)
+		if res := backtrack(ctx, newState, newSum, table, weights); res != nil {
 			output = append(output, res...)
 		}
 	}
-	//path = nil
-	//for i := range newStates {
-	//	if res := backtrack(newStates[i], newSums[i], table, weights, rounder); res != nil {
-	//		output = append(output, res...)
-	//	}
-	//}
 	return output
 }
 
-func buildModuloMap(modulo int64, table map[int64][]uint16) map[int32][]int64 {
-	moduloMap := make(map[int32][]int64)
+func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][]uint16) map[int32][]string {
+	moduloMap := make(map[int32][]string)
+	sumDec := decimal.WithContext(ctx)
 	var reduced int32
-	for sum := range table {
-		reduced = int32(tools.Mod(sum, modulo))
-		if _, ok := moduloMap[reduced]; !ok {
-			moduloMap[reduced] = make([]int64, 0)
+	var preReduced int64
+	var ok bool
+	for sumStr := range table {
+		sumDec.SetUint64(0)
+		ctx.SetString(sumDec, sumStr)
+		preReduced, ok = tools.BigMod(ctx, sumDec, modulo).Int64()
+		if !ok {
+			log.Fatalf("Failed to reduce %s to int64", sumStr)
 		}
-		moduloMap[reduced] = append(moduloMap[reduced], sum)
+		reduced = int32(preReduced)
+		if _, ok := moduloMap[reduced]; !ok {
+			moduloMap[reduced] = make([]string, 0)
+		}
+		moduloMap[reduced] = append(moduloMap[reduced], sumStr)
 	}
 	return moduloMap
 }
 
-func allSumCombinations(modSum, umodulo int32, modTables []map[int32][]int64, fullTables []map[int64][]uint16,
-	betas []map[uint16]int64, rounder *Rounder) map[int64][][]uint16 {
-	combinations := make(map[int64][][]uint16)
+func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]string, fullTables []map[string][]uint16,
+	betas []map[uint16]*decimal.Big) map[string][][]uint16 {
+	combinations := make(map[string][][]uint16)
 	var valueEntry, valueExit int32
-	var tmpSum int64
+	tmpSum, leftSum, rightSum := decimal.WithContext(ctx), decimal.WithContext(ctx), decimal.WithContext(ctx)
+	var ok bool
+	var s string
 	for valueEntry = range modTables[0] {
 		valueExit = tools.SubMod(modSum, valueEntry, umodulo)
-		if _, ok := modTables[1][valueExit]; !ok {
+		if _, ok = modTables[1][valueExit]; !ok {
 			continue
 		}
-		leftSolComb := backtrackedSolutions(modTables[0][valueEntry], fullTables[0], betas[0], rounder)
-		rightSolComb := backtrackedSolutions(modTables[1][valueExit], fullTables[1], betas[1], rounder)
+		leftSolComb := backtrackedSolutions(ctx, modTables[0][valueEntry], fullTables[0], betas[0])
+		rightSolComb := backtrackedSolutions(ctx, modTables[1][valueExit], fullTables[1], betas[1])
+		//fmt.Printf("/// %v\n", leftSolComb)
+		//fmt.Printf("\\\\\\ %v\n", rightSolComb)
 		for nonModSumL, lSols := range leftSolComb {
+			leftSum.SetUint64(0)
+			ctx.SetString(leftSum, nonModSumL)
 			for nonModSumR, rSols := range rightSolComb {
-				tmpSum = nonModSumL + nonModSumR
+				rightSum.SetUint64(0)
+				ctx.SetString(rightSum, nonModSumR)
+				ctx.Add(tmpSum, leftSum, rightSum)
 				for i := range lSols {
 					for j := range rSols {
-						if _, ok := combinations[tmpSum]; !ok {
-							combinations[tmpSum] = make([][]uint16, 0)
+						s = tmpSum.String()
+						if _, ok = combinations[s]; !ok {
+							combinations[s] = make([][]uint16, 0)
 						}
-						combinations[tmpSum] = append(combinations[tmpSum], append(lSols[i], rSols[j]...))
+						combinations[s] = append(combinations[s], append(lSols[i], rSols[j]...))
 						//joint := make([]uint16, len(lSols[i])+len(rSols[j]))
 						//copy(joint, lSols[i])
 						//copy(joint[len(lSols[i]):], rSols[j])
@@ -282,17 +295,31 @@ func allSumCombinations(modSum, umodulo int32, modTables []map[int32][]int64, fu
 	return combinations
 }
 
-func backtrackedSolutions(sums []int64, table map[int64][]uint16, betas map[uint16]int64, rounder *Rounder) map[int64][][]uint16 {
-	solutions := make(map[int64][][]uint16)
+func backtrackedSolutions(ctx decimal.Context, sums []string, table map[string][]uint16, betas map[uint16]*decimal.Big) map[string][][]uint16 {
+	solutions := make(map[string][][]uint16)
 	for _, sum := range sums {
+		sumBig, ok := decimal.WithContext(ctx).SetString(sum)
+		if !ok {
+			log.Fatalf("Failed to convert %s to decimal", sum)
+		}
 		input := make([]uint16, 0)
-		solutions[sum] = backtrack(input, sum, table, betas, rounder)
+		solutions[sum] = backtrack(ctx, input, sumBig, table, betas)
 	}
 	return solutions
 }
 
-func makeBetaMap(betas []int64, start, end int) map[uint16]int64 {
-	bmap := make(map[uint16]int64)
+func scaleWeights(ctx decimal.Context, weights []*decimal.Big, multiplier *decimal.Big) []*decimal.Big {
+	scaledWeights := make([]*decimal.Big, len(weights))
+	for i := range weights {
+		scaledWeights[i] = decimal.WithContext(ctx)
+		scaledWeights[i].Copy(weights[i])
+		scaledWeights[i].Mul(scaledWeights[i], multiplier)
+	}
+	return scaledWeights
+}
+
+func makeBetaMap(betas []*decimal.Big, start, end int) map[uint16]*decimal.Big {
+	bmap := make(map[uint16]*decimal.Big)
 	for i := start; i < end; i++ {
 		bmap[uint16(i)] = betas[i]
 	}
@@ -416,13 +443,15 @@ func findNextPositiveMins(values []int64) []int64 {
 	return mins
 }
 
-func getMaxTotal(values []int64) (int64, int64) {
-	positive, negative := int64(0), int64(0)
+func getMaxTotal(ctx decimal.Context, values []*decimal.Big) (*decimal.Big, *decimal.Big) {
+	positive, negative := decimal.WithContext(ctx), decimal.WithContext(ctx)
 	for _, v := range values {
-		if v > 0 {
-			positive += pgs.NumHaplotypes * v
+		if v.Sign() > 0 {
+			ctx.Add(positive, positive, v)
+			ctx.Add(positive, positive, v)
 		} else {
-			negative += pgs.NumHaplotypes * v
+			ctx.Add(negative, negative, v)
+			ctx.Add(negative, negative, v)
 		}
 	}
 	return positive, negative
