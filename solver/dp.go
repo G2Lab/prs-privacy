@@ -55,8 +55,8 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	for i := 0; i < numSegments; i++ {
 		tables[i] = calculateSubsetSumsTable(s.p.Context, betas[i], upper, lower)
 		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
-		fmt.Println(tables[i])
-		fmt.Println(betas[i])
+		//fmt.Println(tables[i])
+		//fmt.Println(betas[i])
 	}
 
 	var umodulo int32
@@ -71,7 +71,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	moduloMaps := make([]map[int32][]string, numSegments)
 	for i := 0; i < numSegments; i++ {
 		moduloMaps[i] = buildModuloMap(s.p.Context, modulo, tables[i])
-		fmt.Println(moduloMaps[i])
+		//fmt.Println(moduloMaps[i])
 	}
 
 	// Combine and backtrack
@@ -85,9 +85,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	sl, sr, slr := decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context)
 	var midValue, targetDiff int32
 	for midValue = 0; midValue < umodulo; midValue++ {
-		//if midValue%50 == 0 {
-		//	fmt.Printf("MidValue: %d\n", midValue)
-		//}
+		if midValue%1000000 == 0 {
+			fmt.Printf("MidValue: %d\n", midValue)
+		}
 		combL := allSumCombinations(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
 			betas[:numSegments/2])
 		// No pair adds up to this midValue
@@ -101,9 +101,6 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		if len(combR) == 0 {
 			continue
 		}
-		//fmt.Printf("MidValue: %d, TargetDiff %d\n\n", midValue, targetDiff)
-		//fmt.Println(combL)
-		//fmt.Println(combR)
 		for sumL, solsL := range combL {
 			sl.SetUint64(0)
 			s.p.Context.SetString(sl, sumL)
@@ -111,25 +108,18 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 				sr.SetUint64(0)
 				s.p.Context.SetString(sr, sumR)
 				s.p.Context.Add(slr, sl, sr)
-				//fmt.Println(sumL, sumR, slr.String(), scaledTarget.String())
 				if slr.Cmp(scaledTarget) != 0 {
 					continue
 				}
-				//fmt.Printf("Found a solution!\n")
-				//fmt.Println(sumL, sumR, s.target.String())
-				//fmt.Println(solsL)
-				//fmt.Println(solsR)
-				//fmt.Println("//////////")
 				for j := range solsL {
 					for i := range solsR {
-						joint := make([]uint16, len(solsL[j])+len(solsR[i]))
-						copy(joint, solsL[j])
-						copy(joint[len(solsL[j]):], solsR[i])
-						//joint := append(solsL[j], solsR[i]...)
+						//joint := make([]uint16, len(solsL[j])+len(solsR[i]))
+						//copy(joint, solsL[j])
+						//copy(joint[len(solsL[j]):], solsR[i])
+						joint := append(solsL[j], solsR[i]...)
 						//fmt.Println(combL)
 						//fmt.Println(combR)
 						//fmt.Println("-----", ArrayToString(lociToGenotype(joint, pgs.NumHaplotypes*len(s.p.Weights))),
-						//	new(big.Rat).Sub(s.scaledTarget, lociToScore(joint, s.p.Weights)).FloatString(12), sumR+sumL)
 						subsets = append(subsets, joint)
 					}
 				}
@@ -267,8 +257,6 @@ func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []
 		}
 		leftSolComb := backtrackedSolutions(ctx, modTables[0][valueEntry], fullTables[0], betas[0])
 		rightSolComb := backtrackedSolutions(ctx, modTables[1][valueExit], fullTables[1], betas[1])
-		//fmt.Printf("/// %v\n", leftSolComb)
-		//fmt.Printf("\\\\\\ %v\n", rightSolComb)
 		for nonModSumL, lSols := range leftSolComb {
 			leftSum.SetUint64(0)
 			ctx.SetString(leftSum, nonModSumL)
