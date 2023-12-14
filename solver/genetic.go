@@ -33,7 +33,7 @@ package solver
 //	//poolSize := len(g.p.Variants)
 //	solutions := make(map[string][]uint8)
 //	candidates := make([][]uint8, poolSize, int(3/2)*poolSize)
-//	// Initialize candidate solutions according to the SNPs likelihood in the population
+//	// Initialize mutations solutions according to the SNPs likelihood in the population
 //	for i := 0; i < len(candidates); i++ {
 //		candidates[i], err = g.p.SampleFromPopulation()
 //		//candidates[i], err = g.p.SampleUniform()
@@ -47,8 +47,8 @@ package solver
 //		if k%500 == 0 {
 //			fmt.Printf("Iteration %d/%d\n", k, params.ITERATIONS)
 //			//acc := make([]float64, 0, len(candidates))
-//			//for _, candidate := range candidates {
-//			//	acc = append(acc, Accuracy(candidate, g.trueGenome))
+//			//for _, mutations := range candidates {
+//			//	acc = append(acc, Accuracy(mutations, g.trueGenome))
 //			//}
 //			//slices.Sort(acc)
 //			//fmt.Printf("Accuracy: %v\n", acc[len(acc)-10:])

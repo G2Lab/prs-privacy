@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/big"
 	"sort"
 
 	"github.com/ericlagergren/decimal"
@@ -68,26 +67,31 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	modulo := decimal.WithContext(s.p.Context)
 	modulo.SetUint64(uint64(umodulo))
 	fmt.Printf("Modulo: %s\n", modulo.String())
-	moduloMaps := make([]map[int32][]string, numSegments)
+	moduloMaps := make([]map[int32][]*decimal.Big, numSegments)
 	for i := 0; i < numSegments; i++ {
 		moduloMaps[i] = buildModuloMap(s.p.Context, modulo, tables[i])
 		//fmt.Println(moduloMaps[i])
 	}
 
 	// Combine and backtrack
-	subsets := make([][]uint16, 0)
 	tmp, ok := tools.BigMod(s.p.Context, scaledTarget, modulo).Int64()
 	if !ok {
 		log.Fatalf("Failed to convert %s to int64", scaledTarget.String())
 	}
 	modTarget := int32(tmp)
-	fmt.Printf("Mod target: %d\n", modTarget)
+
+	//subsets := make([][]uint16, 0)
+	var leftLkl, rightLkl float64
+	leftHeap := &genheap{}
+	solutionHeap := &genheap{}
+	//fmt.Printf("Mod target: %d\n", modTarget)
 	sl, sr, slr := decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context)
 	var midValue, targetDiff int32
 	for midValue = 0; midValue < umodulo; midValue++ {
-		if midValue%1000000 == 0 {
+		if midValue%100000 == 0 {
 			fmt.Printf("MidValue: %d\n", midValue)
 		}
+		//combL := getMatchingSums(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2])
 		combL := allSumCombinations(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
 			betas[:numSegments/2])
 		// No pair adds up to this midValue
@@ -95,6 +99,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 			continue
 		}
 		targetDiff = tools.SubMod(modTarget, midValue, umodulo)
+		//combR := getMatchingSums(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:])
 		combR := allSumCombinations(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:], tables[numSegments/2:],
 			betas[numSegments/2:])
 		// No pair adds up to targetDiff
@@ -112,35 +117,33 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 					continue
 				}
 				for j := range solsL {
+					leftLkl = calculateNegativeLikelihood(solsL[j], len(s.p.Weights)*pgs.NumHaplotypes/2, s.p)
+					if !addToHeap(leftHeap, leftLkl, solsL[j], params.SmallHeap) {
+						continue
+					}
 					for i := range solsR {
-						//joint := make([]uint16, len(solsL[j])+len(solsR[i]))
-						//copy(joint, solsL[j])
-						//copy(joint[len(solsL[j]):], solsR[i])
-						joint := append(solsL[j], solsR[i]...)
-						//fmt.Println(combL)
-						//fmt.Println(combR)
-						//fmt.Println("-----", ArrayToString(lociToGenotype(joint, pgs.NumHaplotypes*len(s.p.Weights))),
-						subsets = append(subsets, joint)
+						//joint := append(solsL[j], solsR[i]...)
+						//subsets = append(subsets, joint)
+						joint := make([]uint16, len(solsL[j])+len(solsR[i]))
+						copy(joint, solsL[j])
+						copy(joint[len(solsL[j]):], solsR[i])
+						rightLkl = calculateNegativeLikelihood(solsR[i], len(s.p.Weights)*pgs.NumHaplotypes/2, s.p)
+						addToHeap(solutionHeap, leftLkl+rightLkl, joint, params.BigHeap)
 					}
 				}
 			}
 		}
-
 	}
 	solutions := make(map[string][]uint8)
-	for _, subset := range subsets {
-		sol := lociToGenotype(subset, pgs.NumHaplotypes*len(s.p.Weights))
-		solutions[ArrayToString(sol)] = sol
+	for _, sol := range *solutionHeap {
+		subset := lociToGenotype(sol.mutations, len(s.p.Weights)*pgs.NumHaplotypes)
+		solutions[ArrayToString(subset)] = subset
 	}
-	return solutions
-
-	//lowestAbsoluteLikelihood := math.MaxFloat64
-	//var lkl float64
-	//lkl = calculateNegativeLikelihood(joint, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
-	//if lkl <= lowestAbsoluteLikelihood {
-	//	subsets = append(subsets, joint)
-	//	lowestAbsoluteLikelihood = lkl
+	//for _, subset := range subsets {
+	//	sol := lociToGenotype(subset, pgs.NumHaplotypes*len(s.p.Weights))
+	//	solutions[ArrayToString(sol)] = sol
 	//}
+	return solutions
 }
 
 // We assume that the weights are sorted in ascending order
@@ -168,7 +171,7 @@ func calculateSubsetSumsTable(ctx decimal.Context, betas map[uint16]*decimal.Big
 	var nextss string
 	for _, pos := range indices {
 		i++
-		fmt.Printf("Position %d/%d\n", i, len(betas))
+		//fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[pos].Sign() > 0 {
 			ctx.Add(lowerBound, lowerBound, betas[pos])
 			ctx.Add(lowerBound, lowerBound, betas[pos])
@@ -221,8 +224,8 @@ func backtrack(ctx decimal.Context, path []uint16, sum *decimal.Big, table map[s
 	return output
 }
 
-func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][]uint16) map[int32][]string {
-	moduloMap := make(map[int32][]string)
+func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][]uint16) map[int32][]*decimal.Big {
+	moduloMap := make(map[int32][]*decimal.Big)
 	sumDec := decimal.WithContext(ctx)
 	var reduced int32
 	var preReduced int64
@@ -236,11 +239,32 @@ func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][
 		}
 		reduced = int32(preReduced)
 		if _, ok := moduloMap[reduced]; !ok {
-			moduloMap[reduced] = make([]string, 0)
+			moduloMap[reduced] = make([]*decimal.Big, 0)
 		}
-		moduloMap[reduced] = append(moduloMap[reduced], sumStr)
+		moduloMap[reduced] = append(moduloMap[reduced], sumDec)
 	}
 	return moduloMap
+}
+
+func getMatchingSums(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]*decimal.Big) [][]*decimal.Big {
+	var valueEntry, valueExit int32
+	var ok bool
+	matches := make([][]*decimal.Big, 0)
+	leftSum, rightSum := decimal.WithContext(ctx), decimal.WithContext(ctx)
+	for valueEntry = range modTables[0] {
+		valueExit = tools.SubMod(modSum, valueEntry, umodulo)
+		if _, ok = modTables[1][valueExit]; !ok {
+			continue
+		}
+		for _, leftSum = range modTables[0][valueEntry] {
+			for _, rightSum = range modTables[1][valueExit] {
+				jointSum := decimal.WithContext(ctx)
+				ctx.Add(jointSum, leftSum, rightSum)
+				matches = append(matches, []*decimal.Big{jointSum, leftSum, rightSum})
+			}
+		}
+	}
+	return matches
 }
 
 func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]string, fullTables []map[string][]uint16,
@@ -270,11 +294,11 @@ func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []
 						if _, ok = combinations[s]; !ok {
 							combinations[s] = make([][]uint16, 0)
 						}
-						combinations[s] = append(combinations[s], append(lSols[i], rSols[j]...))
-						//joint := make([]uint16, len(lSols[i])+len(rSols[j]))
-						//copy(joint, lSols[i])
-						//copy(joint[len(lSols[i]):], rSols[j])
-						//combinations[tmpSum] = append(combinations[tmpSum], joint)
+						//combinations[s] = append(combinations[s], append(lSols[i], rSols[j]...))
+						joint := make([]uint16, len(lSols[i])+len(rSols[j]))
+						copy(joint, lSols[i])
+						copy(joint[len(lSols[i]):], rSols[j])
+						combinations[s] = append(combinations[s], joint)
 					}
 				}
 			}
@@ -284,11 +308,13 @@ func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []
 }
 
 func backtrackedSolutions(ctx decimal.Context, sums []string, table map[string][]uint16, betas map[uint16]*decimal.Big) map[string][][]uint16 {
+	var ok bool
 	solutions := make(map[string][][]uint16)
 	for _, sum := range sums {
-		sumBig, ok := decimal.WithContext(ctx).SetString(sum)
+		sumBig := decimal.WithContext(ctx)
+		_, ok = ctx.SetString(sumBig, sum)
 		if !ok {
-			log.Fatalf("Failed to convert %s to decimal", sum)
+			log.Fatalf("Failed to convert %s to decimal.Big", sum)
 		}
 		input := make([]uint16, 0)
 		solutions[sum] = backtrack(ctx, input, sumBig, table, betas)
@@ -297,13 +323,13 @@ func backtrackedSolutions(ctx decimal.Context, sums []string, table map[string][
 }
 
 func scaleWeights(ctx decimal.Context, weights []*decimal.Big, multiplier *decimal.Big) []*decimal.Big {
-	scaledWeights := make([]*decimal.Big, len(weights))
+	scaled := make([]*decimal.Big, len(weights))
 	for i := range weights {
-		scaledWeights[i] = decimal.WithContext(ctx)
-		scaledWeights[i].Copy(weights[i])
-		scaledWeights[i].Mul(scaledWeights[i], multiplier)
+		scaled[i] = decimal.WithContext(ctx)
+		scaled[i].Copy(weights[i])
+		scaled[i].Mul(scaled[i], multiplier)
 	}
-	return scaledWeights
+	return scaled
 }
 
 func makeBetaMap(betas []*decimal.Big, start, end int) map[uint16]*decimal.Big {
@@ -312,6 +338,20 @@ func makeBetaMap(betas []*decimal.Big, start, end int) map[uint16]*decimal.Big {
 		bmap[uint16(i)] = betas[i]
 	}
 	return bmap
+}
+
+func addToHeap(h *genheap, lkl float64, sol []uint16, heapSize int) bool {
+	switch {
+	case h.Len() < heapSize:
+		heap.Push(h, genotype{sol, lkl})
+		return true
+	case lkl < (*h)[0].likelihood:
+		heap.Pop(h)
+		heap.Push(h, genotype{sol, lkl})
+		return true
+	default:
+		return false
+	}
 }
 
 func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
@@ -323,63 +363,36 @@ func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint1
 	return candidates
 }
 
-type candidateWithLikelihood struct {
-	candidate  []uint16
-	likelihood float64
-}
-
-type likelihoodHeap []candidateWithLikelihood
-
-func (lh likelihoodHeap) Len() int { return len(lh) }
-func (lh likelihoodHeap) Less(i, j int) bool {
-	return lh[i].likelihood > lh[j].likelihood
-}
-func (lh likelihoodHeap) Swap(i, j int) {
-	lh[i].candidate, lh[j].candidate = lh[j].candidate, lh[i].candidate
-	lh[i].likelihood, lh[j].likelihood = lh[j].likelihood, lh[i].likelihood
-}
-
-func (lh *likelihoodHeap) Push(x interface{}) {
-	*lh = append(*lh, x.(candidateWithLikelihood))
-}
-
-func (lh *likelihoodHeap) Pop() interface{} {
-	old := *lh
-	n := len(old)
-	x := old[n-1]
-	*lh = old[0 : n-1]
-	return x
-}
-
 func selectTopLikelihoodCandidates(candidates [][]uint16, totalLen int, p *pgs.PGS, top int) [][]uint16 {
 	if len(candidates) <= top {
 		return candidates
 	}
-	h := &likelihoodHeap{}
-	// Push the first N slices onto the heap
+	h := &genheap{}
+	// Push the first N slices onto the genheap
 	for i := 0; i < top; i++ {
-		heap.Push(h, candidateWithLikelihood{candidates[i], calculateNegativeLikelihood(candidates[i], totalLen, p)})
+		heap.Push(h, genotype{candidates[i], calculateNegativeLikelihood(candidates[i], totalLen, p)})
 	}
 	var lkl float64
-	// Update the heap with remaining slices
+	// Update the genheap with remaining slices
 	for i := top; i < len(candidates); i++ {
 		lkl = calculateNegativeLikelihood(candidates[i], totalLen, p)
-		if lkl > (*h)[0].likelihood {
+		if lkl < (*h)[0].likelihood {
 			// Replace the minimum element with the current slice
 			heap.Pop(h)
-			heap.Push(h, candidateWithLikelihood{candidates[i], lkl})
+			heap.Push(h, genotype{candidates[i], lkl})
 		}
 	}
 
-	// Extract slices from the heap
+	// Extract slices from the genheap
 	result := make([][]uint16, top)
 	for i := top - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(candidateWithLikelihood).candidate
+		result[i] = heap.Pop(h).(genotype).mutations
 	}
 
 	return result
 }
 
+// Smaller the negative likelihood, the more likely the sequence is
 func calculateNegativeLikelihood(sequence []uint16, totalLen int, p *pgs.PGS) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
@@ -445,26 +458,6 @@ func getMaxTotal(ctx decimal.Context, values []*decimal.Big) (*decimal.Big, *dec
 	return positive, negative
 }
 
-func betasFromWeights(weights []*big.Rat, multiplier *big.Rat) []int64 {
-	betas := make([]int64, len(weights))
-	for i := range betas {
-		tmp, _ := new(big.Rat).Mul(weights[i], multiplier).Float64()
-		betas[i] = int64(tmp)
-	}
-	return betas
-}
-
-func lociToScore(loci []uint16, weights []*big.Rat) *big.Rat {
-	score := new(big.Rat).SetInt64(0)
-	for _, locus := range loci {
-		score.Add(score, weights[locus/2])
-		if locus%2 == 1 {
-			score.Add(score, weights[locus/2])
-		}
-	}
-	return score
-}
-
 func lociToGenotype(loci []uint16, total int) []uint8 {
 	sol := make([]uint8, total)
 	for _, locus := range loci {
@@ -481,7 +474,7 @@ func lociToGenotype(loci []uint16, total int) []uint8 {
 	return sol
 }
 
-func sortedIndices(values []*big.Rat) []int {
+func sortedIndices(values []*decimal.Big) []int {
 	// Create a slice of indices.
 	indices := make([]int, len(values))
 	for i := range indices {

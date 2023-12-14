@@ -2,9 +2,14 @@ package params
 
 const DataFolder = "inputs"
 
+const NumCpusEnv = "SLURM_CPUS_PER_TASK"
+
 const ITERATIONS = 5000
 
-const NumCpusEnv = "SLURM_CPUS_PER_TASK"
+const (
+	SmallHeap = 100
+	BigHeap   = 300
+)
 
 const (
 	MaxNumModuloBits   = 23
