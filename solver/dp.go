@@ -26,6 +26,11 @@ func NewDP(target *decimal.Big, p *pgs.PGS, numThreads int) *DP {
 	return s
 }
 
+type Product struct {
+	Factors []*decimal.Big
+	Sum     *decimal.Big
+}
+
 func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	scale := s.target.Scale()
 	multiplier := decimal.WithContext(s.p.Context).SetMantScale(1, -scale)
@@ -80,57 +85,68 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	}
 	modTarget := int32(tmp)
 
-	//subsets := make([][]uint16, 0)
-	var leftLkl, rightLkl float64
-	leftHeap := &genheap{}
+	// Do recursion to explore all the combinations
+	//lheaps := make([]*genheap, numSegments)
 	solutionHeap := &genheap{}
+	var lkl float64
+	var combine func(int, []uint16, [][][]uint16)
+	combine = func(k int, input []uint16, segments [][][]uint16) {
+		if k == numSegments {
+			lkl = calculateNegativeLikelihood(input, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+			addToHeap(solutionHeap, lkl, input, params.BigHeap)
+			return
+		}
+		for _, sol := range segments[k] {
+			carryover := make([]uint16, len(input)+len(sol))
+			copy(carryover, input)
+			copy(carryover[len(input):], sol)
+			combine(k+1, carryover, segments)
+		}
+	}
+
 	//fmt.Printf("Mod target: %d\n", modTarget)
-	sl, sr, slr := decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context), decimal.WithContext(s.p.Context)
+	sumLR := decimal.WithContext(s.p.Context)
+	backtracked := make([]map[string][][]uint16, numSegments)
+	products := make([][]*Product, numSegments/2)
+	for i := 0; i < len(products); i++ {
+		products[i] = make([]*Product, 0)
+	}
 	var midValue, targetDiff int32
+	var i, j, k int
 	for midValue = 0; midValue < umodulo; midValue++ {
 		if midValue%100000 == 0 {
 			fmt.Printf("MidValue: %d\n", midValue)
 		}
-		//combL := getMatchingSums(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2])
-		combL := allSumCombinations(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2], tables[:numSegments/2],
-			betas[:numSegments/2])
+		products[0] = getMatchingSums(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2])
 		// No pair adds up to this midValue
-		if len(combL) == 0 {
+		if len(products[0]) == 0 {
 			continue
 		}
 		targetDiff = tools.SubMod(modTarget, midValue, umodulo)
-		//combR := getMatchingSums(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:])
-		combR := allSumCombinations(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:], tables[numSegments/2:],
-			betas[numSegments/2:])
+		products[1] = getMatchingSums(s.p.Context, targetDiff, umodulo, moduloMaps[numSegments/2:])
 		// No pair adds up to targetDiff
-		if len(combR) == 0 {
+		if len(products[1]) == 0 {
 			continue
 		}
-		for sumL, solsL := range combL {
-			sl.SetUint64(0)
-			s.p.Context.SetString(sl, sumL)
-			for sumR, solsR := range combR {
-				sr.SetUint64(0)
-				s.p.Context.SetString(sr, sumR)
-				s.p.Context.Add(slr, sl, sr)
-				if slr.Cmp(scaledTarget) != 0 {
+		segments := make([][][]uint16, numSegments)
+		for i = range products[0] {
+			for j = range products[1] {
+				sumLR.SetUint64(0)
+				s.p.Context.Add(sumLR, products[0][i].Sum, products[1][j].Sum)
+				if sumLR.Cmp(scaledTarget) != 0 {
 					continue
 				}
-				for j := range solsL {
-					leftLkl = calculateNegativeLikelihood(solsL[j], len(s.p.Weights)*pgs.NumHaplotypes/2, s.p)
-					if !addToHeap(leftHeap, leftLkl, solsL[j], params.SmallHeap) {
-						continue
+				// Get all the parts of the valid solution
+				for k = 0; k < numSegments/2; k++ {
+					if segments[k], ok = backtracked[k][products[0][i].Factors[k].String()]; !ok {
+						segments[k] = backtrackFromSum(s.p.Context, products[0][i].Factors[k], tables[k], betas[k])
 					}
-					for i := range solsR {
-						//joint := append(solsL[j], solsR[i]...)
-						//subsets = append(subsets, joint)
-						joint := make([]uint16, len(solsL[j])+len(solsR[i]))
-						copy(joint, solsL[j])
-						copy(joint[len(solsL[j]):], solsR[i])
-						rightLkl = calculateNegativeLikelihood(solsR[i], len(s.p.Weights)*pgs.NumHaplotypes/2, s.p)
-						addToHeap(solutionHeap, leftLkl+rightLkl, joint, params.BigHeap)
+					if segments[numSegments/2+k], ok = backtracked[numSegments/2+k][products[1][j].Factors[k].String()]; !ok {
+						segments[numSegments/2+k] = backtrackFromSum(s.p.Context, products[1][j].Factors[k], tables[numSegments/2+k], betas[numSegments/2+k])
 					}
 				}
+				joint := make([]uint16, 0)
+				combine(0, joint, segments)
 			}
 		}
 	}
@@ -139,10 +155,6 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		subset := lociToGenotype(sol.mutations, len(s.p.Weights)*pgs.NumHaplotypes)
 		solutions[ArrayToString(subset)] = subset
 	}
-	//for _, subset := range subsets {
-	//	sol := lociToGenotype(subset, pgs.NumHaplotypes*len(s.p.Weights))
-	//	solutions[ArrayToString(sol)] = sol
-	//}
 	return solutions
 }
 
@@ -226,12 +238,11 @@ func backtrack(ctx decimal.Context, path []uint16, sum *decimal.Big, table map[s
 
 func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][]uint16) map[int32][]*decimal.Big {
 	moduloMap := make(map[int32][]*decimal.Big)
-	sumDec := decimal.WithContext(ctx)
 	var reduced int32
 	var preReduced int64
 	var ok bool
 	for sumStr := range table {
-		sumDec.SetUint64(0)
+		sumDec := decimal.WithContext(ctx)
 		ctx.SetString(sumDec, sumStr)
 		preReduced, ok = tools.BigMod(ctx, sumDec, modulo).Int64()
 		if !ok {
@@ -246,25 +257,29 @@ func buildModuloMap(ctx decimal.Context, modulo *decimal.Big, table map[string][
 	return moduloMap
 }
 
-func getMatchingSums(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]*decimal.Big) [][]*decimal.Big {
+func getMatchingSums(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]*decimal.Big) []*Product {
 	var valueEntry, valueExit int32
 	var ok bool
-	matches := make([][]*decimal.Big, 0)
-	leftSum, rightSum := decimal.WithContext(ctx), decimal.WithContext(ctx)
+	matches := make([]*Product, 0)
 	for valueEntry = range modTables[0] {
 		valueExit = tools.SubMod(modSum, valueEntry, umodulo)
 		if _, ok = modTables[1][valueExit]; !ok {
 			continue
 		}
-		for _, leftSum = range modTables[0][valueEntry] {
-			for _, rightSum = range modTables[1][valueExit] {
+		for _, leftSum := range modTables[0][valueEntry] {
+			for _, rightSum := range modTables[1][valueExit] {
 				jointSum := decimal.WithContext(ctx)
 				ctx.Add(jointSum, leftSum, rightSum)
-				matches = append(matches, []*decimal.Big{jointSum, leftSum, rightSum})
+				matches = append(matches, &Product{[]*decimal.Big{leftSum, rightSum}, jointSum})
 			}
 		}
 	}
 	return matches
+}
+
+func backtrackFromSum(ctx decimal.Context, sum *decimal.Big, table map[string][]uint16, betas map[uint16]*decimal.Big) [][]uint16 {
+	input := make([]uint16, 0)
+	return backtrack(ctx, input, sum, table, betas)
 }
 
 func allSumCombinations(ctx decimal.Context, modSum, umodulo int32, modTables []map[int32][]string, fullTables []map[string][]uint16,

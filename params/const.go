@@ -8,7 +8,7 @@ const ITERATIONS = 5000
 
 const (
 	SmallHeap = 100
-	BigHeap   = 300
+	BigHeap   = 1000
 )
 
 const (

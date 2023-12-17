@@ -343,8 +343,8 @@ package solver
 ////	return solutions.RetrieveMapOnly()
 ////}
 //
-////func (s *Solve) branching(current []int, sum, target float64, pos int, solutions *MutexMap, threadsLeft int, wg *sync.WaitGroup) {
-////	if math.Abs(sum - target) < pgs.ErrorMargin {
+////func (s *Solve) branching(current []int, Sum, target float64, pos int, solutions *MutexMap, threadsLeft int, wg *sync.WaitGroup) {
+////	if math.Abs(Sum - target) < pgs.ErrorMargin {
 ////		if len(current) < len(s.p.Weights) {
 ////			// pad with zeros
 ////			current = append(current, make([]int, len(s.p.Weights)-len(current))...)
@@ -353,7 +353,7 @@ package solver
 ////		solutions.Put(arrayToStringDiploid(current), current)
 ////		return
 ////	}
-////	if sum > target || pos >= len(s.p.Weights) {
+////	if Sum > target || pos >= len(s.p.Weights) {
 ////		return
 ////	}
 ////
@@ -362,11 +362,11 @@ package solver
 ////		wg.Add(1)
 ////		threadsLeft -= 1
 ////		go func() {
-////			s.branching(current, sum, target, pos+1, solutions, threadsLeft, wg)
+////			s.branching(current, Sum, target, pos+1, solutions, threadsLeft, wg)
 ////			wg.Done()
 ////		}()
 ////	} else {
-////		s.branching(current, sum, target, pos+1, solutions, threadsLeft, wg)
+////		s.branching(current, Sum, target, pos+1, solutions, threadsLeft, wg)
 ////	}
 ////	for snp := 1; snp <= 2; snp++ {
 ////		branched := make([]int, len(current))
@@ -376,11 +376,11 @@ package solver
 ////			wg.Add(1)
 ////			threadsLeft -= 1
 ////			go func() {
-////				s.branching(branched, sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
+////				s.branching(branched, Sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
 ////				wg.Done()
 ////			}()
 ////		} else {
-////			s.branching(branched, sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
+////			s.branching(branched, Sum+float64(snp)*s.p.Weights[pos], target, pos+1, solutions, threadsLeft, wg)
 ////		}
 ////	}
 ////}
