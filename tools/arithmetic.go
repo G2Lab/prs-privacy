@@ -28,49 +28,6 @@ func BigSubMod(ctx decimal.Context, a, b, modulus *decimal.Big) *decimal.Big {
 	return BigMod(ctx, diff, modulus)
 }
 
-//
-//func IsPrime(ctx decimal.Context, n *decimal.Big) bool {
-//	if n.Cmp(decimal.New(2, 0)) == 0 {
-//		return true
-//	}
-//	if n.Cmp(decimal.New(1, 0)) == 0 || n.Cmp(decimal.New(0, 0)) == -1 {
-//		return false
-//	}
-//	rem := decimal.WithContext(ctx)
-//	// Check even numbers
-//	ctx.Rem(rem, n, Two)
-//	if rem.Cmp(BigZero) == 0 {
-//		return false
-//	}
-//	// Check the odd divisors up to sqrt(n)
-//	maxDivisor := decimal.WithContext(ctx)
-//	ctx.Sqrt(maxDivisor, n)
-//	i := decimal.WithContext(ctx)
-//	i.Copy(Three)
-//	for i.Cmp(maxDivisor) != 1 {
-//		ctx.Rem(rem, n, i)
-//		if rem.Cmp(BigZero) == 0 {
-//			return false
-//		}
-//		i = ctx.Add(i, i, Two)
-//	}
-//	return true
-//}
-//
-//func FindNextBiggerPrime(ctx decimal.Context, n *decimal.Big) *decimal.Big {
-//	for !IsPrime(ctx, n) {
-//		n = ctx.Add(n, n, One)
-//	}
-//	return n
-//}
-//
-//func FindNextSmallerPrime(ctx decimal.Context, n *decimal.Big) *decimal.Big {
-//	for !IsPrime(ctx, n) {
-//		n = ctx.Sub(n, n, One)
-//	}
-//	return n
-//}
-
 // Mod function
 func Mod[T params.Integer](n, modulus T) T {
 	result := n % modulus
