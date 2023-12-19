@@ -111,10 +111,11 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	for i := 0; i < len(products); i++ {
 		products[i] = make([]*Product, 0)
 	}
+	step := umodulo / 10
 	var midValue, targetDiff int32
 	var i, j, k int
 	for midValue = 0; midValue < umodulo; midValue++ {
-		if midValue%100000 == 0 {
+		if midValue%step == 0 {
 			fmt.Printf("MidValue: %d\n", midValue)
 		}
 		products[0] = getMatchingSums(s.p.Context, midValue, umodulo, moduloMaps[:numSegments/2])
