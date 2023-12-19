@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"runtime/pprof"
 	"strconv"
 
 	"github.com/ericlagergren/decimal"
@@ -15,7 +17,19 @@ import (
 	"github.com/nikirill/prs/solver"
 )
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	//likelihoodEffect()
 	//scoreToLikelihoodDistribution()
 	//scoreToLikelihood()

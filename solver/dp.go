@@ -63,12 +63,13 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 		//fmt.Println(betas[i])
 	}
 
-	var umodulo int32
-	if len(s.p.Weights)/3 < params.MaxNumModuloBits {
-		umodulo = int32(tools.FindNextBiggerPrime(uint64(math.Pow(2, float64(len(s.p.Weights)/3)))))
-	} else {
-		umodulo = params.DefaultPrimeModulo
-	}
+	//var umodulo int32
+	//if len(s.p.Weights)/3 < params.MaxNumModuloBits {
+	//	umodulo = int32(tools.FindNextBiggerPrime(uint64(math.Pow(2, float64(len(s.p.Weights)/3)))))
+	//} else {
+	//	umodulo = params.DefaultPrimeModulo
+	//}
+	umodulo := int32(tools.FindNextSmallerPrime(uint64(len(tables[0]))))
 	modulo := decimal.WithContext(s.p.Context)
 	modulo.SetUint64(uint64(umodulo))
 	fmt.Printf("Modulo: %s\n", modulo.String())
@@ -92,7 +93,7 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	var combine func(int, []uint16, [][][]uint16)
 	combine = func(k int, input []uint16, segments [][][]uint16) {
 		if k == numSegments {
-			lkl = calculateNegativeLikelihood(input, len(s.p.Weights)*pgs.NumHaplotypes, s.p)
+			lkl = calculateNegativeLikelihood(input, 0, len(scaledWeights)*pgs.NumHaplotypes, s.p)
 			addToHeap(solutionHeap, lkl, input, params.BigHeap)
 			return
 		}
@@ -107,6 +108,9 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 	//fmt.Printf("Mod target: %d\n", modTarget)
 	sumLR := decimal.WithContext(s.p.Context)
 	backtracked := make([]map[string][][]uint16, numSegments)
+	for i := 0; i < numSegments; i++ {
+		backtracked[i] = make(map[string][][]uint16)
+	}
 	products := make([][]*Product, numSegments/2)
 	for i := 0; i < len(products); i++ {
 		products[i] = make([]*Product, 0)
@@ -141,9 +145,13 @@ func (s *DP) Solve(numThreads int) map[string][]uint8 {
 				for k = 0; k < numSegments/2; k++ {
 					if segments[k], ok = backtracked[k][products[0][i].Factors[k].String()]; !ok {
 						segments[k] = backtrackFromSum(s.p.Context, products[0][i].Factors[k], tables[k], betas[k])
+						backtracked[k][products[0][i].Factors[k].String()] = make([][]uint16, len(segments[k]))
+						copy(backtracked[k][products[0][i].Factors[k].String()], segments[k])
 					}
 					if segments[numSegments/2+k], ok = backtracked[numSegments/2+k][products[1][j].Factors[k].String()]; !ok {
 						segments[numSegments/2+k] = backtrackFromSum(s.p.Context, products[1][j].Factors[k], tables[numSegments/2+k], betas[numSegments/2+k])
+						backtracked[numSegments/2+k][products[1][j].Factors[k].String()] = make([][]uint16, len(segments[numSegments/2+k]))
+						copy(backtracked[numSegments/2+k][products[1][j].Factors[k].String()], segments[numSegments/2+k])
 					}
 				}
 				joint := make([]uint16, 0)
@@ -373,7 +381,7 @@ func addToHeap(h *genheap, lkl float64, sol []uint16, heapSize int) bool {
 func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
 	likelihoods := make([]float64, len(candidates))
 	for i, candidate := range candidates {
-		likelihoods[i] = calculateNegativeLikelihood(candidate, totalLen, p)
+		likelihoods[i] = calculateNegativeLikelihood(candidate, 0, totalLen, p)
 	}
 	sortBy(candidates, likelihoods)
 	return candidates
@@ -386,12 +394,12 @@ func selectTopLikelihoodCandidates(candidates [][]uint16, totalLen int, p *pgs.P
 	h := &genheap{}
 	// Push the first N slices onto the genheap
 	for i := 0; i < top; i++ {
-		heap.Push(h, genotype{candidates[i], calculateNegativeLikelihood(candidates[i], totalLen, p)})
+		heap.Push(h, genotype{candidates[i], calculateNegativeLikelihood(candidates[i], 0, totalLen, p)})
 	}
 	var lkl float64
 	// Update the genheap with remaining slices
 	for i := top; i < len(candidates); i++ {
-		lkl = calculateNegativeLikelihood(candidates[i], totalLen, p)
+		lkl = calculateNegativeLikelihood(candidates[i], 0, totalLen, p)
 		if lkl < (*h)[0].likelihood {
 			// Replace the minimum element with the current slice
 			heap.Pop(h)
@@ -409,17 +417,24 @@ func selectTopLikelihoodCandidates(candidates [][]uint16, totalLen int, p *pgs.P
 }
 
 // Smaller the negative likelihood, the more likely the sequence is
-func calculateNegativeLikelihood(sequence []uint16, totalLen int, p *pgs.PGS) float64 {
+func calculateNegativeLikelihood(sequence []uint16, startIdx, endIdx int, p *pgs.PGS) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
 	for _, pos := range sequence {
 		indexed[pos] = struct{}{}
 	}
-	for j := 0; j < totalLen; j++ {
-		if _, ok := indexed[uint16(j)]; ok {
-			likelihood += mafToLikelihood(p.Maf[j/2][1])
-		} else {
+	var single, double bool
+	for j := startIdx; j < endIdx; j += pgs.NumHaplotypes {
+		_, single = indexed[uint16(j)]
+		_, double = indexed[uint16(j+1)]
+		switch {
+		case single:
 			likelihood += mafToLikelihood(p.Maf[j/2][0])
+			likelihood += mafToLikelihood(p.Maf[j/2][1])
+		case double:
+			likelihood += mafToLikelihood(p.Maf[j/2][1]) * pgs.NumHaplotypes
+		default:
+			likelihood += mafToLikelihood(p.Maf[j/2][0]) * pgs.NumHaplotypes
 		}
 	}
 	return likelihood
