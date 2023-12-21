@@ -3,6 +3,7 @@ package solver
 import (
 	"fmt"
 	"log"
+	"math"
 	"strings"
 
 	"github.com/ericlagergren/decimal"
@@ -11,7 +12,44 @@ import (
 )
 
 type Solver interface {
-	Solve(numThreads int) map[string][]uint8
+	Solve() map[string][]uint8
+}
+
+// Smaller the negative likelihood, the more likely the sequence is
+func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, p *pgs.PGS) float64 {
+	var likelihood float64 = 0
+	indexed := make(map[uint16]struct{})
+	for _, pos := range mutatedLoci {
+		indexed[pos] = struct{}{}
+	}
+	var single, double bool
+	for j := startIdx; j < endIdx; j += pgs.NumHaplotypes {
+		_, single = indexed[uint16(j)]
+		_, double = indexed[uint16(j+1)]
+		switch {
+		case single:
+			likelihood += mafToLikelihood(p.Maf[j/2][0])
+			likelihood += mafToLikelihood(p.Maf[j/2][1])
+		case double:
+			likelihood += mafToLikelihood(p.Maf[j/2][1]) * pgs.NumHaplotypes
+		default:
+			likelihood += mafToLikelihood(p.Maf[j/2][0]) * pgs.NumHaplotypes
+		}
+	}
+	return likelihood
+}
+
+func mafToLikelihood(maf float64) float64 {
+	return -math.Log(maf)
+}
+
+func locusAlreadyExists(v uint16, array []uint16) bool {
+	for _, a := range array {
+		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
+			return true
+		}
+	}
+	return false
 }
 
 func CalculateScore(ctx decimal.Context, snps []uint8, weights []*decimal.Big) *decimal.Big {

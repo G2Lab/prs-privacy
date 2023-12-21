@@ -5,6 +5,12 @@ type genotype struct {
 	likelihood float64
 }
 
+func newGenotype(mutations []uint16, likelihood float64) *genotype {
+	mtt := make([]uint16, len(mutations))
+	copy(mtt, mutations)
+	return &genotype{mtt, likelihood}
+}
+
 type genheap []genotype
 
 func (h genheap) Len() int { return len(h) }

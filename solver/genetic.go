@@ -26,7 +26,7 @@ package solver
 //	}
 //}
 //
-//func (g *Genetic) Solve(numThreads int) map[string][]uint8 {
+//func (g *Genetic) Solve() map[string][]uint8 {
 //	var err error
 //	rand.NewSource(time.Now().UnixNano())
 //	poolSize := len(g.p.Variants) * 10
