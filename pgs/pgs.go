@@ -214,9 +214,11 @@ scannerLoop:
 	}
 
 	p.Context = decimal.Context{
-		MaxScale:  maxPrecision + 5,
-		MinScale:  -maxPrecision - 5,
-		Precision: maxPrecision + 3,
+		MaxScale:     maxPrecision + 3,
+		MinScale:     -maxPrecision - 3,
+		Precision:    maxPrecision + 2,
+		RoundingMode: decimal.ToNegativeInf,
+		//RoundingMode: decimal.ToZero,
 	}
 
 	p.Weights = make([]*decimal.Big, len(p.Loci))

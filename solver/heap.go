@@ -1,5 +1,7 @@
 package solver
 
+import "container/heap"
+
 type genotype struct {
 	mutations  []uint16
 	likelihood float64
@@ -9,6 +11,20 @@ func newGenotype(mutations []uint16, likelihood float64) *genotype {
 	mtt := make([]uint16, len(mutations))
 	copy(mtt, mutations)
 	return &genotype{mtt, likelihood}
+}
+
+func addToHeap(h *genheap, lkl float64, sol []uint16, heapSize int) bool {
+	switch {
+	case h.Len() < heapSize:
+		heap.Push(h, genotype{sol, lkl})
+		return true
+	case lkl < (*h)[0].likelihood:
+		heap.Pop(h)
+		heap.Push(h, genotype{sol, lkl})
+		return true
+	default:
+		return false
+	}
 }
 
 type genheap []genotype

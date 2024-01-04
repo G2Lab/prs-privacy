@@ -85,7 +85,7 @@ func (s *TwoSplitDP) Solve() map[string][]uint8 {
 	var combine func(int, []uint16, float64, [][]*genotype)
 	combine = func(k int, input []uint16, lkl float64, genotypes [][]*genotype) {
 		if k == numSegments {
-			addToHeap(solutionHeap, lkl, input, params.BigHeap)
+			addToHeap(solutionHeap, lkl, input, params.HeapSize)
 			return
 		}
 		for _, sol := range genotypes[k] {
@@ -162,6 +162,18 @@ func (s *TwoSplitDP) Solve() map[string][]uint8 {
 	}
 	return solutions
 }
+
+//if _, ok = backtracked[i][halfSum]; !ok {
+//combinations := backtrackFromIntSum(halfSum, tables[i], betas[i])
+//backtracked[i][halfSum] = make([]*genotype, 0)
+//for _, seq := range combinations {
+//lkl = calculateNegativeLikelihood(seq, splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
+//if addToHeap(partHeaps[i], lkl, seq, params.HeapSize) {
+//backtracked[i][halfSum] = append(backtracked[i][halfSum], newGenotype(seq, lkl))
+//}
+//}
+//}
+//halfSols[i] = append(halfSols[i], backtracked[i][halfSum]...)
 
 // We assume that the weights are sorted in ascending order
 func calculateSubsetSumsTable(ctx decimal.Context, betas map[uint16]*decimal.Big, upperBoundOG, lowerBoundOG *decimal.Big) map[string][]uint16 {
@@ -303,20 +315,6 @@ func makeBetaMap(betas []*decimal.Big, start, end int) map[uint16]*decimal.Big {
 		bmap[uint16(i)] = betas[i]
 	}
 	return bmap
-}
-
-func addToHeap(h *genheap, lkl float64, sol []uint16, heapSize int) bool {
-	switch {
-	case h.Len() < heapSize:
-		heap.Push(h, genotype{sol, lkl})
-		return true
-	case lkl < (*h)[0].likelihood:
-		heap.Pop(h)
-		heap.Push(h, genotype{sol, lkl})
-		return true
-	default:
-		return false
-	}
 }
 
 func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {
