@@ -60,7 +60,7 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 	splitIdxs := []int{0, len(weights) / 2, len(weights)}
 	betas := make([]map[uint16]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
-		betas[i] = makeIntBetaMap(weights, splitIdxs[i], splitIdxs[i+1])
+		betas[i] = makeBetaMap(weights, splitIdxs[i], splitIdxs[i+1])
 	}
 
 	tables := make([]map[int64][]uint16, numSegments)
@@ -72,10 +72,8 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive
 
 	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumIntTable(betas[i], upper, lower)
+		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
 		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
-		//fmt.Println(tables[i])
-		//fmt.Println(betas[i])
 	}
 
 	targets := []int64{target}
@@ -118,7 +116,7 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 		for i = 0; i < numSegments; i++ {
 			halfSols[i] = make([]*genotype, 0)
 			for _, halfSum := range halfSums[i] {
-				combinations := backtrackFromIntSum(halfSum, tables[i], betas[i])
+				combinations := backtrackFromSum(halfSum, tables[i], betas[i])
 				for _, seq := range combinations {
 					lkl = calculateNegativeLikelihood(seq, splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
 					halfSols[i] = append(halfSols[i], newGenotype(seq, lkl))
@@ -138,7 +136,7 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumIntTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
+func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
 	// Fill out the table using dynamic programming
 	table := make(map[int64][]uint16)
 	// add the zero weight
@@ -181,7 +179,7 @@ func calculateSubsetSumIntTable(betas map[uint16]int64, upperBound, lowerBound i
 	return table
 }
 
-func backtrackFromIntSum(sum int64, table map[int64][]uint16, betas map[uint16]int64) [][]uint16 {
+func backtrackFromSum(sum int64, table map[int64][]uint16, betas map[uint16]int64) [][]uint16 {
 	input := make([]uint16, 0)
 	return backtrackInt(input, sum, table, betas)
 }
@@ -242,7 +240,7 @@ func bigsToInts(ctx decimal.Context, bigs []*decimal.Big, multiplier *decimal.Bi
 	return ints
 }
 
-func makeIntBetaMap(betas []int64, start, end int) map[uint16]int64 {
+func makeBetaMap(betas []int64, start, end int) map[uint16]int64 {
 	bmap := make(map[uint16]int64)
 	for i := start; i < end; i++ {
 		bmap[uint16(i)] = betas[i]
