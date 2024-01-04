@@ -38,12 +38,12 @@ type Rounder struct {
 }
 
 func (dp *OneSplitDP) Solve() map[string][]uint8 {
-	var roundingErrorLeft int64 = 0
+	var roundingError int64 = 0
 	multiplier := decimal.WithContext(dp.p.Context).SetMantScale(1, -dp.target.Scale())
 	if dp.target.Scale() > params.PrecisionsLimit {
 		multiplier.SetMantScale(1, -params.PrecisionsLimit)
-		//roundingErrorLeft = int64(dp.p.VariantCount) * 5 / 4
-		roundingErrorLeft = int64(dp.p.VariantCount)
+		//roundingError = int64(dp.p.VariantCount) * 5 / 4
+		roundingError = int64(dp.p.VariantCount)
 		dp.rounder.RoundedMode = true
 		dp.rounder.ScaledWeights = scaleWeights(dp.p.Context, dp.p.Weights, multiplier)
 		dp.rounder.ScaledTarget.Mul(dp.target, multiplier)
@@ -60,16 +60,16 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 	splitIdxs := []int{0, len(weights) / 2, len(weights)}
 	betas := make([]map[uint16]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
-		betas[i] = dp.makeBetaMap(weights, splitIdxs[i], splitIdxs[i+1])
+		betas[i] = makeIntBetaMap(weights, splitIdxs[i], splitIdxs[i+1])
 	}
 
 	tables := make([]map[int64][]uint16, numSegments)
-	maxTotalPositive, maxTotalNegative := dp.getMaxTotal(weights)
+	maxTotalPositive, maxTotalNegative := getIntMaxTotal(weights)
 	//if dp.rounder.RoundedMode && maxTotalNegative < 0 {
-	//	roundingErrorRight = roundingErrorLeft
+	//	roundingErrorRight = roundingError
 	//}
-	//upper, lower := target-maxTotalNegative+roundingErrorLeft, target-maxTotalPositive-roundingErrorRight
-	upper, lower := target-maxTotalNegative+roundingErrorLeft, target-maxTotalPositive
+	//upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingErrorRight
+	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive
 
 	for i := 0; i < numSegments; i++ {
 		tables[i] = calculateSubsetSumIntTable(betas[i], upper, lower)
@@ -80,27 +80,22 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 
 	targets := []int64{target}
 	if dp.rounder.RoundedMode {
-		//for w := target + roundingErrorRight; w > target-roundingErrorLeft; w-- {
+		//for w := target + roundingErrorRight; w > target-roundingError; w-- {
 		//	if w == target {
 		//		continue
 		//	}
-		for w := target - 1; w > target-roundingErrorLeft; w-- {
+		for w := target - 1; w > target-roundingError; w-- {
 			targets = append(targets, w)
 		}
 	}
 
 	// Do recursion to explore all the combinations
-	partHeaps := make([]*genheap, numSegments)
-	for i := 0; i < numSegments; i++ {
-		partHeaps[i] = &genheap{}
-	}
 	solutionHeap := &genheap{}
-	backtracked := make([]map[int64][]*genotype, numSegments)
-	for i := 0; i < numSegments; i++ {
-		backtracked[i] = make(map[int64][]*genotype)
-	}
 	halfSums := make([][]int64, numSegments)
 	step := len(tables[0]) / 10
+	if step == 0 {
+		step = 1
+	}
 	var i, s int
 	var lkl float64
 	var leftSum int64
@@ -123,17 +118,11 @@ func (dp *OneSplitDP) Solve() map[string][]uint8 {
 		for i = 0; i < numSegments; i++ {
 			halfSols[i] = make([]*genotype, 0)
 			for _, halfSum := range halfSums[i] {
-				if _, ok = backtracked[i][halfSum]; !ok {
-					combinations := backtrackFromIntSum(halfSum, tables[i], betas[i])
-					backtracked[i][halfSum] = make([]*genotype, 0)
-					for _, seq := range combinations {
-						lkl = calculateNegativeLikelihood(seq, splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
-						if addToHeap(partHeaps[i], lkl, seq, params.HeapSize) {
-							backtracked[i][halfSum] = append(backtracked[i][halfSum], newGenotype(seq, lkl))
-						}
-					}
+				combinations := backtrackFromIntSum(halfSum, tables[i], betas[i])
+				for _, seq := range combinations {
+					lkl = calculateNegativeLikelihood(seq, splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
+					halfSols[i] = append(halfSols[i], newGenotype(seq, lkl))
 				}
-				halfSols[i] = append(halfSols[i], backtracked[i][halfSum]...)
 			}
 		}
 		// combine partial solutions
@@ -253,7 +242,7 @@ func bigsToInts(ctx decimal.Context, bigs []*decimal.Big, multiplier *decimal.Bi
 	return ints
 }
 
-func (dp *OneSplitDP) makeBetaMap(betas []int64, start, end int) map[uint16]int64 {
+func makeIntBetaMap(betas []int64, start, end int) map[uint16]int64 {
 	bmap := make(map[uint16]int64)
 	for i := start; i < end; i++ {
 		bmap[uint16(i)] = betas[i]
@@ -261,7 +250,7 @@ func (dp *OneSplitDP) makeBetaMap(betas []int64, start, end int) map[uint16]int6
 	return bmap
 }
 
-func (dp *OneSplitDP) getMaxTotal(values []int64) (int64, int64) {
+func getIntMaxTotal(values []int64) (int64, int64) {
 	var positive, negative int64 = 0, 0
 	for _, v := range values {
 		if v > 0 {
