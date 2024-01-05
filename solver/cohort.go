@@ -4,12 +4,12 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/ericlagergren/decimal"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
@@ -17,15 +17,14 @@ import (
 
 type Individual struct {
 	Genotype []uint8
-	Score    *decimal.Big
+	Score    *apd.Decimal
 }
 
 type Cohort map[string]*Individual
 
-func NewIndividual(ctx decimal.Context) *Individual {
+func NewIndividual() *Individual {
 	return &Individual{
 		Genotype: make([]uint8, 0),
-		Score:    decimal.WithContext(ctx),
 	}
 }
 
@@ -84,7 +83,7 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 				continue
 			}
 			if _, ok := c[individ]; !ok {
-				c[individ] = NewIndividual(ctx)
+				c[individ] = NewIndividual()
 			}
 			c[individ].Genotype = append(c[individ].Genotype, allele...)
 			for k = 0; k < allele[0]+allele[1]; k++ {
@@ -153,7 +152,8 @@ func (c Cohort) SaveScores(filename string) error {
 	return nil
 }
 
-func (c Cohort) LoadScores(filename string, ctx decimal.Context) error {
+func (c Cohort) LoadScores(filename string, ctx *apd.Context) error {
+	var err error
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -167,8 +167,9 @@ func (c Cohort) LoadScores(filename string, ctx decimal.Context) error {
 		}
 		name := record[0]
 		score := record[1]
-		c[name] = NewIndividual(ctx)
-		if _, ok := c[name].Score.SetString(score); !ok {
+		c[name] = NewIndividual()
+		c[name].Score, _, err = ctx.NewFromString(score)
+		if err != nil {
 			return err
 		}
 	}

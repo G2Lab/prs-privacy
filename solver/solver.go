@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ericlagergren/decimal"
+	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 )
@@ -52,8 +52,8 @@ func locusAlreadyExists(v uint16, array []uint16) bool {
 	return false
 }
 
-func CalculateScore(ctx decimal.Context, snps []uint8, weights []*decimal.Big) *decimal.Big {
-	score := decimal.WithContext(ctx)
+func CalculateScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
+	score := apd.New(0, 0)
 	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
 		for j := 0; j < pgs.NumHaplotypes; j++ {
 			switch snps[i+j] {

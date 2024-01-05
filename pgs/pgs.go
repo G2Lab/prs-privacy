@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ericlagergren/decimal"
+	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/tools"
 )
@@ -90,12 +90,13 @@ func (v *Variant) GetLocus() string {
 	return fmt.Sprintf("%s:%s", v.GetHmChr(), v.GetHmPos())
 }
 
-func (v *Variant) GetWeight(ctx decimal.Context) (*decimal.Big, error) {
+func (v *Variant) GetWeight(ctx *apd.Context) (*apd.Decimal, error) {
 	if value, ok := v.fields["effect_weight"].(string); ok {
-		weight := decimal.WithContext(ctx)
-		if _, ok = ctx.SetString(weight, value); ok {
-			return weight, nil
+		weight, _, err := ctx.NewFromString(value)
+		if err != nil {
+			return nil, err
 		}
+		return weight, nil
 	}
 	return nil, errors.New("error parsing weight")
 }
@@ -109,20 +110,20 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 }
 
 type PGS struct {
-	PgsID        string
-	TraitName    string
-	TraitEFO     string
-	GenomeBuild  string
-	WeightType   string
-	HmPOSBuild   string
-	VariantCount int
-	Fieldnames   []string
-	Variants     map[string]*Variant
-	Loci         []string
-	Weights      []*decimal.Big
-	Context      decimal.Context
-	//WeightPrecision int
-	Maf [][]float64 // [major, minor] allele frequency from the population
+	PgsID           string
+	TraitName       string
+	TraitEFO        string
+	GenomeBuild     string
+	WeightType      string
+	HmPOSBuild      string
+	VariantCount    int
+	Fieldnames      []string
+	Variants        map[string]*Variant
+	Loci            []string
+	Weights         []*apd.Decimal
+	Context         *apd.Context
+	WeightPrecision uint32
+	Maf             [][]float64 // [major, minor] allele frequency from the population
 	//Eaf             [][]float64 // [other, effect] allele frequency from the study / catalogue file
 }
 
@@ -140,7 +141,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	defer file.Close()
 
 	headerInProgress := true
-	maxPrecision := 0
+	maxPrecision := uint32(0)
 	scanner := bufio.NewScanner(file)
 scannerLoop:
 	for scanner.Scan() {
@@ -213,15 +214,15 @@ scannerLoop:
 		return err
 	}
 
-	p.Context = decimal.Context{
-		MaxScale:     maxPrecision + 3,
-		MinScale:     -maxPrecision - 3,
-		Precision:    maxPrecision + 2,
-		RoundingMode: decimal.ToNegativeInf,
-		//RoundingMode: decimal.ToZero,
+	p.Context = &apd.Context{
+		Precision:   maxPrecision + 2,
+		Rounding:    apd.RoundFloor,
+		MaxExponent: int32(maxPrecision) + 3,
+		MinExponent: -int32(maxPrecision) - 3,
+		Traps:       apd.DefaultTraps,
 	}
 
-	p.Weights = make([]*decimal.Big, len(p.Loci))
+	p.Weights = make([]*apd.Decimal, len(p.Loci))
 	//p.Eaf = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
@@ -230,8 +231,8 @@ scannerLoop:
 		}
 		//p.Eaf[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
-	//p.WeightPrecision = maxPrecision
-	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
+	p.WeightPrecision = maxPrecision
+	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	if err := scanner.Err(); err != nil {
 		return err
@@ -240,20 +241,25 @@ scannerLoop:
 	return nil
 }
 
-func getPrecision(value string) int {
+func getPrecision(value string) uint32 {
 	if strings.Contains(value, "e") {
-		expLen := len(strings.Split(value, "e")[0]) - 1
+		exp := strings.Split(value, "e")[0]
+		expLen := len(exp)
+		if strings.Contains(exp, ".") {
+			expLen = len(strings.Split(exp, ".")[1])
+		}
 		mntLen, err := strconv.Atoi(strings.Split(value, "e")[1][1:])
 		if err != nil {
 			log.Printf("Error parsing mantissa %s: %v", value, err)
 			return 0
 		}
-		return expLen + mntLen
+		fmt.Printf("%s: expLen %d, mntLen %d\n", value, expLen, mntLen)
+		return uint32(expLen + mntLen)
 	}
 	if !strings.Contains(value, ".") {
 		return 0
 	}
-	return len(strings.Split(value, ".")[1])
+	return uint32(len(strings.Split(value, ".")[1]))
 }
 
 func (p *PGS) GetSortedVariantLoci() ([]string, error) {
