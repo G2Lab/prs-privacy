@@ -129,6 +129,8 @@ func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 	var ok bool
 	var lkl float64
 	var leftSum int64
+	var combinations [][]uint16
+	halfSols := make([][]*genotype, numSegments)
 	for leftSum = range tables[0] {
 		if s++; s%step == 0 {
 			fmt.Printf("Progress: %d%%\n", s*10/step)
@@ -144,22 +146,18 @@ func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 		}
 		halfSums[0] = []int64{leftSum}
 		// backtrack partial solutions
-		halfSols := make([][]*genotype, numSegments)
 		for i = 0; i < numSegments; i++ {
 			halfSols[i] = make([]*genotype, 0)
 			for _, halfSum := range halfSums[i] {
-				combinations := backtrackFromSum(halfSum, tables[i], betas[i])
+				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
 				for j := range combinations {
 					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
-				combinations = nil
 			}
 		}
 		// combine partial solutions
 		combinePartials(0, numSegments, make([]uint16, 0), 0, apd.NewBigInt(0), halfSols, solHeap, dp.rounder)
-		//
-		halfSols = nil
 	}
 }
 
@@ -234,7 +232,7 @@ func (dp *DP) twoSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 				}
 				partSols[k] = backtracked[k][match[k]]
 			}
-			combinePartials(0, numSegments, make([]uint16, 0), 0, apd.NewBigInt(0), partSols, solHeap, dp.rounder)
+			combinePartials(0, numSegments, make([]uint16, 0, len(dp.p.Weights)*pgs.NumHaplotypes), 0, apd.NewBigInt(0), partSols, solHeap, dp.rounder)
 		}
 	}
 }
@@ -285,27 +283,26 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 
 func backtrackFromSum(sum int64, table map[int64][]uint16, betas map[uint16]int64) [][]uint16 {
 	input := make([]uint16, 0)
-	return backtrack(input, sum, table, betas)
+	output := make([][]uint16, 0)
+	backtrack(input, &output, sum, table, betas)
+	return output
 }
 
-func backtrack(path []uint16, sum int64, table map[int64][]uint16, weights map[uint16]int64) [][]uint16 {
+func backtrack(path []uint16, result *[][]uint16, sum int64, table map[int64][]uint16, weights map[uint16]int64) {
 	if sum == 0 {
-		return [][]uint16{path}
+		sol := make([]uint16, len(path))
+		copy(sol, path)
+		*result = append(*result, sol)
 	}
-	output := make([][]uint16, 0)
 	for _, ptr := range table[sum] {
 		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
 			continue
 		}
-		newState := make([]uint16, len(path)+1)
-		copy(newState, path)
-		newState[len(path)] = ptr
+		path = append(path, ptr)
 		newSum := sum - weights[ptr/2]*int64(ptr%2+1)
-		if res := backtrack(newState, newSum, table, weights); res != nil {
-			output = append(output, res...)
-		}
+		backtrack(path, result, newSum, table, weights)
+		path = path[:len(path)-1]
 	}
-	return output
 }
 
 func combinePartials(segmentNum, totalSegments int, input []uint16, lkl float64, score *apd.BigInt, genotypes [][]*genotype, solHeap *genheap, rnd *Rounder) {
@@ -319,16 +316,15 @@ func combinePartials(segmentNum, totalSegments int, input []uint16, lkl float64,
 		return
 	}
 	for _, sol := range genotypes[segmentNum] {
-		carryover := make([]uint16, len(input)+len(sol.mutations))
-		copy(carryover, input)
-		copy(carryover[len(input):], sol.mutations)
+		input = append(input, sol.mutations...)
 		if rnd.RoundedMode {
 			newScore := apd.NewBigInt(0)
 			newScore.Add(score, lociToScore(sol.mutations, rnd.ScaledWeights))
-			combinePartials(segmentNum+1, totalSegments, carryover, lkl+sol.likelihood, newScore, genotypes, solHeap, rnd)
+			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, newScore, genotypes, solHeap, rnd)
 		} else {
-			combinePartials(segmentNum+1, totalSegments, carryover, lkl+sol.likelihood, score, genotypes, solHeap, rnd)
+			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, score, genotypes, solHeap, rnd)
 		}
+		input = input[:len(input)-len(sol.mutations)]
 	}
 }
 

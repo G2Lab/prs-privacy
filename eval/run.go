@@ -512,9 +512,9 @@ func findAllSolutions() {
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-	catalogFile := "PGS001827_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))

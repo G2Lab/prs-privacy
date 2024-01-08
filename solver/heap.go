@@ -16,11 +16,13 @@ func newGenotype(mutations []uint16, likelihood float64) *genotype {
 func addToHeap(h *genheap, lkl float64, sol []uint16, heapSize int) bool {
 	switch {
 	case h.Len() < heapSize:
-		heap.Push(h, genotype{sol, lkl})
+		ng := newGenotype(sol, lkl)
+		heap.Push(h, *ng)
 		return true
 	case lkl < (*h)[0].likelihood:
 		heap.Pop(h)
-		heap.Push(h, genotype{sol, lkl})
+		ng := newGenotype(sol, lkl)
+		heap.Push(h, *ng)
 		return true
 	default:
 		return false
