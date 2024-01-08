@@ -253,7 +253,6 @@ func getPrecision(value string) uint32 {
 			log.Printf("Error parsing mantissa %s: %v", value, err)
 			return 0
 		}
-		fmt.Printf("%s: expLen %d, mntLen %d\n", value, expLen, mntLen)
 		return uint32(expLen + mntLen)
 	}
 	if !strings.Contains(value, ".") {
