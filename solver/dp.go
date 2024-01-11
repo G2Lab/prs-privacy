@@ -58,7 +58,7 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 		fmt.Printf("Scaled target: %s\n", dp.rounder.ScaledTarget.String())
 		fmt.Printf("Scaled weights: %v\n", dp.rounder.ScaledWeights)
 	}
-	weights := decimalsToInts(dp.p.Context, dp.p.Weights, multiplier)
+	weights := DecimalsToInts(dp.p.Context, dp.p.Weights, multiplier)
 	tmp := new(apd.Decimal)
 	_, err = dp.p.Context.Mul(tmp, dp.target, multiplier)
 	if err != nil {
@@ -73,7 +73,12 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 		log.Fatalf("Failed to convert target decimal to int64: %s", tmp.String())
 	}
 	fmt.Printf("Target: %d\n", target)
-	fmt.Printf("Weights: %v\n", weights)
+	//fmt.Printf("Weights: %v\n", weights)
+
+	sort.Slice(weights, func(i, j int) bool {
+		return weights[i] < weights[j]
+	})
+	fmt.Printf("Sorted weights: %v\n", weights)
 
 	var splitIdxs []int
 	if numSegments == 2 {
@@ -87,12 +92,21 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 		betas[i] = makeBetaMap(weights, splitIdxs[i], splitIdxs[i+1])
 	}
 
-	tables := make([]map[int64][]uint16, numSegments)
-	maxTotalPositive, maxTotalNegative := getMaxTotal(weights)
+	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive
+	segmentTargetUpperLimit, segmentTargetLowerLimit := make([]int64, numSegments), make([]int64, numSegments)
+	//maxTotalPositive, maxTotalNegative := make([]int64, numSegments), make([]int64, numSegments)
+	for i := 0; i < numSegments; i++ {
+		segmentTargetUpperLimit[i], segmentTargetLowerLimit[i] = SampleMaxMinScores(splitIdxs[i], splitIdxs[i+1],
+			100*(splitIdxs[i+1]-splitIdxs[i]), betas[i], dp.p)
+		//maxTotalPositive[i], maxTotalNegative[i] = GetMaxTotal(weights[splitIdxs[i]:splitIdxs[i+1]])
+	}
 
+	tables := make([]map[int64][]uint16, numSegments)
 	for i := 0; i < numSegments; i++ {
 		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
+		//tables[i] = calculateSubsetSumTable(betas[i], segmentTargetUpperLimit[i]-maxTotalNegative[i],
+		//	segmentTargetLowerLimit[i]-maxTotalPositive[i])
 		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 	}
 
@@ -106,9 +120,11 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 	// Do recursion to explore all the combinations
 	solutionHeap := &genheap{}
 	if numSegments == 2 {
-		dp.oneSplitDP(numSegments, splitIdxs, tables, betas, targets, solutionHeap)
+		dp.oneSplitDP(numSegments, splitIdxs, tables, betas, targets, segmentTargetUpperLimit,
+			segmentTargetLowerLimit, solutionHeap)
 	} else if numSegments == 4 {
-		dp.twoSplitDP(numSegments, splitIdxs, tables, betas, targets, solutionHeap)
+		dp.twoSplitDP(numSegments, splitIdxs, tables, betas, targets, segmentTargetUpperLimit,
+			segmentTargetLowerLimit, solutionHeap)
 	}
 
 	solutions := make(map[string][]uint8)
@@ -119,8 +135,13 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 	return solutions
 }
 
-func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64, targets []int64, solHeap *genheap) {
+func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64,
+	targets []int64, upperLimits, lowerLimits []int64, solHeap *genheap) {
 	halfSums := make([][]int64, numSegments)
+	backtracked := make([]map[int64][]*genotype, numSegments)
+	for i := 0; i < numSegments; i++ {
+		backtracked[i] = make(map[int64][]*genotype)
+	}
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
@@ -135,8 +156,14 @@ func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 		if s++; s%step == 0 {
 			fmt.Printf("Progress: %d%%\n", s*10/step)
 		}
+		if leftSum > upperLimits[0] || leftSum < lowerLimits[0] {
+			continue
+		}
 		halfSums[1] = make([]int64, 0)
 		for _, t := range targets {
+			if t-leftSum > upperLimits[1] || t-leftSum < lowerLimits[1] {
+				continue
+			}
 			if _, ok = tables[1][t-leftSum]; ok {
 				halfSums[1] = append(halfSums[1], t-leftSum)
 			}
@@ -155,13 +182,26 @@ func (dp *DP) oneSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
 			}
+			//halfSols[i] = make([]*genotype, 0)
+			//for _, halfSum := range halfSums[i] {
+			//	if _, ok = backtracked[i][halfSum]; !ok {
+			//		combinations := backtrackFromSum(halfSum, tables[i], betas[i])
+			//		backtracked[i][halfSum] = make([]*genotype, 0, len(combinations))
+			//		for l := range combinations {
+			//			lkl = calculateNegativeLikelihood(combinations[l], splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
+			//			backtracked[i][halfSum] = append(backtracked[i][halfSum], newGenotype(combinations[l], lkl))
+			//		}
+			//	}
+			//	halfSols[i] = append(halfSols[i], backtracked[i][halfSum]...)
+			//}
 		}
 		// combine partial solutions
 		combinePartials(0, numSegments, make([]uint16, 0), 0, apd.NewBigInt(0), halfSols, solHeap, dp.rounder)
 	}
 }
 
-func (dp *DP) twoSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64, targets []int64, solHeap *genheap) {
+func (dp *DP) twoSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64,
+	targets []int64, upperLimits, lowerLimits []int64, solHeap *genheap) {
 	var ok bool
 	modulo := int64(tools.FindNextSmallerPrime(uint64(len(tables[0]))))
 	fmt.Printf("Modulo: %d\n", modulo)
@@ -179,31 +219,31 @@ func (dp *DP) twoSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 	for i := 0; i < numSegments; i++ {
 		backtracked[i] = make(map[int64][]*genotype)
 	}
-	products := make([][]*Product, numSegments/2)
-	for i := 0; i < len(products); i++ {
-		products[i] = make([]*Product, 0)
-	}
-	step := int32(modulo) / 10
+	step := int32(modulo) / 100
 	if step == 0 {
 		step = 1
 	}
+	products := make([][]*Product, numSegments/2)
 	var midValue, targetDiff, mt int32
 	var sumLR int64
 	var lkl float64
 	var k, j int
+	var matches [][]int64
 	for midValue = 0; midValue < int32(modulo); midValue++ {
-		matches := make([][]int64, 0)
+		matches = make([][]int64, 0)
 		if midValue%step == 0 {
 			fmt.Printf("MidValue: %d\n", midValue)
 		}
-		products[0] = getMatchingSums(midValue, int32(modulo), moduloMaps[:numSegments/2])
+		products[0] = getMatchingSums(midValue, int32(modulo), moduloMaps[:numSegments/2], upperLimits[:numSegments/2],
+			lowerLimits[:numSegments/2])
 		// No pair adds up to this midValue
 		if len(products[0]) == 0 {
 			continue
 		}
 		for j, mt = range modTargets {
 			targetDiff = tools.SubMod(mt, midValue, int32(modulo))
-			products[1] = getMatchingSums(targetDiff, int32(modulo), moduloMaps[numSegments/2:])
+			products[1] = getMatchingSums(targetDiff, int32(modulo), moduloMaps[numSegments/2:],
+				upperLimits[numSegments/2:], lowerLimits[numSegments/2:])
 			// No pair adds up to targetDiff
 			if len(products[1]) == 0 {
 				continue
@@ -343,7 +383,7 @@ func buildModuloMap(modulo int64, table map[int64][]uint16) map[int32][]int64 {
 	return moduloMap
 }
 
-func getMatchingSums(modSum, modulo int32, modTables []map[int32][]int64) []*Product {
+func getMatchingSums(modSum, modulo int32, modTables []map[int32][]int64, upperLimits, lowerLimits []int64) []*Product {
 	var valueEntry, valueExit int32
 	var ok bool
 	matches := make([]*Product, 0)
@@ -353,7 +393,13 @@ func getMatchingSums(modSum, modulo int32, modTables []map[int32][]int64) []*Pro
 			continue
 		}
 		for _, leftSum := range modTables[0][valueEntry] {
+			if leftSum > upperLimits[0] || leftSum < lowerLimits[0] {
+				continue
+			}
 			for _, rightSum := range modTables[1][valueExit] {
+				if rightSum > upperLimits[1] || rightSum < lowerLimits[1] {
+					continue
+				}
 				matches = append(matches, &Product{[]int64{leftSum, rightSum}, leftSum + rightSum})
 			}
 		}
@@ -361,7 +407,7 @@ func getMatchingSums(modSum, modulo int32, modTables []map[int32][]int64) []*Pro
 	return matches
 }
 
-func decimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {
+func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {
 	ints := make([]int64, len(decimals))
 	tmp := new(apd.Decimal)
 	var err error
@@ -410,7 +456,7 @@ func scaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Deci
 	return scaled
 }
 
-func getMaxTotal(values []int64) (int64, int64) {
+func GetMaxTotal(values []int64) (int64, int64) {
 	var positive, negative int64 = 0, 0
 	for _, v := range values {
 		if v > 0 {
@@ -420,6 +466,26 @@ func getMaxTotal(values []int64) (int64, int64) {
 		}
 	}
 	return positive, negative
+}
+
+func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, p *pgs.PGS) (int64, int64) {
+	var err error
+	var sample []uint8
+	var score, maxScore, minScore int64
+	for i := 0; i < numSamples; i++ {
+		sample, err = p.SampleSegmentFromPopulation(segmentStart, segmentEnd)
+		if err != nil {
+			log.Fatalf("Error sampling segment: %v", err)
+		}
+		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
+		if score > maxScore {
+			maxScore = score
+		}
+		if score < minScore {
+			minScore = score
+		}
+	}
+	return maxScore, minScore
 }
 
 func lociToScore(loci []uint16, weights []*apd.BigInt) *apd.BigInt {
@@ -442,6 +508,23 @@ func lociToGenotype(loci []uint16, total int) []uint8 {
 		}
 	}
 	return sol
+}
+
+func genotypeToScore(start, end int, snps []uint8, betas map[uint16]int64) int64 {
+	score := int64(0)
+	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
+		for j := 0; j < pgs.NumHaplotypes; j++ {
+			switch snps[i+j] {
+			case 0:
+				continue
+			case 1:
+				score += betas[uint16(start+i/2)]
+			default:
+				log.Printf("Invalid alelle value: %d", snps[i+j])
+			}
+		}
+	}
+	return score
 }
 
 func sortByLikelihood(candidates [][]uint16, totalLen int, p *pgs.PGS) [][]uint16 {

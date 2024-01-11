@@ -433,6 +433,22 @@ func (p *PGS) SampleFromPopulation() ([]uint8, error) {
 	return sample, nil
 }
 
+func (p *PGS) SampleSegmentFromPopulation(start, end int) ([]uint8, error) {
+	sample := make([]uint8, (end-start)*NumHaplotypes)
+	// Initial sample based on individual priors
+	for i := start; i < end; i++ {
+		for j := 0; j < NumHaplotypes; j++ {
+			maf := p.Maf[i]
+			ind := tools.SampleFromDistribution(maf)
+			sample[(i-start)*NumHaplotypes+j] = GENOTYPES[ind]
+			if sample[(i-start)*NumHaplotypes+j] == 255 {
+				return nil, errors.New("error in population sampling")
+			}
+		}
+	}
+	return sample, nil
+}
+
 func (p *PGS) SampleUniform() ([]uint8, error) {
 	sample := make([]uint8, p.VariantCount*NumHaplotypes)
 	// Initial sample based on individual priors
@@ -469,10 +485,6 @@ func (p *PGS) SnpLikelihood(sequence []uint8, i int) float64 {
 
 func (p *PGS) AllMajorSample() []uint8 {
 	sample := make([]uint8, 2*len(p.Weights))
-	//for i := 0; i < len(p.Weights); i++ {
-	//	fmt.Printf("%.4f ", p.Maf[i][0])
-	//}
-	//fmt.Println()
 	for i := 0; i < len(p.Weights); i++ {
 		if p.Maf[i][0] > 0.5 {
 			sample[2*i] = 0
@@ -480,6 +492,20 @@ func (p *PGS) AllMajorSample() []uint8 {
 		} else {
 			sample[2*i] = 1
 			sample[2*i+1] = 1
+		}
+	}
+	return sample
+}
+
+func (p *PGS) AllMinorSample() []uint8 {
+	sample := make([]uint8, 2*len(p.Weights))
+	for i := 0; i < len(p.Weights); i++ {
+		if p.Maf[i][0] > 0.5 {
+			sample[2*i] = 1
+			sample[2*i+1] = 1
+		} else {
+			sample[2*i] = 0
+			sample[2*i+1] = 0
 		}
 	}
 	return sample

@@ -4,6 +4,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import statistics
 
 
 def pairwise(filepath):
@@ -311,6 +312,50 @@ def accuracy_cdf(pgs_ids):
     plt.savefig('accuracy.pdf')
 
 
+def score_deviation():
+    filepath = "results/distro.json"
+    rows = []
+    with open(filepath, 'r') as file:
+        for row in file:
+            row = row.strip()
+            if row.startswith("[["):
+                rows.append(list(map(lambda x: [float(x[0]), float(x[1])], json.loads(row))))
+            else:
+                rows.append(list(map(lambda x: float(x), json.loads(row))))
+    maxTotal = rows[0]
+    examples = rows[1]
+    left = rows[2]
+    right = rows[3]
+    # diff = [left[i]-right[i] for i in range(0, len(left))]
+    full = [left[i]+right[i] for i in range(0, len(left))]
+    print(len(left), len(right))
+    mf = statistics.median(full)
+    leftLim, rightLim = mf - maxTotal[0], mf - maxTotal[1]
+    plt.axvline(leftLim, color='purple', linewidth=1, label='Naive Min')
+    plt.axvline(rightLim, color='purple', linewidth=1, label='Naive Max')
+
+    # plt.hist(diff, bins=50, color='blue', alpha=0.7, label='Left-right diff')
+    plt.hist(full, bins=50, color='orange', alpha=0.7)
+    # plt.hist(left, bins=50, color='blue', alpha=0.7, label='Scores')
+    # plt.hist(right, bins=50, color='orange', alpha=0.7, label='Scores')
+    labels = ['Sampled Max', 'Sampled Min']
+    colors = ['red', 'green', 'yellow', 'purple']
+    for i in range(0, len(examples)):
+        plt.axvline(examples[i], color=colors[i], linestyle='dashed', linewidth=1, label=labels[i])
+    # for example in examples:
+    #     plt.axvline(example[0], color=colors[0], linestyle='dashed', linewidth=1, label=labels[0])
+    #     plt.axvline(example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
+        # plt.axvline(example[0]+example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
+    # for v in major:
+    #     plt.axvline(v, color=colors[major.index(v)], linestyle='dashed', linewidth=1, label=labels[major.index(v)])
+    # for v in minor:
+    #     plt.axvline(v, color=colors[minor.index(v)+2], linestyle='dashed', linewidth=1, label=labels[minor.index(v)])
+    plt.xlabel("Score")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -333,4 +378,5 @@ if __name__ == "__main__":
     # accuracy_likelihood("PGS000037")
     # accuracy_likelihood("PGS002302")
     # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
-    accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
+    # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
+    score_deviation()

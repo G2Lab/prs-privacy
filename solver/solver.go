@@ -52,7 +52,7 @@ func locusAlreadyExists(v uint16, array []uint16) bool {
 	return false
 }
 
-func CalculateScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
+func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
 	score := apd.New(0, 0)
 	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
 		for j := 0; j < pgs.NumHaplotypes; j++ {

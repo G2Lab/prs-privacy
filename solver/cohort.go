@@ -25,6 +25,7 @@ type Cohort map[string]*Individual
 func NewIndividual() *Individual {
 	return &Individual{
 		Genotype: make([]uint8, 0),
+		Score:    apd.New(0, 0),
 	}
 }
 
@@ -87,7 +88,11 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 			}
 			c[individ].Genotype = append(c[individ].Genotype, allele...)
 			for k = 0; k < allele[0]+allele[1]; k++ {
-				ctx.Add(c[individ].Score, c[individ].Score, p.Weights[i])
+				_, err = ctx.Add(c[individ].Score, c[individ].Score, p.Weights[i])
+				if err != nil {
+					log.Println("Error adding to score:", err)
+					return
+				}
 			}
 		}
 	}

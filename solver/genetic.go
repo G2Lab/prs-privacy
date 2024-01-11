@@ -88,7 +88,7 @@ package solver
 //				log.Fatalf("Error resampling in fitness calculation: %v\n", err)
 //				return nil, nil, nil
 //			}
-//			deltas[i] = CalculateScore(population[i], g.p.Weights) - g.target
+//			deltas[i] = CalculateDecimalScore(population[i], g.p.Weights) - g.target
 //		}
 //	}
 //	return population, deltas, solutions
@@ -97,7 +97,7 @@ package solver
 //func (g *Genetic) calculateDeltas(population [][]uint8) []float64 {
 //	deltas := make([]float64, len(population))
 //	for i := range population {
-//		deltas[i] = CalculateScore(population[i], g.p.Weights) - g.target
+//		deltas[i] = CalculateDecimalScore(population[i], g.p.Weights) - g.target
 //	}
 //	return deltas
 //}
@@ -122,7 +122,7 @@ package solver
 //		fitness := FitnessFromLikelihoods(likelihoods, T)
 //
 //		//deltas := make([]float64, len(parents[first])/pgs.NumHaplotypes-1)
-//		//delta := CalculateScore(parents[second], g.p.Weights) - g.target
+//		//delta := CalculateDecimalScore(parents[second], g.p.Weights) - g.target
 //		//for k := 0; k < len(g.p.Weights)-1; k++ {
 //		//	delta += (float64(parents[first][k*pgs.NumHaplotypes]) + float64(parents[first][k*pgs.NumHaplotypes+1])) * g.p.Weights[k]
 //		//	delta -= (float64(parents[second][k*pgs.NumHaplotypes]) + float64(parents[second][k*pgs.NumHaplotypes+1])) * g.p.Weights[k]
