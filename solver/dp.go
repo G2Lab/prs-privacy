@@ -73,12 +73,12 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 		log.Fatalf("Failed to convert target decimal to int64: %s", tmp.String())
 	}
 	fmt.Printf("Target: %d\n", target)
-	//fmt.Printf("Weights: %v\n", weights)
+	fmt.Printf("Weights: %v\n", weights)
 
-	sort.Slice(weights, func(i, j int) bool {
-		return weights[i] < weights[j]
-	})
-	fmt.Printf("Sorted weights: %v\n", weights)
+	//sort.Slice(weights, func(i, j int) bool {
+	//	return weights[i] < weights[j]
+	//})
+	//fmt.Printf("Sorted weights: %v\n", weights)
 
 	var splitIdxs []int
 	if numSegments == 2 {
