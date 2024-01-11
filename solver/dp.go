@@ -29,6 +29,11 @@ type Product struct {
 	Sum     int64
 }
 
+type Root struct {
+	indices       []uint16
+	maxLikelihood float64
+}
+
 func NewDP(target *apd.Decimal, p *pgs.PGS) *DP {
 	s := &DP{
 		target: target,
@@ -102,9 +107,9 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 		//maxTotalPositive[i], maxTotalNegative[i] = GetMaxTotal(weights[splitIdxs[i]:splitIdxs[i+1]])
 	}
 
-	tables := make([]map[int64][]uint16, numSegments)
+	tables := make([]map[int64]*Root, numSegments)
 	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
+		tables[i] = calculateSubsetSumTable(betas[i], upper, lower, dp.p)
 		//tables[i] = calculateSubsetSumTable(betas[i], segmentTargetUpperLimit[i]-maxTotalNegative[i],
 		//	segmentTargetLowerLimit[i]-maxTotalPositive[i])
 		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
@@ -278,11 +283,9 @@ func (dp *DP) twoSplitDP(numSegments int, splitIdxs []int, tables []map[int64][]
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
+func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int64, p *pgs.PGS) map[int64]*Root {
 	// Fill out the table using dynamic programming
-	table := make(map[int64][]uint16)
-	// add the zero weight
-	table[0] = make([]uint16, 0)
+	table := make(map[int64]*Root)
 	indices := make([]uint16, 0, len(betas))
 	for i := range betas {
 		indices = append(indices, i)
@@ -290,6 +293,10 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 	sort.Slice(indices, func(i, j int) bool {
 		return indices[i] < indices[j]
 	})
+	// add the zero weight and
+	// the likelihood of the snps being 0
+	lkl := calculateNegativeLikelihood([]uint16{}, int(indices[0]), int(indices[len(indices)-1]), p)
+	table[0] = &Root{make([]uint16, 0), 0}
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
 	var k, i uint16
