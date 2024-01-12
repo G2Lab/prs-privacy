@@ -179,13 +179,13 @@ package solver
 //}
 //
 //func FitnessFromLikelihoods(likelihoods []float64, T float64) []float64 {
-//	minLikelihood := findMin(likelihoods)
+//	topLikelihood := findMin(likelihoods)
 //	fitness := make([]float64, len(likelihoods))
 //	for i, likelihood := range likelihoods {
 //		// higher the (negative) likelihood, higher the fitness
 //		//fitness[i] = 1 / math.Abs(likelihood)
-//		fitness[i] = math.Abs(likelihood - minLikelihood - 1)
-//		//fitness[i] = 1 / math.Exp(-likelihood*T/minLikelihood)
+//		fitness[i] = math.Abs(likelihood - topLikelihood - 1)
+//		//fitness[i] = 1 / math.Exp(-likelihood*T/topLikelihood)
 //	}
 //	return fitness
 //}

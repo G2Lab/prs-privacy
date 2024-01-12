@@ -509,9 +509,9 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG00242"
 
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
@@ -540,6 +540,7 @@ func findAllSolutions() {
 	//solmap := slv.recursive(numThreads)
 	//solmap = findComplements(solmap, p, numThreads)
 	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
+	//solutions := solver.SortByLikelihood(solmap, p)
 	//fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 	//	cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(cohort[INDIVIDUAL].Genotype, p.Weights),
 	//	p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
