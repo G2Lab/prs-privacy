@@ -36,7 +36,7 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	NumHaplotypes                 = 2
+	NumHplt                       = 2
 	MissingEffectAlleleLikelihood = 0.0004
 )
 
@@ -394,11 +394,11 @@ func (p *PGS) ShuffleIndicesByLikelihood(original []uint8) []int {
 	var lkl float64
 	weightedIndices := make([]int, 0)
 	for i, maf := range p.Maf {
-		for j := 0; j < NumHaplotypes; j++ {
-			weightedIndices = append(weightedIndices, NumHaplotypes*i+j)
-			lkl = 1 - maf[original[NumHaplotypes*i+j]]
+		for j := 0; j < NumHplt; j++ {
+			weightedIndices = append(weightedIndices, NumHplt*i+j)
+			lkl = 1 - maf[original[NumHplt*i+j]]
 			for k := 0; k < int(lkl*100); k++ {
-				weightedIndices = append(weightedIndices, NumHaplotypes*i+j)
+				weightedIndices = append(weightedIndices, NumHplt*i+j)
 			}
 		}
 	}
@@ -418,14 +418,14 @@ func (p *PGS) ShuffleIndicesByLikelihood(original []uint8) []int {
 
 // SampleFromPopulation samples a candidate according to the MAF
 func (p *PGS) SampleFromPopulation() ([]uint8, error) {
-	sample := make([]uint8, p.VariantCount*NumHaplotypes)
+	sample := make([]uint8, p.VariantCount*NumHplt)
 	// Initial sample based on individual priors
 	for i := range p.Loci {
-		for j := 0; j < NumHaplotypes; j++ {
+		for j := 0; j < NumHplt; j++ {
 			maf := p.Maf[i]
 			ind := tools.SampleFromDistribution(maf)
-			sample[i*NumHaplotypes+j] = GENOTYPES[ind]
-			if sample[i*NumHaplotypes+j] == 255 {
+			sample[i*NumHplt+j] = GENOTYPES[ind]
+			if sample[i*NumHplt+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -434,14 +434,14 @@ func (p *PGS) SampleFromPopulation() ([]uint8, error) {
 }
 
 func (p *PGS) SampleSegmentFromPopulation(start, end int) ([]uint8, error) {
-	sample := make([]uint8, (end-start)*NumHaplotypes)
+	sample := make([]uint8, (end-start)*NumHplt)
 	// Initial sample based on individual priors
 	for i := start; i < end; i++ {
-		for j := 0; j < NumHaplotypes; j++ {
+		for j := 0; j < NumHplt; j++ {
 			maf := p.Maf[i]
 			ind := tools.SampleFromDistribution(maf)
-			sample[(i-start)*NumHaplotypes+j] = GENOTYPES[ind]
-			if sample[(i-start)*NumHaplotypes+j] == 255 {
+			sample[(i-start)*NumHplt+j] = GENOTYPES[ind]
+			if sample[(i-start)*NumHplt+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -450,12 +450,12 @@ func (p *PGS) SampleSegmentFromPopulation(start, end int) ([]uint8, error) {
 }
 
 func (p *PGS) SampleUniform() ([]uint8, error) {
-	sample := make([]uint8, p.VariantCount*NumHaplotypes)
+	sample := make([]uint8, p.VariantCount*NumHplt)
 	// Initial sample based on individual priors
 	for i := range p.Loci {
-		for j := 0; j < NumHaplotypes; j++ {
-			sample[i*NumHaplotypes+j] = tools.SampleUniform(GENOTYPES)
-			if sample[i*NumHaplotypes+j] == 255 {
+		for j := 0; j < NumHplt; j++ {
+			sample[i*NumHplt+j] = tools.SampleUniform(GENOTYPES)
+			if sample[i*NumHplt+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -467,9 +467,9 @@ func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
 	//likelihood := 1.0
 	likelihood := 0.0
 	for i := range p.Loci {
-		for j := 0; j < NumHaplotypes; j++ {
-			likelihood += math.Log(p.Maf[i][sequence[i*NumHaplotypes+j]])
-			//likelihood += math.Log(p.Eaf[i][sequence[i*NumHaplotypes+j]])
+		for j := 0; j < NumHplt; j++ {
+			likelihood += math.Log(p.Maf[i][sequence[i*NumHplt+j]])
+			//likelihood += math.Log(p.Eaf[i][sequence[i*NumHplt+j]])
 		}
 	}
 	return likelihood
@@ -477,8 +477,8 @@ func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
 
 func (p *PGS) SnpLikelihood(sequence []uint8, i int) float64 {
 	likelihood := 0.0
-	for j := 0; j < NumHaplotypes; j++ {
-		likelihood += math.Log(p.Maf[i][sequence[i*NumHaplotypes+j]])
+	for j := 0; j < NumHplt; j++ {
+		likelihood += math.Log(p.Maf[i][sequence[i*NumHplt+j]])
 	}
 	return likelihood
 }

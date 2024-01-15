@@ -23,7 +23,7 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, p *
 		indexed[pos] = struct{}{}
 	}
 	var single, double bool
-	for j := startIdx; j < endIdx; j += pgs.NumHaplotypes {
+	for j := startIdx; j < endIdx; j += pgs.NumHplt {
 		_, single = indexed[uint16(j)]
 		_, double = indexed[uint16(j+1)]
 		switch {
@@ -31,9 +31,9 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, p *
 			likelihood += mafToLikelihood(p.Maf[j/2][0])
 			likelihood += mafToLikelihood(p.Maf[j/2][1])
 		case double:
-			likelihood += mafToLikelihood(p.Maf[j/2][1]) * pgs.NumHaplotypes
+			likelihood += mafToLikelihood(p.Maf[j/2][1]) * pgs.NumHplt
 		default:
-			likelihood += mafToLikelihood(p.Maf[j/2][0]) * pgs.NumHaplotypes
+			likelihood += mafToLikelihood(p.Maf[j/2][0]) * pgs.NumHplt
 		}
 	}
 	return likelihood
@@ -45,7 +45,7 @@ func mafToLikelihood(maf float64) float64 {
 
 func locusAlreadyExists(v uint16, array []uint16) bool {
 	for _, a := range array {
-		if a == v || (v%pgs.NumHaplotypes == 0 && a == v+1) || (v%pgs.NumHaplotypes == 1 && a == v-1) {
+		if a == v || (v%pgs.NumHplt == 0 && a == v+1) || (v%pgs.NumHplt == 1 && a == v-1) {
 			return true
 		}
 	}
@@ -54,8 +54,8 @@ func locusAlreadyExists(v uint16, array []uint16) bool {
 
 func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
 	score := apd.New(0, 0)
-	for i := 0; i < len(snps); i += pgs.NumHaplotypes {
-		for j := 0; j < pgs.NumHaplotypes; j++ {
+	for i := 0; i < len(snps); i += pgs.NumHplt {
+		for j := 0; j < pgs.NumHplt; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
@@ -74,12 +74,12 @@ func Accuracy(solution []uint8, target []uint8) float64 {
 		return 0.0
 	}
 	acc := 0.0
-	for i := 0; i < len(solution); i += pgs.NumHaplotypes {
+	for i := 0; i < len(solution); i += pgs.NumHplt {
 		if solution[i]+solution[i+1] == target[i]+target[i+1] {
 			acc++
 		}
 	}
-	return acc * pgs.NumHaplotypes / float64(len(solution))
+	return acc * pgs.NumHplt / float64(len(solution))
 }
 
 func sortInts(positions []int, values []int) {
@@ -110,7 +110,7 @@ func getTriplets(nums []int) [][]int {
 
 func ArrayToString(array []uint8) string {
 	str := make([]string, len(array)/2)
-	for i := 0; i < len(array); i += pgs.NumHaplotypes {
+	for i := 0; i < len(array); i += pgs.NumHplt {
 		str[i/2] = fmt.Sprint(array[i] + array[i+1])
 	}
 	return strings.Join(str, "")
@@ -162,9 +162,9 @@ func sortBy[T, P params.Ordered](items [][]T, properties []P) {
 }
 
 func diploidToSum(diploid []int) []int {
-	sum := make([]int, len(diploid)/pgs.NumHaplotypes)
-	for i := 0; i < len(diploid); i += pgs.NumHaplotypes {
-		sum[i/pgs.NumHaplotypes] = diploid[i] + diploid[i+1]
+	sum := make([]int, len(diploid)/pgs.NumHplt)
+	for i := 0; i < len(diploid); i += pgs.NumHplt {
+		sum[i/pgs.NumHplt] = diploid[i] + diploid[i+1]
 	}
 	return sum
 }

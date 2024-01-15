@@ -509,12 +509,12 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG00242"
 
 	p := pgs.NewPGS()
-	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
@@ -546,7 +546,7 @@ func findAllSolutions() {
 	//	p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Major likelihood: %f\n", p.CalculateSequenceLikelihood(majorReference))
 
-	fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
+	fmt.Printf("\nTrue:\n%s, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype), p.CalculateSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
 	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
@@ -624,7 +624,7 @@ func scoreDistribution() {
 	}
 	for _, sample := range samples {
 		for i := 0; i < len(indices)-1; i++ {
-			score, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype[indices[i]*pgs.NumHaplotypes:indices[i+1]*pgs.NumHaplotypes],
+			score, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype[indices[i]*pgs.NumHplt:indices[i+1]*pgs.NumHplt],
 				p.Weights[indices[i]:indices[i+1]]).Float64()
 			scores[i] = append(scores[i], score)
 		}
@@ -685,7 +685,7 @@ func numSNPs(seq []uint8) int {
 
 func numHeterozygous(seq []uint8) int {
 	num := 0
-	for i := 0; i < len(seq); i += pgs.NumHaplotypes {
+	for i := 0; i < len(seq); i += pgs.NumHplt {
 		if seq[i] == 1 && seq[i+1] == 1 {
 			num++
 		}
