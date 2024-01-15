@@ -23,11 +23,6 @@ type Rounder struct {
 	ScaledTarget  *apd.BigInt
 }
 
-type Product struct {
-	Factors []int64
-	Sum     int64
-}
-
 type Node struct {
 	pointers      map[uint16]uint16
 	topLikelihood float64
@@ -67,7 +62,8 @@ func NewDP(target *apd.Decimal, p *pgs.PGS) *DP {
 	return s
 }
 
-func (dp *DP) Solve(numSegments int) map[string][]uint8 {
+func (dp *DP) Solve() map[string][]uint8 {
+	numSegments := 2
 	var err error
 	var roundingError int64 = 0
 	multiplier := apd.New(1, int32(dp.p.WeightPrecision))
@@ -125,7 +121,7 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 
 	// Do recursion to explore all the combinations
 	solutionHeap := newGenHeap()
-	dp.mitm(numSegments, splitIdxs, tables, betas, targets, solutionHeap)
+	dp.mitm(numSegments, tables, betas, targets, solutionHeap)
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
@@ -135,14 +131,15 @@ func (dp *DP) Solve(numSegments int) map[string][]uint8 {
 	return solutions
 }
 
-func (dp *DP) mitm(numSegments int, splitIdxs []int, tables []map[int64]*Node, betas []map[uint16]int64,
-	targets []int64, solHeap *genHeap) {
+func (dp *DP) mitm(numSegments int, tables []map[int64]*Node, betas []map[uint16]int64, targets []int64, solHeap *genHeap) {
+	matchHeapSize := 1000 * dp.p.VariantCount
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
-	topSums := make([]int64, numSegments)
-	topLkl := math.MaxFloat64
+	//topSums := make([]int64, numSegments)
+	//topLkl := math.MaxFloat64
+	mheap := newMatchHeap()
 	var s int
 	var ok bool
 	var leftSum int64
@@ -152,18 +149,29 @@ func (dp *DP) mitm(numSegments int, splitIdxs []int, tables []map[int64]*Node, b
 		}
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {
-				if topLkl > tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood {
-					topLkl = tables[0][leftSum].topLikelihood + tables[1][t-leftSum].topLikelihood
-					topSums[0], topSums[1] = leftSum, t-leftSum
-				}
+				//fmt.Println("==", leftSum, t-leftSum, tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood)
+				mheap.addToMatchHeap(tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
+				//if topLkl > tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood {
+				//	topLkl = tables[0][leftSum].topLikelihood + tables[1][t-leftSum].topLikelihood
+				//	topSums[0], topSums[1] = leftSum, t-leftSum
+				//}
 			}
 		}
 	}
-	var solution []uint16
-	for i := 0; i < numSegments; i++ {
-		solution = append(solution, backtrack(topSums[i], tables[i], betas[i])...)
+	score := apd.NewBigInt(0)
+	for _, mtch := range *mheap {
+		var solution []uint16
+		for i := 0; i < numSegments; i++ {
+			solution = append(solution, backtrack(mtch.sums[i], tables[i], betas[i])...)
+		}
+		if dp.rounder.RoundedMode {
+			score.Set(lociToScore(solution, dp.rounder.ScaledWeights))
+			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
+				continue
+			}
+		}
+		solHeap.addToGenHeap(mtch.likelihood, solution, params.HeapSize)
 	}
-	solHeap.addToGenHeap(topLkl, solution, params.HeapSize)
 }
 
 // We assume that the weights are sorted in ascending order
@@ -235,14 +243,11 @@ func backtrack(sum int64, table map[int64]*Node, weights map[uint16]int64) []uin
 	nextPtr := table[sum].topPointer
 	newSum := sum
 	for sum != 0 && nextPtr != math.MaxUint16 {
-		//fmt.Printf("%d->%d: %d->%d\n", nextPtr, table[sum].pointers[nextPtr], sum, sum-weights[nextPtr/2]*int64(nextPtr%2+1))
-		//fmt.Println(table[sum].pointers)
 		output = append(output, nextPtr)
 		newSum -= weights[nextPtr/2] * int64(nextPtr%2+1)
 		nextPtr = table[sum].pointers[nextPtr]
 		sum = newSum
 	}
-	//fmt.Println("//////")
 	return output
 }
 

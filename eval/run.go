@@ -209,7 +209,7 @@ func accuracyLikelihood() {
 		}
 		fmt.Printf("%d\n", i)
 		slv := solver.NewDP(cohort[samples[i]].Score, p)
-		solmap := slv.Solve(2)
+		solmap := slv.Solve()
 		solutions := solver.SortByLikelihood(solmap, p)
 		result := NewResult(samples[i], cohort[samples[i]].Score)
 		solved = false
@@ -264,7 +264,7 @@ func scoreToLikelihood() {
 		fmt.Printf("%d ", i)
 		output := []string{samples[i], fmt.Sprintf("%.3f", cohort[samples[i]].Score)}
 		slv := solver.NewDP(cohort[samples[i]].Score, p)
-		solmap := slv.Solve(2)
+		solmap := slv.Solve()
 		solutions := solver.SortByAccuracy(solmap, cohort[samples[i]].Genotype)
 		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[samples[i]].Genotype) != 1.0 {
 			fmt.Printf("No solution for %s: %s, %.3f\n", samples[i], solver.ArrayToString(solutions[0]),
@@ -391,7 +391,7 @@ func likelihoodEffect() {
 		}
 		fmt.Printf("%d ", i)
 		slv := solver.NewDP(cohort[samples[i]].Score, p)
-		solmap := slv.Solve(2)
+		solmap := slv.Solve()
 		solutions := solver.SortByLikelihood(solmap, p)
 		firstAcc := 0.0
 		firstLikelihood := 0.0
@@ -471,7 +471,7 @@ func distribution() {
 	fmt.Printf("Full major %s: score %f, likelihood %f\n", solver.ArrayToString(majorReference), solver.CalculateDecimalScore(p.Context, majorReference, p.Weights), p.CalculateSequenceLikelihood(majorReference))
 	for i := 0; i < len(sorted); i += step {
 		slv := solver.NewDP(cohort[sorted[i]].Score, p)
-		solmap := slv.Solve(2)
+		solmap := slv.Solve()
 		solutions := solver.SortByLikelihood(solmap, p)
 		//fmt.Printf("\n\n%s, %s\n", p.PgsID, sorted[i])
 		//for _, solution := range solutions {
@@ -534,11 +534,7 @@ func findAllSolutions() {
 	//fmt.Printf("Accuracy with major: %f\n",
 	//	solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
 
-	solmap := slv.Solve(2)
-	//solmap := slv.Solve(4)
-	//solmap := slv.solve(numThreads)
-	//solmap := slv.recursive(numThreads)
-	//solmap = findComplements(solmap, p, numThreads)
+	solmap := slv.Solve()
 	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	//solutions := solver.SortByLikelihood(solmap, p)
 	//fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
