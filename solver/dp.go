@@ -94,8 +94,8 @@ func (dp *DP) Solve() map[string][]uint8 {
 		log.Fatalf("Failed to convert target decimal to int64: %s", tmp.String())
 	}
 	fmt.Printf("Target: %d\n", target)
-	fmt.Printf("Weights: %v\n", weights)
-
+	fmt.Printf("Weights [%d]: %v\n", len(weights), weights)
+	
 	var splitIdxs []int
 	splitIdxs = []int{0, len(weights) / 2, len(weights)}
 	betas := make([]map[uint16]int64, numSegments)

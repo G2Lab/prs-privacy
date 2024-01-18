@@ -197,6 +197,7 @@ scannerLoop:
 				}
 				// If there is no mapping, we skip the variant
 				if len(value) == 0 {
+					fmt.Printf("No mapping for variant %s\n", values[0])
 					continue scannerLoop
 				}
 			}
@@ -379,7 +380,7 @@ func (p *PGS) assembleMAF(filename string) {
 			break
 		}
 		if !found {
-			writer.Write([]string{chr, pos, "0.00000"})
+			writer.Write([]string{chr, pos, strconv.FormatFloat(MissingEffectAlleleLikelihood, 'f', 6, 64)})
 			log.Printf("No MAF found for locus %s", locus)
 		}
 		writer.Flush()
@@ -464,9 +465,13 @@ func (p *PGS) SampleUniform() ([]uint8, error) {
 }
 
 func (p *PGS) CalculateSequenceLikelihood(sequence []uint8) float64 {
-	//likelihood := 1.0
 	likelihood := 0.0
-	for i := range p.Loci {
+	if len(sequence) != len(p.Weights)*NumHplt {
+		fmt.Printf("Error: sequence length %d does not match the number of variants %d\n", len(sequence), len(p.Weights))
+		fmt.Println(sequence)
+		return 0.0
+	}
+	for i := range p.Weights {
 		for j := 0; j < NumHplt; j++ {
 			likelihood += math.Log(p.Maf[i][sequence[i*NumHplt+j]])
 			//likelihood += math.Log(p.Eaf[i][sequence[i*NumHplt+j]])

@@ -16,7 +16,7 @@ func IndividualSnpsQuery(c string, p string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
-		"[%SAMPLE=%GT\t]",
+		"[%POS-%SAMPLE=%GT\t]",
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, p, p),
 		GetChromosomeFilepath(c),
@@ -73,7 +73,7 @@ func NormalizeSnp(snp string) (string, error) {
 	case "0|0", "0|1", "1|0", "1|1":
 		return snp, nil
 	/*
-		rare multiallelic cases
+		rare multi-allelic cases
 	*/
 	case "0|2", "0|3", "0|4", "0|5", "0|6", "0|7", "0|8", "0|9":
 		return "0|1", nil

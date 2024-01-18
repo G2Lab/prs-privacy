@@ -501,6 +501,7 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -518,6 +519,8 @@ func findAllSolutions() {
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003195_hmPOS_GRCh38_noX.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -526,6 +529,7 @@ func findAllSolutions() {
 	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
 	p.LoadStats()
 	cohort := solver.NewCohort(p)
+	fmt.Printf("Genotype Length: %d\n", len(cohort[INDIVIDUAL].Genotype))
 
 	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p)
 	//slv := solver.NewTwoSplitDP(cohort[INDIVIDUAL].Score, p)

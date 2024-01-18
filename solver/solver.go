@@ -82,44 +82,10 @@ func Accuracy(solution []uint8, target []uint8) float64 {
 	return acc * pgs.NumHplt / float64(len(solution))
 }
 
-func sortInts(positions []int, values []int) {
-	for i := 0; i < len(values)-1; i++ {
-		for j := i + 1; j < len(values); j++ {
-			if values[i] > values[j] {
-				values[i], values[j] = values[j], values[i]
-				positions[i], positions[j] = positions[j], positions[i]
-			}
-		}
-	}
-}
-
-func getTriplets(nums []int) [][]int {
-	triplets := make([][]int, 0)
-
-	for i := 0; i < len(nums)-2; i++ {
-		for j := i + 1; j < len(nums)-1; j++ {
-			for k := j + 1; k < len(nums); k++ {
-				triplet := []int{nums[i], nums[j], nums[k]}
-				triplets = append(triplets, triplet)
-			}
-		}
-	}
-
-	return triplets
-}
-
 func ArrayToString(array []uint8) string {
 	str := make([]string, len(array)/2)
 	for i := 0; i < len(array); i += pgs.NumHplt {
-		str[i/2] = fmt.Sprint(array[i] + array[i+1])
-	}
-	return strings.Join(str, "")
-}
-
-func arrayToStringDiploid(array []int) string {
-	str := make([]string, len(array))
-	for i := 0; i < len(array); i++ {
-		str[i] = fmt.Sprint(array[i])
+		str[i/pgs.NumHplt] = fmt.Sprint(array[i] + array[i+1])
 	}
 	return strings.Join(str, "")
 }
@@ -159,22 +125,4 @@ func sortBy[T, P params.Ordered](items [][]T, properties []P) {
 			}
 		}
 	}
-}
-
-func diploidToSum(diploid []int) []int {
-	sum := make([]int, len(diploid)/pgs.NumHplt)
-	for i := 0; i < len(diploid); i += pgs.NumHplt {
-		sum[i/pgs.NumHplt] = diploid[i] + diploid[i+1]
-	}
-	return sum
-}
-
-func findMin(values []float64) float64 {
-	minV := values[0]
-	for _, v := range values {
-		if v < minV {
-			minV = v
-		}
-	}
-	return minV
 }
