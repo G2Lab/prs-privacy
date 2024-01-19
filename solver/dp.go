@@ -36,16 +36,16 @@ func newNode(lkl float64, ptr uint16) *Node {
 type Update struct {
 	sum        int64
 	likelihood float64
-	forwardptr uint16
-	backptr    uint16
+	forwardPtr uint16
+	backPtr    uint16
 }
 
 func newUpdate(sum int64, likelihood float64, fptr, bptr uint16) Update {
 	return Update{
 		sum:        sum,
 		likelihood: likelihood,
-		forwardptr: fptr,
-		backptr:    bptr,
+		forwardPtr: fptr,
+		backPtr:    bptr,
 	}
 }
 
@@ -76,8 +76,8 @@ func (dp *DP) Solve() map[string][]uint8 {
 		dp.p.Context.Mul(sct, dp.target, multiplier)
 		dp.rounder.ScaledTarget.SetString(sct.String(), 10)
 		multiplier.SetFinite(1, params.PrecisionsLimit)
-		fmt.Printf("Scaled target: %s\n", dp.rounder.ScaledTarget.String())
-		fmt.Printf("Scaled weights: %v\n", dp.rounder.ScaledWeights)
+		//fmt.Printf("Scaled target: %s\n", dp.rounder.ScaledTarget.String())
+		//fmt.Printf("Scaled weights: %v\n", dp.rounder.ScaledWeights)
 	}
 	weights := DecimalsToInts(dp.p.Context, dp.p.Weights, multiplier)
 	tmp := new(apd.Decimal)
@@ -95,7 +95,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 	}
 	fmt.Printf("Target: %d\n", target)
 	fmt.Printf("Weights [%d]: %v\n", len(weights), weights)
-	
+
 	var splitIdxs []int
 	splitIdxs = []int{0, len(weights) / 2, len(weights)}
 	betas := make([]map[uint16]int64, numSegments)
@@ -106,12 +106,6 @@ func (dp *DP) Solve() map[string][]uint8 {
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive
 
-	tables := make([]map[int64]*Node, numSegments)
-	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumTable(betas[i], upper, lower, dp.p)
-		fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
-	}
-
 	targets := []int64{target}
 	if dp.rounder.RoundedMode {
 		for w := target - 1; w > target-roundingError; w-- {
@@ -119,9 +113,23 @@ func (dp *DP) Solve() map[string][]uint8 {
 		}
 	}
 
-	// Do recursion to explore all the combinations
 	solutionHeap := newGenHeap()
-	dp.mitm(numSegments, tables, betas, targets, solutionHeap)
+	if len(weights) > 50 {
+		tables := make([]map[int64]*Node, numSegments)
+		for i := 0; i < numSegments; i++ {
+			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.p)
+			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+		}
+		dp.probabilisticMitM(numSegments, tables, betas, targets, solutionHeap)
+	} else {
+		tables := make([]map[int64][]uint16, numSegments)
+		for i := 0; i < numSegments; i++ {
+			tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
+			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
+		}
+		// Do recursion to explore all the combinations
+		dp.deterministicMitM(numSegments, splitIdxs, tables, betas, targets, solutionHeap)
+	}
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
@@ -131,14 +139,12 @@ func (dp *DP) Solve() map[string][]uint8 {
 	return solutions
 }
 
-func (dp *DP) mitm(numSegments int, tables []map[int64]*Node, betas []map[uint16]int64, targets []int64, solHeap *genHeap) {
+func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint16]int64, targets []int64, solHeap *genHeap) {
 	matchHeapSize := 1000 * dp.p.VariantCount
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
-	//topSums := make([]int64, numSegments)
-	//topLkl := math.MaxFloat64
 	mheap := newMatchHeap()
 	var s int
 	var ok bool
@@ -151,10 +157,6 @@ func (dp *DP) mitm(numSegments int, tables []map[int64]*Node, betas []map[uint16
 			if _, ok = tables[1][t-leftSum]; ok {
 				//fmt.Println("==", leftSum, t-leftSum, tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood)
 				mheap.addToMatchHeap(tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
-				//if topLkl > tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood {
-				//	topLkl = tables[0][leftSum].topLikelihood + tables[1][t-leftSum].topLikelihood
-				//	topSums[0], topSums[1] = leftSum, t-leftSum
-				//}
 			}
 		}
 	}
@@ -162,7 +164,7 @@ func (dp *DP) mitm(numSegments int, tables []map[int64]*Node, betas []map[uint16
 	for _, mtch := range *mheap {
 		var solution []uint16
 		for i := 0; i < numSegments; i++ {
-			solution = append(solution, backtrack(mtch.sums[i], tables[i], betas[i])...)
+			solution = append(solution, backtrackWithPointers(mtch.sums[i], tables[i], betas[i])...)
 		}
 		if dp.rounder.RoundedMode {
 			score.Set(lociToScore(solution, dp.rounder.ScaledWeights))
@@ -174,8 +176,67 @@ func (dp *DP) mitm(numSegments int, tables []map[int64]*Node, betas []map[uint16
 	}
 }
 
+func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64,
+	targets []int64, solHeap *genHeap) {
+	halfSums := make([][]int64, numSegments)
+	backtracked := make([]map[int64][]*genotype, numSegments)
+	for i := 0; i < numSegments; i++ {
+		backtracked[i] = make(map[int64][]*genotype)
+	}
+	step := len(tables[0]) / 10
+	if step == 0 {
+		step = 1
+	}
+	var i, s int
+	var ok bool
+	var lkl float64
+	var leftSum int64
+	var combinations [][]uint16
+	halfSols := make([][]*genotype, numSegments)
+	for leftSum = range tables[0] {
+		if s++; s%step == 0 {
+			fmt.Printf("Progress: %d%%\n", s*10/step)
+		}
+		halfSums[1] = make([]int64, 0)
+		for _, t := range targets {
+			if _, ok = tables[1][t-leftSum]; ok {
+				halfSums[1] = append(halfSums[1], t-leftSum)
+			}
+		}
+		if len(halfSums[1]) == 0 {
+			continue
+		}
+		halfSums[0] = []int64{leftSum}
+		// backtrack partial solutions
+		for i = 0; i < numSegments; i++ {
+			halfSols[i] = make([]*genotype, 0)
+			for _, halfSum := range halfSums[i] {
+				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
+				for j := range combinations {
+					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.p)
+					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
+				}
+			}
+			//halfSols[i] = make([]*genotype, 0)
+			//for _, halfSum := range halfSums[i] {
+			//	if _, ok = backtracked[i][halfSum]; !ok {
+			//		combinations := backtrackFromSum(halfSum, tables[i], betas[i])
+			//		backtracked[i][halfSum] = make([]*genotype, 0, len(combinations))
+			//		for l := range combinations {
+			//			lkl = calculateNegativeLikelihood(combinations[l], splitIdxs[i]*pgs.NumHaplotypes, splitIdxs[i+1]*pgs.NumHaplotypes, dp.p)
+			//			backtracked[i][halfSum] = append(backtracked[i][halfSum], newGenotype(combinations[l], lkl))
+			//		}
+			//	}
+			//	halfSols[i] = append(halfSols[i], backtracked[i][halfSum]...)
+			//}
+		}
+		// combine partial solutions
+		combinePartials(0, numSegments, make([]uint16, 0), 0, apd.NewBigInt(0), halfSols, solHeap, params.HeapSize, dp.rounder)
+	}
+}
+
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int64, p *pgs.PGS) map[int64]*Node {
+func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, lowerBound int64, p *pgs.PGS) map[int64]*Node {
 	// Fill out the table using dynamic programming
 	table := make(map[int64]*Node)
 	indices := make([]uint16, 0, len(betas))
@@ -230,7 +291,7 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 		// We postpone the updates to avoid the sums for the same locus stacking up on each other
 		for u := range updates {
 			table[updates[u].sum].topLikelihood = updates[u].likelihood
-			table[updates[u].sum].topPointer = updates[u].forwardptr
+			table[updates[u].sum].topPointer = updates[u].forwardPtr
 		}
 		existingSums = append(existingSums, newSums...)
 
@@ -238,7 +299,51 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 	return table
 }
 
-func backtrack(sum int64, table map[int64]*Node, weights map[uint16]int64) []uint16 {
+// We assume that the weights are sorted in ascending order
+func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int64) map[int64][]uint16 {
+	// Fill out the table using dynamic programming
+	table := make(map[int64][]uint16)
+	// add the zero weight
+	table[0] = make([]uint16, 0)
+	indices := make([]uint16, 0, len(betas))
+	for i := range betas {
+		indices = append(indices, i)
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		return indices[i] < indices[j]
+	})
+	existingSums := make([]int64, 1)
+	existingSums[0] = 0
+	var k, i uint16
+	var prevSum, nextSum, weight int64
+	for _, pos := range indices {
+		i++
+		//fmt.Printf("Position %d/%d\n", i, len(betas))
+		if betas[pos] > 0 {
+			lowerBound += pgs.NumHplt * betas[pos]
+		} else {
+			upperBound += pgs.NumHplt * betas[pos]
+		}
+		newSums := make([]int64, 0)
+		for _, prevSum = range existingSums {
+			for k = 1; k <= pgs.NumHplt; k++ {
+				weight = betas[pos] * int64(k)
+				nextSum = prevSum + weight
+				if nextSum >= lowerBound && nextSum <= upperBound {
+					if _, ok := table[nextSum]; !ok {
+						table[nextSum] = make([]uint16, 0)
+						newSums = append(newSums, nextSum)
+					}
+					table[nextSum] = append(table[nextSum], pgs.NumHplt*pos+k-1)
+				}
+			}
+		}
+		existingSums = append(existingSums, newSums...)
+	}
+	return table
+}
+
+func backtrackWithPointers(sum int64, table map[int64]*Node, weights map[uint16]int64) []uint16 {
 	output := make([]uint16, 0)
 	nextPtr := table[sum].topPointer
 	newSum := sum
@@ -249,6 +354,53 @@ func backtrack(sum int64, table map[int64]*Node, weights map[uint16]int64) []uin
 		sum = newSum
 	}
 	return output
+}
+
+func combinePartials(segmentNum, totalSegments int, input []uint16, lkl float64, score *apd.BigInt, genotypes [][]*genotype, solHeap *genHeap, heapSize int, rnd *Rounder) {
+	if segmentNum == totalSegments {
+		if rnd.RoundedMode {
+			if score.Cmp(rnd.ScaledTarget) != 0 {
+				return
+			}
+		}
+		solHeap.addToGenHeap(lkl, input, heapSize)
+		return
+	}
+	for _, sol := range genotypes[segmentNum] {
+		input = append(input, sol.mutations...)
+		if rnd.RoundedMode {
+			newScore := apd.NewBigInt(0)
+			newScore.Add(score, lociToScore(sol.mutations, rnd.ScaledWeights))
+			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, newScore, genotypes, solHeap, heapSize, rnd)
+		} else {
+			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, score, genotypes, solHeap, heapSize, rnd)
+		}
+		input = input[:len(input)-len(sol.mutations)]
+	}
+}
+
+func backtrackFromSum(sum int64, table map[int64][]uint16, betas map[uint16]int64) [][]uint16 {
+	input := make([]uint16, 0)
+	output := make([][]uint16, 0)
+	backtrack(input, &output, sum, table, betas)
+	return output
+}
+
+func backtrack(path []uint16, result *[][]uint16, sum int64, table map[int64][]uint16, weights map[uint16]int64) {
+	if sum == 0 {
+		sol := make([]uint16, len(path))
+		copy(sol, path)
+		*result = append(*result, sol)
+	}
+	for _, ptr := range table[sum] {
+		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
+			continue
+		}
+		path = append(path, ptr)
+		newSum := sum - weights[ptr/2]*int64(ptr%2+1)
+		backtrack(path, result, newSum, table, weights)
+		path = path[:len(path)-1]
+	}
 }
 
 func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {

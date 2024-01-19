@@ -515,12 +515,12 @@ func findAllSolutions() {
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000891_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS003195_hmPOS_GRCh38_noX.txt"
+	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -529,10 +529,8 @@ func findAllSolutions() {
 	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
 	p.LoadStats()
 	cohort := solver.NewCohort(p)
-	fmt.Printf("Genotype Length: %d\n", len(cohort[INDIVIDUAL].Genotype))
 
 	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p)
-	//slv := solver.NewTwoSplitDP(cohort[INDIVIDUAL].Score, p)
 
 	//majorReference := p.AllMajorSample()
 	//fmt.Printf("Accuracy with major: %f\n",
