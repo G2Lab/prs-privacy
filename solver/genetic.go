@@ -113,7 +113,7 @@ package solver
 //		// n: first first first first ... first second
 //
 //		likelihoods := make([]float64, len(parents[first])/pgs.NumHaplotypes-1)
-//		likelihood := g.p.CalculateSequenceLikelihood(parents[second])
+//		likelihood := g.p.CalculateFullSequenceLikelihood(parents[second])
 //		for k := 0; k < len(g.p.Maf)-1; k++ {
 //			likelihood += g.p.SnpLikelihood(parents[first], k)
 //			likelihood -= g.p.SnpLikelihood(parents[second], k)

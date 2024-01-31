@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -129,11 +130,108 @@ func calculateMAF() {
 	wg.Wait()
 }
 
+func readSamplePopulations() {
+	fileName := "data/igsr_samples.tsv"
+
+	// Open the TSV inputFile
+	inputFile, err := os.Open(fileName)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer inputFile.Close()
+
+	// Create a CSV reader with tab as the delimiter
+	reader := csv.NewReader(inputFile)
+	reader.Comma = '\t'
+
+	// Read the header to get column names
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return
+	}
+
+	sampleIdx := indexOf(header, "Sample name")
+	superPopIdx := indexOf(header, "Superpopulation code")
+
+	if sampleIdx == -1 || superPopIdx == -1 {
+		fmt.Println("Required fields not found in the header.")
+		return
+	}
+
+	fullData := make(map[string]string)
+	var record []string
+	// Read the remaining records and extract fields
+	for {
+		record, err = reader.Read()
+		if err != nil {
+			break // End of inputFile
+		}
+		fullData[record[sampleIdx]] = record[superPopIdx]
+	}
+
+	// Check that we have all the sample info for the 1000 Genomes dataset
+	sampleFile, err := os.Open("data/1000genome-samples.csv")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer sampleFile.Close()
+
+	// Create a CSV reader with tab as the delimiter
+	reader = csv.NewReader(sampleFile)
+
+	// Read the header to get column names
+	sampleList, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading sample list:", err)
+		return
+	}
+	reducedData := make(map[string]string)
+	for _, sample := range sampleList {
+		if _, exists := fullData[sample]; !exists {
+			fmt.Printf("Sample %s not found in the superpopulation fullData\n", sample)
+			continue
+		}
+		reducedData[sample] = fullData[sample]
+	}
+
+	// Save the results to a JSON file
+	outputFile, err := os.Create("data/superpopulations.json")
+	if err != nil {
+		fmt.Println("Error creating JSON outputFile:", err)
+		return
+	}
+	defer outputFile.Close()
+
+	// Encode the fullData as JSON and write to the outputFile
+	encoder := json.NewEncoder(outputFile)
+	err = encoder.Encode(reducedData)
+	if err != nil {
+		fmt.Println("Error encoding fullData to JSON:", err)
+	}
+}
+
+// indexOf finds the index of a value in a slice, or returns -1 if not found
+func indexOf(slice []string, value string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
+}
+
 func main() {
 	maf := flag.Bool("maf", false, "calculate MAF")
+	readSP := flag.Bool("populations", false, "read sample populations")
 	flag.Parse()
 
 	if *maf {
 		calculateMAF()
+	}
+	if *readSP {
+		readSamplePopulations()
 	}
 }

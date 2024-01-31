@@ -14,6 +14,7 @@ import (
 type DP struct {
 	target  *apd.Decimal
 	p       *pgs.PGS
+	af      [][]float64
 	rounder *Rounder
 }
 
@@ -29,15 +30,15 @@ type Node struct {
 	topPointer    uint16
 }
 
-func newNode(lkl float64, ptr uint16) *Node {
-	return &Node{make(map[uint16]uint16, 1), lkl, ptr}
-}
-
 type Update struct {
 	sum        int64
 	likelihood float64
 	forwardPtr uint16
 	backPtr    uint16
+}
+
+func newNode(lkl float64, ptr uint16) *Node {
+	return &Node{make(map[uint16]uint16, 1), lkl, ptr}
 }
 
 func newUpdate(sum int64, likelihood float64, fptr, bptr uint16) Update {
@@ -49,10 +50,11 @@ func newUpdate(sum int64, likelihood float64, fptr, bptr uint16) Update {
 	}
 }
 
-func NewDP(target *apd.Decimal, p *pgs.PGS) *DP {
+func NewDP(target *apd.Decimal, p *pgs.PGS, ppl string) *DP {
 	s := &DP{
 		target: target,
 		p:      p,
+		af:     p.PopulationEAF[ppl],
 		rounder: &Rounder{
 			RoundedMode:   false,
 			ScaledWeights: make([]*apd.BigInt, 0),
@@ -117,7 +119,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 	if len(weights) > 50 {
 		tables := make([]map[int64]*Node, numSegments)
 		for i := 0; i < numSegments; i++ {
-			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.p)
+			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.af)
 			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 		}
 		dp.probabilisticMitM(numSegments, tables, betas, targets, solutionHeap)
@@ -213,7 +215,7 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 			for _, halfSum := range halfSums[i] {
 				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
 				for j := range combinations {
-					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.p)
+					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.af)
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
 			}
@@ -236,7 +238,7 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, lowerBound int64, p *pgs.PGS) map[int64]*Node {
+func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, lowerBound int64, af [][]float64) map[int64]*Node {
 	// Fill out the table using dynamic programming
 	table := make(map[int64]*Node)
 	indices := make([]uint16, 0, len(betas))
@@ -248,7 +250,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, l
 	})
 	// the likelihood of all the snps being 0
 	allZeroLikelihood := calculateNegativeLikelihood([]uint16{}, int(indices[0])*pgs.NumHplt,
-		int(indices[len(indices)-1])*pgs.NumHplt, p)
+		int(indices[len(indices)-1])*pgs.NumHplt, af)
 	// add the zero weight
 	table[0] = newNode(allZeroLikelihood, math.MaxUint16)
 	existingSums := make([]int64, 1)
@@ -276,8 +278,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, l
 				if nextSum < lowerBound || nextSum > upperBound {
 					continue
 				}
-				nextLikelihood = table[prevSum].topLikelihood + float64(k)*mafToLikelihood(p.Maf[pos][1]) -
-					float64(k)*mafToLikelihood(p.Maf[pos][0])
+				nextLikelihood = table[prevSum].topLikelihood + float64(k)*afToLikelihood(af[pos][1]) -
+					float64(k)*afToLikelihood(af[pos][0])
 				if _, ok = table[nextSum]; !ok {
 					table[nextSum] = newNode(nextLikelihood, nextPtr)
 					newSums = append(newSums, nextSum)
@@ -462,26 +464,6 @@ func GetMaxTotal(values []int64) (int64, int64) {
 		}
 	}
 	return positive, negative
-}
-
-func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, p *pgs.PGS) (int64, int64) {
-	var err error
-	var sample []uint8
-	var score, maxScore, minScore int64
-	for i := 0; i < numSamples; i++ {
-		sample, err = p.SampleSegmentFromPopulation(segmentStart, segmentEnd)
-		if err != nil {
-			log.Fatalf("Error sampling segment: %v", err)
-		}
-		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
-		if score > maxScore {
-			maxScore = score
-		}
-		if score < minScore {
-			minScore = score
-		}
-	}
-	return maxScore, minScore
 }
 
 func lociToScore(loci []uint16, weights []*apd.BigInt) *apd.BigInt {

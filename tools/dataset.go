@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -12,7 +14,7 @@ func GetChromosomeFilepath(chr string) string {
 	return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v3plus_nounphased.rsID.genotypes.GRCh38_dbSNP_no_SVs.vcf.gz"
 }
 
-func IndividualSnpsQuery(c string, p string) (string, []string) {
+func IndividualSnpsQuery(c, p string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
@@ -23,15 +25,31 @@ func IndividualSnpsQuery(c string, p string) (string, []string) {
 	}
 }
 
-func RangeSnpValuesQuery(c string, posBegin, posEnd string) (string, []string) {
+func RangeQuery(searchPattern, c, posBegin, posEnd string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
-		"[%GT\t]\n",
+		searchPattern,
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, posBegin, posEnd),
 		GetChromosomeFilepath(c),
 	}
+}
+
+func RangeSnpValuesQuery(c, posBegin, posEnd string) (string, []string) {
+	return RangeQuery("[%GT\t]\n", c, posBegin, posEnd)
+}
+
+func RangeNumSamplesQuery(c, posBegin, posEnd string) (string, []string) {
+	return RangeQuery("%NS\n", c, posBegin, posEnd)
+}
+
+func RangeTotalAllelesQuery(c, posBegin, posEnd string) (string, []string) {
+	return RangeQuery("%AN\n", c, posBegin, posEnd)
+}
+
+func RangePopulationAFQuery(population, c, posBegin, posEnd string) (string, []string) {
+	return RangeQuery(fmt.Sprintf("%%%s_AF\n", population), c, posBegin, posEnd)
 }
 
 func AllChrPositionsQuery(c string) (string, []string) {
@@ -119,4 +137,19 @@ func SnpToSum(snp string) (float64, error) {
 	default:
 		return -1, fmt.Errorf("invalid snp value: %s", snp)
 	}
+}
+
+func LoadPopulations() map[string]string {
+	data := make(map[string]string)
+	file, err := os.Open("data/superpopulations.json")
+	if err != nil {
+		fmt.Println("Error opening populations file:", err)
+		return data
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	if err = decoder.Decode(&data); err != nil {
+		fmt.Println("Error decoding populations file:", err)
+	}
+	return data
 }

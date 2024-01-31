@@ -1,7 +1,9 @@
 package solver
 
 import (
+	"errors"
 	"fmt"
+	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"strings"
@@ -16,7 +18,7 @@ type Solver interface {
 }
 
 // Smaller the negative likelihood, the more likely the sequence is
-func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, p *pgs.PGS) float64 {
+func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af [][]float64) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
 	for _, pos := range mutatedLoci {
@@ -28,19 +30,122 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, p *
 		_, double = indexed[uint16(j+1)]
 		switch {
 		case single:
-			likelihood += mafToLikelihood(p.Maf[j/2][0])
-			likelihood += mafToLikelihood(p.Maf[j/2][1])
+			likelihood += afToLikelihood(af[j/2][0])
+			likelihood += afToLikelihood(af[j/2][1])
 		case double:
-			likelihood += mafToLikelihood(p.Maf[j/2][1]) * pgs.NumHplt
+			likelihood += afToLikelihood(af[j/2][1]) * pgs.NumHplt
 		default:
-			likelihood += mafToLikelihood(p.Maf[j/2][0]) * pgs.NumHplt
+			likelihood += afToLikelihood(af[j/2][0]) * pgs.NumHplt
 		}
 	}
 	return likelihood
 }
 
-func mafToLikelihood(maf float64) float64 {
-	return -math.Log(maf)
+func CalculateFullSequenceLikelihood(sequence []uint8, af [][]float64) float64 {
+	likelihood := 0.0
+	//if len(sequence) != len(p.Weights)*pgs.NumHplt {
+	//	fmt.Printf("Error: sequence length %d does not match the number of variants %d\n", len(sequence), len(p.Weights))
+	//	fmt.Println(sequence)
+	//	return 0.0
+	//}
+	for i := 0; i < len(sequence); i += 2 {
+		for j := 0; j < pgs.NumHplt; j++ {
+			likelihood += afToLikelihood(af[i/pgs.NumHplt][sequence[i+j]])
+			//likelihood += afToLikelihood(p.CaseEAF[i/pgs.NumHplt][sequence[i+j]])
+		}
+	}
+	return likelihood
+}
+
+func afToLikelihood(af float64) float64 {
+	return -math.Log(af)
+}
+
+// SampleFromPopulation samples a candidate according to the MAF
+func SampleFromPopulation(af [][]float64) ([]uint8, error) {
+	sample := make([]uint8, len(af)*pgs.NumHplt)
+	// Initial sample based on individual priors
+	for i := range af {
+		for j := 0; j < pgs.NumHplt; j++ {
+			ind := tools.SampleFromDistribution(af[i])
+			sample[i*pgs.NumHplt+j] = pgs.GENOTYPES[ind]
+			if sample[i*pgs.NumHplt+j] == 255 {
+				return nil, errors.New("error in population sampling")
+			}
+		}
+	}
+	return sample, nil
+}
+
+func SampleSegmentFromPopulation(start, end int, af [][]float64) ([]uint8, error) {
+	sample := make([]uint8, (end-start)*pgs.NumHplt)
+	// Initial sample based on individual priors
+	for i := start; i < end; i++ {
+		for j := 0; j < pgs.NumHplt; j++ {
+			ind := tools.SampleFromDistribution(af[i])
+			sample[(i-start)*pgs.NumHplt+j] = pgs.GENOTYPES[ind]
+			if sample[(i-start)*pgs.NumHplt+j] == 255 {
+				return nil, errors.New("error in population sampling")
+			}
+		}
+	}
+	return sample, nil
+}
+
+func SampleUniform(af [][]float64) ([]uint8, error) {
+	sample := make([]uint8, len(af)*pgs.NumHplt)
+	// Initial sample based on individual priors
+	for i := range af {
+		for j := 0; j < pgs.NumHplt; j++ {
+			sample[i*pgs.NumHplt+j] = tools.SampleUniform(pgs.GENOTYPES)
+			if sample[i*pgs.NumHplt+j] == 255 {
+				return nil, errors.New("error in population sampling")
+			}
+		}
+	}
+	return sample, nil
+}
+
+func SnpLikelihood(sequence []uint8, i int, af [][]float64) float64 {
+	likelihood := 0.0
+	for j := 0; j < pgs.NumHplt; j++ {
+		likelihood += afToLikelihood(af[i][sequence[i*pgs.NumHplt+j]])
+	}
+	return likelihood
+}
+
+func AllReferenceAlleleSample(af [][]float64) []uint8 {
+	sample := make([]uint8, 2*len(af))
+	for i := 0; i < len(af); i++ {
+		if af[i][0] > 0.5 {
+			sample[2*i] = 0
+			sample[2*i+1] = 0
+		} else {
+			sample[2*i] = 1
+			sample[2*i+1] = 1
+		}
+	}
+	return sample
+}
+
+func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, af [][]float64) (int64, int64) {
+	var err error
+	var sample []uint8
+	var score, maxScore, minScore int64
+	for i := 0; i < numSamples; i++ {
+		sample, err = SampleSegmentFromPopulation(segmentStart, segmentEnd, af)
+		if err != nil {
+			log.Fatalf("Error sampling segment: %v", err)
+		}
+		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
+		if score > maxScore {
+			maxScore = score
+		}
+		if score < minScore {
+			minScore = score
+		}
+	}
+	return maxScore, minScore
 }
 
 func locusAlreadyExists(v uint16, array []uint16) bool {
@@ -99,29 +204,37 @@ func SortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
 		accuracies[i] = Accuracy(solution, target)
 		i++
 	}
-	sortBy(flattened, accuracies)
+	sortBy(flattened, accuracies, true)
 	return flattened
 }
 
-func SortByLikelihood(solutions map[string][]uint8, p *pgs.PGS) [][]uint8 {
+func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
 	likelihoods := make([]float64, len(solutions))
 	for _, solution := range solutions {
 		flattened[i] = solution
-		likelihoods[i] = p.CalculateSequenceLikelihood(solution)
+		likelihoods[i] = CalculateFullSequenceLikelihood(solution, af)
 		i++
 	}
-	sortBy(flattened, likelihoods)
+	sortBy(flattened, likelihoods, false)
 	return flattened
 }
 
-func sortBy[T, P params.Ordered](items [][]T, properties []P) {
+func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
-			if properties[i] < properties[j] {
-				items[i], items[j] = items[j], items[i]
-				properties[i], properties[j] = properties[j], properties[i]
+			switch reverse {
+			case true:
+				if properties[i] < properties[j] {
+					items[i], items[j] = items[j], items[i]
+					properties[i], properties[j] = properties[j], properties[i]
+				}
+			case false:
+				if properties[i] > properties[j] {
+					items[i], items[j] = items[j], items[i]
+					properties[i], properties[j] = properties[j], properties[i]
+				}
 			}
 		}
 	}

@@ -36,12 +36,13 @@ func NewCohort(p *pgs.PGS) Cohort {
 }
 
 func (c Cohort) Populate(p *pgs.PGS) {
+	var err error
 	filename := fmt.Sprintf("%s/%s.json", params.DataFolder, p.PgsID)
 	// If the file doesn't exist, calculate the PRS and save it
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
+	if _, err = os.Stat(filename); os.IsNotExist(err) {
 		c.RetrieveGenotypesAndCalculatePRS(p)
 		c.SaveToDisk(filename)
-		if _, err := os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
+		if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
 			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID))
 		}
 		// Save scores separately for the ease of reading
