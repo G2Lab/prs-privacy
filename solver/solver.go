@@ -17,7 +17,7 @@ type Solver interface {
 	Solve() map[string][]uint8
 }
 
-// Smaller the negative likelihood, the more likely the sequence is
+// Smaller the negative fitness, the more likely the sequence is
 func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af [][]float64) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
@@ -51,7 +51,7 @@ func CalculateFullSequenceLikelihood(sequence []uint8, af [][]float64) float64 {
 	for i := 0; i < len(sequence); i += 2 {
 		for j := 0; j < pgs.NumHplt; j++ {
 			likelihood += afToLikelihood(af[i/pgs.NumHplt][sequence[i+j]])
-			//likelihood += afToLikelihood(p.CaseEAF[i/pgs.NumHplt][sequence[i+j]])
+			//fitness += afToLikelihood(p.StudyEAF[i/pgs.NumHplt][sequence[i+j]])
 		}
 	}
 	return likelihood
@@ -61,7 +61,7 @@ func afToLikelihood(af float64) float64 {
 	return -math.Log(af)
 }
 
-// SampleFromPopulation samples a candidate according to the MAF
+// SampleFromPopulation samples a individual according to the MAF
 func SampleFromPopulation(af [][]float64) ([]uint8, error) {
 	sample := make([]uint8, len(af)*pgs.NumHplt)
 	// Initial sample based on individual priors
@@ -92,20 +92,6 @@ func SampleSegmentFromPopulation(start, end int, af [][]float64) ([]uint8, error
 	return sample, nil
 }
 
-func SampleUniform(af [][]float64) ([]uint8, error) {
-	sample := make([]uint8, len(af)*pgs.NumHplt)
-	// Initial sample based on individual priors
-	for i := range af {
-		for j := 0; j < pgs.NumHplt; j++ {
-			sample[i*pgs.NumHplt+j] = tools.SampleUniform(pgs.GENOTYPES)
-			if sample[i*pgs.NumHplt+j] == 255 {
-				return nil, errors.New("error in population sampling")
-			}
-		}
-	}
-	return sample, nil
-}
-
 func SnpLikelihood(sequence []uint8, i int, af [][]float64) float64 {
 	likelihood := 0.0
 	for j := 0; j < pgs.NumHplt; j++ {
@@ -128,26 +114,6 @@ func AllReferenceAlleleSample(af [][]float64) []uint8 {
 	return sample
 }
 
-func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, af [][]float64) (int64, int64) {
-	var err error
-	var sample []uint8
-	var score, maxScore, minScore int64
-	for i := 0; i < numSamples; i++ {
-		sample, err = SampleSegmentFromPopulation(segmentStart, segmentEnd, af)
-		if err != nil {
-			log.Fatalf("Error sampling segment: %v", err)
-		}
-		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
-		if score > maxScore {
-			maxScore = score
-		}
-		if score < minScore {
-			minScore = score
-		}
-	}
-	return maxScore, minScore
-}
-
 func locusAlreadyExists(v uint16, array []uint16) bool {
 	for _, a := range array {
 		if a == v || (v%pgs.NumHplt == 0 && a == v+1) || (v%pgs.NumHplt == 1 && a == v-1) {
@@ -165,7 +131,24 @@ func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decima
 			case 0:
 				continue
 			case 1:
-				ctx.Add(score, score, weights[i/2])
+				ctx.Add(score, score, weights[i/pgs.NumHplt])
+			default:
+				log.Printf("Invalid alelle value: %d", snps[i+j])
+			}
+		}
+	}
+	return score
+}
+
+func CalculateBigIntScore(snps []uint8, weights []*apd.BigInt) *apd.BigInt {
+	score := apd.NewBigInt(0)
+	for i := 0; i < len(snps); i += pgs.NumHplt {
+		for j := 0; j < pgs.NumHplt; j++ {
+			switch snps[i+j] {
+			case 0:
+				continue
+			case 1:
+				score.Add(score, weights[i/pgs.NumHplt])
 			default:
 				log.Printf("Invalid alelle value: %d", snps[i+j])
 			}
@@ -221,6 +204,24 @@ func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
 	return flattened
 }
 
+func SortByLikelihoodAndFrequency(solutions map[string][]uint8, alleleFreq [][]float64, freqSpec []float64) [][]uint8 {
+	i := 0
+	flattened := make([][]uint8, len(solutions))
+	laf := make([]float64, len(solutions))
+	var chi float64
+	for _, solution := range solutions {
+		flattened[i] = solution
+		chi = ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, alleleFreq), freqSpec)
+		if chi > 1 {
+			chi = math.Sqrt(chi)
+		}
+		laf[i] = CalculateFullSequenceLikelihood(solution, alleleFreq) + chi
+		i++
+	}
+	sortBy(flattened, laf, false)
+	return flattened
+}
+
 func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
@@ -239,3 +240,41 @@ func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
 		}
 	}
 }
+
+func ChiSquaredTest(observed, expected []float64) float64 {
+	var chi float64
+	for i := 0; i < len(observed); i++ {
+		chi += math.Pow(observed[i]-expected[i], 2) / expected[i]
+	}
+	return chi
+}
+
+func findAbsMin(values []float64) float64 {
+	minV := math.Abs(values[0])
+	for _, v := range values {
+		if math.Abs(v) < minV {
+			minV = math.Abs(v)
+		}
+	}
+	return minV
+}
+
+//func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, af [][]float64) (int64, int64) {
+//	var err error
+//	var sample []uint8
+//	var score, maxScore, minScore int64
+//	for i := 0; i < numSamples; i++ {
+//		sample, err = SampleSegmentFromPopulation(segmentStart, segmentEnd, af)
+//		if err != nil {
+//			log.Fatalf("Error sampling segment: %v", err)
+//		}
+//		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
+//		if score > maxScore {
+//			maxScore = score
+//		}
+//		if score < minScore {
+//			minScore = score
+//		}
+//	}
+//	return maxScore, minScore
+//}

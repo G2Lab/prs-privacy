@@ -39,6 +39,9 @@ func RangeQuery(searchPattern, c, posBegin, posEnd string) (string, []string) {
 func RangeSnpValuesQuery(c, posBegin, posEnd string) (string, []string) {
 	return RangeQuery("[%GT\t]\n", c, posBegin, posEnd)
 }
+func RangeGenotypesQuery(c, posBegin, posEnd string) (string, []string) {
+	return RangeQuery("%CHROM:%POS-[%SAMPLE=%GT\t]\n", c, posBegin, posEnd)
+}
 
 func RangeNumSamplesQuery(c, posBegin, posEnd string) (string, []string) {
 	return RangeQuery("%NS\n", c, posBegin, posEnd)
@@ -139,7 +142,7 @@ func SnpToSum(snp string) (float64, error) {
 	}
 }
 
-func LoadPopulations() map[string]string {
+func LoadAncestry() map[string]string {
 	data := make(map[string]string)
 	file, err := os.Open("data/superpopulations.json")
 	if err != nil {

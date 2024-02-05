@@ -44,7 +44,7 @@ func main() {
 	//test()
 
 	//scoreDistribution()
-	findAllSolutions()
+	//findAllSolutions()
 	//likelihoodEffect()
 	//scoreToLikelihoodDistribution()
 	//scoreToLikelihood()
@@ -52,7 +52,7 @@ func main() {
 	//samples()
 	//distribution()
 	//evaluateReferences()
-	//evaluateGA()
+	evaluateGA()
 }
 
 type Result struct {
@@ -92,56 +92,58 @@ func test() {
 	fmt.Println("%" + strings.Join([]string{"EAS", "EUR", "AMR"}, "_AF\\t%") + "_AF")
 }
 
-//func evaluateGA() {
-//	//INDIVIDUAL := "NA18595"
-//	INDIVIDUAL := "HG02182" // lowest score for PGS000040
-//	//INDIVIDUAL := "HG02215" // highest score for PGS000040
-//	//INDIVIDUAL := "HG02728" // middle 648
-//	//INDIVIDUAL := "NA19780" // high 648
-//	//INDIVIDUAL := "HG00551" // low 648
-//	//
-//	//INDIVIDUAL := "HG01028"
-//	//INDIVIDUAL := "NA18531"
-//	//INDIVIDUAL := "NA20872"
-//
-//	p := pgs.NewPGS()
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
-//	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
-//	if err != nil {
-//		log.Printf("Error loading catalog file: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
-//	p.LoadStats()
-//	cohort := solver.NewCohort(p)
-//
-//	slv := solver.NewGenetic(cohort[INDIVIDUAL].Score, cohort[INDIVIDUAL].Genotype, p)
-//
-//	solmap := slv.Solve(1)
-//	solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-//	fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
-//		cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(cohort[INDIVIDUAL].Genotype, p.Weights),
-//		p.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
-//	fmt.Printf("Major:\n%s -- %f, %f\n", solver.ArrayToString(p.AllReferenceAlleleSample()),
-//		cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(p.AllReferenceAlleleSample(), p.Weights),
-//		p.CalculateFullSequenceLikelihood(p.AllReferenceAlleleSample()))
-//	fmt.Printf("Guessed %d:\n", len(solutions))
-//	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
-//	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
-//	//	cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(solutions[0], p.Weights), p.CalculateFullSequenceLikelihood(solutions[0]))
-//	for _, solution := range solutions {
-//		fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-//			cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(solution, p.Weights), p.CalculateFullSequenceLikelihood(solution))
-//	}
-//}
+func evaluateGA() {
+	//INDIVIDUAL := "NA18595"
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "HG02215" // highest score for PGS000040
+	//INDIVIDUAL := "HG02728" // middle 648
+	//INDIVIDUAL := "NA19780" // high 648
+	INDIVIDUAL := "HG00551" // low 648
+	//
+	//INDIVIDUAL := "HG01028"
+	//INDIVIDUAL := "NA18531"
+	//INDIVIDUAL := "NA20872"
+
+	p := pgs.NewPGS()
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
+	p.LoadStats()
+	cohort := solver.NewCohort(p)
+	populations := tools.LoadAncestry()
+	indPop := populations[INDIVIDUAL]
+
+	slv := solver.NewGenetic(cohort[INDIVIDUAL].Score, p, indPop)
+
+	solmap := slv.Solve()
+	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
+	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
+	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationEAF[indPop], p.FreqSpec[indPop])
+	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
+		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]),
+		solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+
+	fmt.Printf("Guessed %d:\n", len(solutions))
+	for _, solution := range solutions {
+		diff := new(apd.Decimal)
+		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
+		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationEAF[indPop]),
+			solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+	}
+}
 
 //func evaluateReferences() {
 //	resFolder := "results"
@@ -197,7 +199,7 @@ func accuracyLikelihood() {
 		return
 	}
 	p.LoadStats()
-	populations := tools.LoadPopulations()
+	populations := tools.LoadAncestry()
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
 	//samples := cohort.SortByScore()[len(cohort)-100:]
@@ -257,7 +259,7 @@ func scoreToLikelihood() {
 		return
 	}
 	p.LoadStats()
-	populations := tools.LoadPopulations()
+	populations := tools.LoadAncestry()
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
 	samples := allSamples()
@@ -477,7 +479,7 @@ func distribution() {
 		return
 	}
 	p.LoadStats()
-	populations := tools.LoadPopulations()
+	populations := tools.LoadAncestry()
 	cohort := solver.NewCohort(p)
 	sorted := cohort.SortByScore()
 	fmt.Printf("Median score: %g\n", cohort[sorted[len(sorted)/2]].Score)
@@ -550,7 +552,7 @@ func findAllSolutions() {
 	p.LoadStats()
 	cohort := solver.NewCohort(p)
 
-	populations := tools.LoadPopulations()
+	populations := tools.LoadAncestry()
 	indPop := populations[INDIVIDUAL]
 	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop)
 
@@ -573,15 +575,17 @@ func findAllSolutions() {
 
 	solmap := slv.Solve()
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
+	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
+	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationEAF[indPop], p.FreqSpec[indPop])
 	//fmt.Printf("\nTrue:\n%s -- %f, %f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 	//	cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(cohort[INDIVIDUAL].Genotype, p.Weights),
 	//	p.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Major likelihood: %f\n", p.CalculateFullSequenceLikelihood(majorReference))
 
 	fmt.Println(p.Loci)
-	fmt.Printf("\nTrue:\n%s, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
-		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]))
+	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
+		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]),
+		solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 	//shredLoc := "16:53767042"
 	//shredLoc := "5:1279675"
 	//for i := range p.Loci {
@@ -597,8 +601,9 @@ func findAllSolutions() {
 	for _, solution := range solutions {
 		diff := new(apd.Decimal)
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
-		fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationEAF[indPop]))
+		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
+			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationEAF[indPop]),
+			solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 	}
 	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Guessed %d:\n", len(solutions))

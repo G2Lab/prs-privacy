@@ -53,7 +53,7 @@ func numVariantsStats(fileNames []string) {
 			log.Println("Error:", err)
 			return
 		}
-		numVariants = append(numVariants, float64(p.VariantCount))
+		numVariants = append(numVariants, float64(p.NumVariants))
 	}
 	var mean, median float64
 	median, err = stats.Median(numVariants)

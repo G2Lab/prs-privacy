@@ -22,7 +22,7 @@ func TestPGSLoad(t *testing.T) {
 	fmt.Println("Genome Build:", p.GenomeBuild)
 	fmt.Println("Weight Type:", p.WeightType)
 	fmt.Println("HmPOS Build:", p.HmPOSBuild)
-	fmt.Println("Variants Number:", p.VariantCount)
+	fmt.Println("Variants Number:", p.NumVariants)
 	fmt.Println("Field Names:", p.Fieldnames)
 	fmt.Println("Variants:")
 	for _, variant := range p.Variants {

@@ -18,12 +18,6 @@ type DP struct {
 	rounder *Rounder
 }
 
-type Rounder struct {
-	RoundedMode   bool
-	ScaledWeights []*apd.BigInt
-	ScaledTarget  *apd.BigInt
-}
-
 type Node struct {
 	pointers      map[uint16]uint16
 	topLikelihood float64
@@ -52,49 +46,17 @@ func newUpdate(sum int64, likelihood float64, fptr, bptr uint16) Update {
 
 func NewDP(target *apd.Decimal, p *pgs.PGS, ppl string) *DP {
 	s := &DP{
-		target: target,
-		p:      p,
-		af:     p.PopulationEAF[ppl],
-		rounder: &Rounder{
-			RoundedMode:   false,
-			ScaledWeights: make([]*apd.BigInt, 0),
-			ScaledTarget:  new(apd.BigInt),
-		},
+		target:  target,
+		p:       p,
+		af:      p.PopulationEAF[ppl],
+		rounder: newRounder(),
 	}
 	return s
 }
 
 func (dp *DP) Solve() map[string][]uint8 {
 	numSegments := 2
-	var err error
-	var roundingError int64 = 0
-	multiplier := apd.New(1, int32(dp.p.WeightPrecision))
-	if dp.p.WeightPrecision > params.PrecisionsLimit {
-		//roundingError = int64(dp.p.VariantCount) * 5 / 4
-		roundingError = int64(dp.p.VariantCount)
-		dp.rounder.RoundedMode = true
-		dp.rounder.ScaledWeights = scaleWeights(dp.p.Context, dp.p.Weights, multiplier)
-		sct := new(apd.Decimal)
-		dp.p.Context.Mul(sct, dp.target, multiplier)
-		dp.rounder.ScaledTarget.SetString(sct.String(), 10)
-		multiplier.SetFinite(1, params.PrecisionsLimit)
-		//fmt.Printf("Scaled target: %s\n", dp.rounder.ScaledTarget.String())
-		//fmt.Printf("Scaled weights: %v\n", dp.rounder.ScaledWeights)
-	}
-	weights := DecimalsToInts(dp.p.Context, dp.p.Weights, multiplier)
-	tmp := new(apd.Decimal)
-	_, err = dp.p.Context.Mul(tmp, dp.target, multiplier)
-	if err != nil {
-		log.Fatalf("Failed to multiply target and multiplier: %s", dp.target.String())
-	}
-	_, err = dp.p.Context.RoundToIntegralValue(tmp, tmp)
-	if err != nil {
-		log.Fatalf("Failed to round target: %s", tmp.String())
-	}
-	target, err := tmp.Int64()
-	if err != nil {
-		log.Fatalf("Failed to convert target decimal to int64: %s", tmp.String())
-	}
+	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
 	fmt.Printf("Target: %d\n", target)
 	fmt.Printf("Weights [%d]: %v\n", len(weights), weights)
 
@@ -142,7 +104,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 }
 
 func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint16]int64, targets []int64, solHeap *genHeap) {
-	matchHeapSize := 1000 * dp.p.VariantCount
+	matchHeapSize := 1000 * dp.p.NumVariants
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
@@ -248,7 +210,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, l
 	sort.Slice(indices, func(i, j int) bool {
 		return indices[i] < indices[j]
 	})
-	// the likelihood of all the snps being 0
+	// the fitness of all the snps being 0
 	allZeroLikelihood := calculateNegativeLikelihood([]uint16{}, int(indices[0])*pgs.NumHplt,
 		int(indices[len(indices)-1])*pgs.NumHplt, af)
 	// add the zero weight
@@ -403,24 +365,6 @@ func backtrack(path []uint16, result *[][]uint16, sum int64, table map[int64][]u
 		backtrack(path, result, newSum, table, weights)
 		path = path[:len(path)-1]
 	}
-}
-
-func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {
-	ints := make([]int64, len(decimals))
-	tmp := new(apd.Decimal)
-	var err error
-	for i, b := range decimals {
-		ctx.Mul(tmp, b, multiplier)
-		_, err = ctx.RoundToIntegralValue(tmp, tmp)
-		if err != nil {
-			log.Fatalf("Failed to round decimal: %s", b.String())
-		}
-		ints[i], err = tmp.Int64()
-		if err != nil {
-			log.Fatalf("Failed to convert decimal to int64: %s", tmp.String())
-		}
-	}
-	return ints
 }
 
 func makeBetaMap(betas []int64, start, end int) map[uint16]int64 {

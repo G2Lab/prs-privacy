@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -37,6 +38,7 @@ var ALL_FIELDS = []string{
 const (
 	NumHplt    = 2
 	MissingEAF = 0.0004
+	//NumSpectrumBins = 20
 )
 
 var (
@@ -118,7 +120,7 @@ type PGS struct {
 	GenomeBuild     string
 	WeightType      string
 	HmPOSBuild      string
-	VariantCount    int
+	NumVariants     int
 	Fieldnames      []string
 	Variants        map[string]*Variant
 	Loci            []string
@@ -127,7 +129,8 @@ type PGS struct {
 	WeightPrecision uint32
 	//Maf             [][]float64 // [major, minor] allele frequency from the population
 	PopulationEAF map[string][][]float64
-	CaseEAF       [][]float64 // [reference, effect] allele frequency from the study / catalogue file
+	StudyEAF      [][]float64          // [reference, effect] allele frequency from the study / catalogue file
+	FreqSpec      map[string][]float64 // Allele Frequency Spectrum per population
 }
 
 func NewPGS() *PGS {
@@ -168,7 +171,7 @@ scannerLoop:
 				p.HmPOSBuild = fields[1]
 			case "variants_number":
 				if value, err := strconv.Atoi(fields[1]); err == nil {
-					p.VariantCount = value
+					p.NumVariants = value
 				} else {
 					log.Printf("Error parsing variants number %s: %s", fields[1], err)
 				}
@@ -227,17 +230,18 @@ scannerLoop:
 	}
 
 	p.Weights = make([]*apd.Decimal, len(p.Loci))
-	p.CaseEAF = make([][]float64, len(p.Loci))
+	p.StudyEAF = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
 		if err != nil {
 			log.Fatalf("Variant %s, %v: %v\n", loc, err, p.Variants[loc].fields["effect_weight"])
 		}
-		p.CaseEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
+		p.StudyEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
 	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 	p.PopulationEAF = make(map[string][][]float64, len(POPULATIONS))
+	p.FreqSpec = make(map[string][]float64, len(POPULATIONS))
 
 	if err = scanner.Err(); err != nil {
 		return err
@@ -307,7 +311,7 @@ func (p *PGS) GetUnSortedVariantLoci() []string {
 
 func (p *PGS) LoadStats() {
 	p.loadDatasetEAF()
-	//p.loadMAFOld()
+	p.LoadFrequencySpectrumData()
 }
 
 func (p *PGS) loadDatasetEAF() {
@@ -400,6 +404,150 @@ func (p *PGS) extractEAF(filename string) {
 	}
 }
 
+func (p *PGS) LoadFrequencySpectrumData() {
+	filename := fmt.Sprintf("%s/%s.freqspec", params.DataFolder, p.PgsID)
+	_, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		p.computeFrequencySpectrum(filename)
+	}
+	freqSpecFile, err := os.Open(filename)
+	if err != nil {
+		log.Printf("Error opening freqspec file: %v", err)
+		return
+	}
+	defer freqSpecFile.Close()
+	decoder := json.NewDecoder(freqSpecFile)
+	err = decoder.Decode(&p.FreqSpec)
+	if err != nil {
+		log.Printf("Error decoding json freqspec: %v", err)
+	}
+}
+
+func (p *PGS) computeFrequencySpectrum(filename string) {
+	numSpectrumBins := deriveNumSpectrumBins(len(p.Loci))
+	freqSpec := make(map[string][]float64, len(POPULATIONS))
+	for _, population := range POPULATIONS {
+		freqSpec[population] = make([]float64, numSpectrumBins)
+	}
+	ancestry := tools.LoadAncestry()
+	ancestrySizes := make(map[string]int, len(ancestry))
+	//var popNames []string
+	for _, popName := range ancestry {
+		if strings.Contains(popName, ",") {
+			popName = strings.Split(popName, ",")[0]
+		}
+		if _, exists := ancestrySizes[popName]; !exists {
+			//// If the individual has multiple ancestries, we count all
+			//if strings.Contains(popName, ",") {
+			//	popNames = strings.Split(popName, ",")
+			//	for _, p := range popNames {
+			//		if _, exists = ancestrySizes[p]; !exists {
+			//			ancestrySizes[p] = 0
+			//		}
+			//		ancestrySizes[p]++
+			//	}
+			//	continue
+			//}
+			ancestrySizes[popName] = 0
+		}
+		ancestrySizes[popName]++
+	}
+	var digit int
+	var normalized, sample, ancs string
+	for k, locus := range p.Loci {
+		chr, pos := tools.SplitLocus(locus)
+		query, args := tools.RangeGenotypesQuery(chr, pos, pos)
+		cmd := exec.Command(query, args...)
+		output, err := cmd.Output()
+		if err != nil {
+			log.Printf("Error executing bcftools command: %v", err)
+			continue
+		}
+		lines := strings.Split(string(output), "\n")
+		if len(lines[:len(lines)-1]) == 0 {
+			log.Printf("No data for locus %s, inserting all as reference + one effect", locus)
+			for _, ppl := range POPULATIONS {
+				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
+				freqSpec[ppl][valueToBinIdx(p.PopulationEAF[ppl][k][0], numSpectrumBins)] += float64(ancestrySizes[ppl])
+				freqSpec[ppl][valueToBinIdx(p.PopulationEAF[ppl][k][1], numSpectrumBins)] += 1
+			}
+			continue
+		}
+		for _, line := range lines[:len(lines)-1] {
+			fields := strings.Split(line, "-")
+			if fields[0] != locus {
+				fmt.Printf("Locus %s does not match %s\n", locus, fields[0])
+				continue
+			}
+			samples := strings.Split(fields[1], "\t")
+			for _, sample = range samples[:len(samples)-1] {
+				gtp := strings.Split(sample, "=")
+				ancs = ancestry[gtp[0]]
+				if strings.Contains(ancs, ",") {
+					ancs = strings.Split(ancs, ",")[0]
+				}
+				alleles := strings.Split(gtp[1], "|")
+				for _, allele := range alleles {
+					normalized, err = tools.NormalizeAllele(allele)
+					if err != nil {
+						if normalized != "." {
+							log.Printf("%v: %s, at %s\n", err, sample, locus)
+						}
+						continue
+					}
+					digit, err = strconv.Atoi(normalized)
+					if err != nil {
+						log.Printf("Error converting %s to int: %v", normalized, err)
+						continue
+					}
+					freqSpec[ancs][valueToBinIdx(p.PopulationEAF[ancs][k][digit], numSpectrumBins)]++
+				}
+			}
+		}
+	}
+	// Normalize the frequency spectrum
+	for _, population := range POPULATIONS {
+		for i := 0; i < numSpectrumBins; i++ {
+			freqSpec[population][i] /= float64(ancestrySizes[population])
+		}
+	}
+	// save the output
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Error creating freqspec file: %v", err)
+		return
+	}
+	defer file.Close()
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(freqSpec)
+	if err != nil {
+		log.Printf("Error encoding json freqspec: %v", err)
+	}
+}
+
+func CalculateAlleleFrequency(sequence []uint8, af [][]float64) []float64 {
+	numSpectrumBins := deriveNumSpectrumBins(len(sequence) / 2)
+	alfreq := make([]float64, numSpectrumBins)
+	for i := 0; i < len(sequence); i += 2 {
+		for j := 0; j < NumHplt; j++ {
+			alfreq[valueToBinIdx(af[i/NumHplt][sequence[i+j]], numSpectrumBins)]++
+		}
+	}
+	return alfreq
+}
+
+func valueToBinIdx(value float64, numBins int) int {
+	idx := int(value * float64(numBins))
+	if idx == numBins {
+		idx--
+	}
+	return idx
+}
+
+func deriveNumSpectrumBins(l int) int {
+	return int(math.Ceil(math.Sqrt(float64(l)))) + 1
+}
+
 //func (p *PGS) loadMAFOld() {
 //	filename := fmt.Sprintf("%s/%s.maf", params.DataFolder, p.PgsID)
 //	_, err := os.Stat(filename)
@@ -436,7 +584,7 @@ func (p *PGS) extractEAF(filename string) {
 //		p.Maf = append(p.Maf, []float64{1 - effectLikelihood, effectLikelihood})
 //	}
 //	//for i := 0; i < len(p.Loci); i++ {
-//	//	p.Maf[i] = p.CaseEAF[i]
+//	//	p.Maf[i] = p.StudyEAF[i]
 //	//}
 //}
 //
@@ -484,33 +632,4 @@ func (p *PGS) extractEAF(filename string) {
 //		writer.Flush()
 //		f.Close()
 //	}
-//}
-
-//// ShuffleIndicesByLikelihood shuffles index order by the likelihood of alternative allele.
-//// It ensures that if there are several solutions away from the current delta, we tend to pick the one with the highest
-//// likelihood, but it is still randomized.
-//func (p *PGS) ShuffleIndicesByLikelihood(original []uint8) []int {
-//	var lkl float64
-//	weightedIndices := make([]int, 0)
-//	for i, maf := range p.Maf {
-//		for j := 0; j < NumHplt; j++ {
-//			weightedIndices = append(weightedIndices, NumHplt*i+j)
-//			lkl = 1 - maf[original[NumHplt*i+j]]
-//			for k := 0; k < int(lkl*100); k++ {
-//				weightedIndices = append(weightedIndices, NumHplt*i+j)
-//			}
-//		}
-//	}
-//	rand.Shuffle(len(weightedIndices), func(i, j int) {
-//		weightedIndices[i], weightedIndices[j] = weightedIndices[j], weightedIndices[i]
-//	})
-//	indices := make([]int, 0, len(original))
-//	unique := make(map[int]struct{})
-//	for _, v := range weightedIndices {
-//		if _, exists := unique[v]; !exists {
-//			indices = append(indices, v)
-//			unique[v] = struct{}{}
-//		}
-//	}
-//	return indices
 //}
