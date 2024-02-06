@@ -56,18 +56,17 @@ func (g *Genetic) Solve() map[string][]uint8 {
 	}
 	//Evaluate individuals
 	for k := 0; k < params.ITERATIONS; k++ {
-		//for k := 0; k < 100; k++ {
 		if k%500 == 0 {
 			fmt.Printf("Iteration %d/%d\n", k, params.ITERATIONS)
 		}
 		deltas := g.calculateDeltas(candidates)
 		candidates, deltas = g.checkForSolutions(candidates, deltas)
 		candidates, deltas = g.mutate(candidates, deltas, iterationToTemperature(k))
-		//candidates, deltas = g.checkForSolutions(candidates, deltas)
-		//children := g.crossover(candidates, iterationToTemperature(k))
-		//chDeltas := g.calculateDeltas(children)
-		//children, chDeltas = g.checkForSolutions(children, chDeltas)
-		//candidates = g.tournament(append(candidates, children...), append(deltas, chDeltas...), poolSize, iterationToTemperature(k))
+		candidates, deltas = g.checkForSolutions(candidates, deltas)
+		children := g.crossover(candidates, iterationToTemperature(k))
+		chDeltas := g.calculateDeltas(children)
+		children, chDeltas = g.checkForSolutions(children, chDeltas)
+		candidates = g.tournament(append(candidates, children...), append(deltas, chDeltas...), poolSize, iterationToTemperature(k))
 	}
 
 	solutions := make(map[string][]uint8)
