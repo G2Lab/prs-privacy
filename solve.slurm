@@ -12,4 +12,4 @@ module load bcftools/1.17
 module load htslib/1.17
 module load go/1.20.2
 go build -o solve ./eval/
-GOMEMLIMIT=190GiB ./solve $1 $2
+GOMEMLIMIT=19GiB ./solve $1 $2

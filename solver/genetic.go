@@ -61,12 +61,11 @@ func (g *Genetic) Solve() map[string][]uint8 {
 		}
 		deltas := g.calculateDeltas(candidates)
 		candidates, deltas = g.checkForSolutions(candidates, deltas)
-		candidates, deltas = g.mutate(candidates, deltas, iterationToTemperature(k))
-		candidates, deltas = g.checkForSolutions(candidates, deltas)
 		children := g.crossover(candidates, iterationToTemperature(k))
 		chDeltas := g.calculateDeltas(children)
 		children, chDeltas = g.checkForSolutions(children, chDeltas)
 		candidates = g.tournament(append(candidates, children...), append(deltas, chDeltas...), poolSize, iterationToTemperature(k))
+		candidates = g.mutate(candidates, iterationToTemperature(k))
 	}
 
 	solutions := make(map[string][]uint8)
@@ -114,29 +113,29 @@ func (g *Genetic) calculateDeltas(population [][]uint8) []float64 {
 func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
 	parents := tools.Shuffle(population)
 	splice := func(first, second int) []uint8 {
-		// Likelihoods for the possible crossovers in the form of:
+		// Likelihoods/deltas for the possible crossovers in the form of:
 		// 0: first second second second ... second second
 		// 1: first first second second ... second second
 		// 2: first first first second ... second second
 		// ...
 		// n: first first first first ... first second
 
-		likelihoods := make([]float64, len(parents[first])/pgs.NumHplt-1)
-		likelihood := CalculateFullSequenceLikelihood(parents[second], g.af)
-		for k := 0; k < len(g.af)-1; k++ {
-			likelihood += LocusLikelihood(parents[first], k, g.af)
-			likelihood -= LocusLikelihood(parents[second], k, g.af)
-			likelihoods[k] = likelihood
-		}
-		fitness := FitnessFromLikelihoods(likelihoods, T)
-
-		//deltas := make([]float64, len(parents[first])/pgs.NumHplt-1)
-		//delta := CalculateDecimalScore(parents[second], g.p.Weights) - g.ogTarget
-		//for k := 0; k < len(g.p.Weights)-1; k++ {
-		//	delta += (float64(parents[first][k*pgs.NumHplt]) + float64(parents[first][k*pgs.NumHplt+1])) * g.p.Weights[k]
-		//	delta -= (float64(parents[second][k*pgs.NumHplt]) + float64(parents[second][k*pgs.NumHplt+1])) * g.p.Weights[k]
+		//likelihoods := make([]float64, len(parents[first])/pgs.NumHplt-1)
+		//likelihood := CalculateFullSequenceLikelihood(parents[second], g.af)
+		//for k := 0; k < len(g.af)-1; k++ {
+		//	likelihood += LocusLikelihood(parents[first], k, g.af)
+		//	likelihood -= LocusLikelihood(parents[second], k, g.af)
+		//	likelihoods[k] = likelihood
 		//}
-		//fitness := FitnessFromDeltas(deltas, T)
+		//fitness := FitnessFromLikelihoods(likelihoods, T)
+
+		deltas := make([]float64, len(parents[first])/pgs.NumHplt-1)
+		delta := CalculateFloatScore(parents[second], g.weights) - g.target
+		for k := 0; k < len(g.p.Weights)-1; k++ {
+			delta += (float64(parents[first][k*pgs.NumHplt]) + float64(parents[first][k*pgs.NumHplt+1])) * g.weights[k]
+			delta -= (float64(parents[second][k*pgs.NumHplt]) + float64(parents[second][k*pgs.NumHplt+1])) * g.weights[k]
+		}
+		fitness := FitnessFromDeltas(deltas, T)
 
 		selectedIndex := tools.SampleFromDistribution(fitness) + 1
 		child := make([]uint8, len(parents[first]))
@@ -170,11 +169,11 @@ func (g *Genetic) tournament(population [][]uint8, deltas []float64, populationS
 	return population[:populationSize]
 }
 
-func (g *Genetic) mutate(population [][]uint8, deltas []float64, T float64) ([][]uint8, []float64) {
+func (g *Genetic) mutate(population [][]uint8, T float64) [][]uint8 {
 	for j, original := range population {
-		population[j], deltas[j] = g.MutateGenome(original, deltas[j], T)
+		population[j] = g.MutateGenome(original, T)
 	}
-	return population, deltas
+	return population
 }
 
 func FitnessFromDeltas(deltas []float64, T float64) []float64 {
@@ -197,7 +196,7 @@ func FitnessFromLikelihoods(likelihoods []float64, T float64) []float64 {
 	return fitness
 }
 
-func (g *Genetic) MutateGenome(original []uint8, delta float64, T float64) ([]uint8, float64) {
+func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	//indices := shuffleIndicesByLikelihood(original, g.af)
 	//if len(indices) != len(original) {
 	//	log.Fatalf("Error shuffling indices: %d != %d", len(indices), len(original))
@@ -211,7 +210,6 @@ func (g *Genetic) MutateGenome(original []uint8, delta float64, T float64) ([]ui
 	})
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	newDelta := 0.0
 	originalBins := CalculateAlleleFrequency(original, g.af)
 	var newIdx, oldIdx int
 	var freqChange float64
@@ -257,9 +255,9 @@ func (g *Genetic) MutateGenome(original []uint8, delta float64, T float64) ([]ui
 	}
 	//fmt.Println(probabilities)
 	mutationId := tools.SampleFromDistribution(probabilities)
-	newDelta = delta + (float64(mutations[mutationId])-float64(original[mutationId]))*g.weights[mutationId/pgs.NumHplt]
+	//newDelta = delta + (float64(mutations[mutationId])-float64(original[mutationId]))*g.weights[mutationId/pgs.NumHplt]
 	original[mutationId] = mutations[mutationId]
-	return original, newDelta
+	return original
 }
 
 func (g *Genetic) specShiftFactor(idx int, shift float64, currentSpec []float64) float64 {
