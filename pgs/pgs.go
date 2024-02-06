@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -131,6 +130,7 @@ type PGS struct {
 	PopulationEAF map[string][][]float64
 	StudyEAF      [][]float64          // [reference, effect] allele frequency from the study / catalogue file
 	FreqSpec      map[string][]float64 // Allele Frequency Spectrum per population
+	NumSpecBins   int
 }
 
 func NewPGS() *PGS {
@@ -242,6 +242,7 @@ scannerLoop:
 	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 	p.PopulationEAF = make(map[string][][]float64, len(POPULATIONS))
 	p.FreqSpec = make(map[string][]float64, len(POPULATIONS))
+	p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
 
 	if err = scanner.Err(); err != nil {
 		return err
@@ -424,10 +425,9 @@ func (p *PGS) LoadFrequencySpectrumData() {
 }
 
 func (p *PGS) computeFrequencySpectrum(filename string) {
-	numSpectrumBins := deriveNumSpectrumBins(len(p.Loci))
 	freqSpec := make(map[string][]float64, len(POPULATIONS))
 	for _, population := range POPULATIONS {
-		freqSpec[population] = make([]float64, numSpectrumBins)
+		freqSpec[population] = make([]float64, p.NumSpecBins)
 	}
 	ancestry := tools.LoadAncestry()
 	ancestrySizes := make(map[string]int, len(ancestry))
@@ -468,8 +468,8 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 			log.Printf("No data for locus %s, inserting all as reference + one effect", locus)
 			for _, ppl := range POPULATIONS {
 				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
-				freqSpec[ppl][valueToBinIdx(p.PopulationEAF[ppl][k][0], numSpectrumBins)] += float64(ancestrySizes[ppl])
-				freqSpec[ppl][valueToBinIdx(p.PopulationEAF[ppl][k][1], numSpectrumBins)] += 1
+				freqSpec[ppl][tools.ValueToBinIdx(p.PopulationEAF[ppl][k][0], p.NumSpecBins)] += float64(ancestrySizes[ppl])
+				freqSpec[ppl][tools.ValueToBinIdx(p.PopulationEAF[ppl][k][1], p.NumSpecBins)] += 1
 			}
 			continue
 		}
@@ -500,14 +500,14 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 						log.Printf("Error converting %s to int: %v", normalized, err)
 						continue
 					}
-					freqSpec[ancs][valueToBinIdx(p.PopulationEAF[ancs][k][digit], numSpectrumBins)]++
+					freqSpec[ancs][tools.ValueToBinIdx(p.PopulationEAF[ancs][k][digit], p.NumSpecBins)]++
 				}
 			}
 		}
 	}
 	// Normalize the frequency spectrum
 	for _, population := range POPULATIONS {
-		for i := 0; i < numSpectrumBins; i++ {
+		for i := 0; i < p.NumSpecBins; i++ {
 			freqSpec[population][i] /= float64(ancestrySizes[population])
 		}
 	}
@@ -523,29 +523,6 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 	if err != nil {
 		log.Printf("Error encoding json freqspec: %v", err)
 	}
-}
-
-func CalculateAlleleFrequency(sequence []uint8, af [][]float64) []float64 {
-	numSpectrumBins := deriveNumSpectrumBins(len(sequence) / 2)
-	alfreq := make([]float64, numSpectrumBins)
-	for i := 0; i < len(sequence); i += 2 {
-		for j := 0; j < NumHplt; j++ {
-			alfreq[valueToBinIdx(af[i/NumHplt][sequence[i+j]], numSpectrumBins)]++
-		}
-	}
-	return alfreq
-}
-
-func valueToBinIdx(value float64, numBins int) int {
-	idx := int(value * float64(numBins))
-	if idx == numBins {
-		idx--
-	}
-	return idx
-}
-
-func deriveNumSpectrumBins(l int) int {
-	return int(math.Ceil(math.Sqrt(float64(l)))) + 1
 }
 
 //func (p *PGS) loadMAFOld() {

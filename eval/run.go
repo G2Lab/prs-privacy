@@ -105,11 +105,11 @@ func evaluateGA() {
 	//INDIVIDUAL := "NA20872"
 
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
@@ -133,7 +133,7 @@ func evaluateGA() {
 	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationEAF[indPop], p.FreqSpec[indPop])
 	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]),
-		solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+		solver.ChiSquaredValue(solver.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
@@ -141,7 +141,7 @@ func evaluateGA() {
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
 		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationEAF[indPop]),
-			solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+			solver.ChiSquaredValue(solver.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 	}
 }
 
@@ -585,7 +585,7 @@ func findAllSolutions() {
 	fmt.Println(p.Loci)
 	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]),
-		solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+		solver.ChiSquaredValue(solver.CalculateAlleleFrequency(cohort[INDIVIDUAL].Genotype, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 	//shredLoc := "16:53767042"
 	//shredLoc := "5:1279675"
 	//for i := range p.Loci {
@@ -603,7 +603,7 @@ func findAllSolutions() {
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
 		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationEAF[indPop]),
-			solver.ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
+			solver.ChiSquaredValue(solver.CalculateAlleleFrequency(solution, p.PopulationEAF[indPop]), p.FreqSpec[indPop]))
 	}
 	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Guessed %d:\n", len(solutions))

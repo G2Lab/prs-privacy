@@ -92,7 +92,7 @@ func SampleSegmentFromPopulation(start, end int, af [][]float64) ([]uint8, error
 	return sample, nil
 }
 
-func SnpLikelihood(sequence []uint8, i int, af [][]float64) float64 {
+func LocusLikelihood(sequence []uint8, i int, af [][]float64) float64 {
 	likelihood := 0.0
 	for j := 0; j < pgs.NumHplt; j++ {
 		likelihood += afToLikelihood(af[i][sequence[i*pgs.NumHplt+j]])
@@ -204,6 +204,17 @@ func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
 	return flattened
 }
 
+func CalculateAlleleFrequency(sequence []uint8, af [][]float64) []float64 {
+	numSpectrumBins := tools.DeriveNumSpectrumBins(len(sequence) / 2)
+	alfreq := make([]float64, numSpectrumBins)
+	for i := 0; i < len(sequence); i += 2 {
+		for j := 0; j < pgs.NumHplt; j++ {
+			alfreq[tools.ValueToBinIdx(af[i/pgs.NumHplt][sequence[i+j]], numSpectrumBins)]++
+		}
+	}
+	return alfreq
+}
+
 func SortByLikelihoodAndFrequency(solutions map[string][]uint8, alleleFreq [][]float64, freqSpec []float64) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
@@ -211,7 +222,7 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, alleleFreq [][]f
 	var chi float64
 	for _, solution := range solutions {
 		flattened[i] = solution
-		chi = ChiSquaredTest(pgs.CalculateAlleleFrequency(solution, alleleFreq), freqSpec)
+		chi = ChiSquaredValue(CalculateAlleleFrequency(solution, alleleFreq), freqSpec)
 		if chi > 1 {
 			chi = math.Sqrt(chi)
 		}
@@ -241,7 +252,7 @@ func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
 	}
 }
 
-func ChiSquaredTest(observed, expected []float64) float64 {
+func ChiSquaredValue(observed, expected []float64) float64 {
 	var chi float64
 	for i := 0; i < len(observed); i++ {
 		chi += math.Pow(observed[i]-expected[i], 2) / expected[i]

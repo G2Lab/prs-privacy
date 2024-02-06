@@ -56,6 +56,7 @@ func (g *Genetic) Solve() map[string][]uint8 {
 	}
 	//Evaluate individuals
 	for k := 0; k < params.ITERATIONS; k++ {
+		//for k := 0; k < 100; k++ {
 		if k%500 == 0 {
 			fmt.Printf("Iteration %d/%d\n", k, params.ITERATIONS)
 		}
@@ -124,8 +125,8 @@ func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
 		likelihoods := make([]float64, len(parents[first])/pgs.NumHplt-1)
 		likelihood := CalculateFullSequenceLikelihood(parents[second], g.af)
 		for k := 0; k < len(g.af)-1; k++ {
-			likelihood += SnpLikelihood(parents[first], k, g.af)
-			likelihood -= SnpLikelihood(parents[second], k, g.af)
+			likelihood += LocusLikelihood(parents[first], k, g.af)
+			likelihood -= LocusLikelihood(parents[second], k, g.af)
 			likelihoods[k] = likelihood
 		}
 		fitness := FitnessFromLikelihoods(likelihoods, T)
@@ -212,47 +213,63 @@ func (g *Genetic) MutateGenome(original []uint8, delta float64, T float64) ([]ui
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
 	newDelta := 0.0
+	originalBins := CalculateAlleleFrequency(original, g.af)
+	var newIdx, oldIdx int
+	var freqChange float64
 	for _, i := range indices {
 		for _, v := range pgs.GENOTYPES {
 			if v == original[i] {
 				continue
 			}
-			// If new SNP = 0 and original SNP = 1, delta = delta - weight.
-			// If new SNP = 1 and original SNP = 0, delta = delta + weight.
-			newDelta = delta + (float64(v)-float64(original[i]))*g.weights[i/pgs.NumHplt]
-			if math.Abs(newDelta) <= g.roundingError {
-				precise := false
-				if g.rounder.RoundedMode {
-					cp := make([]uint8, len(original))
-					copy(cp, original)
-					cp[i] = v
-					score := CalculateBigIntScore(cp, g.rounder.ScaledWeights)
-					if score.Cmp(g.rounder.ScaledTarget) == 0 {
-						precise = true
-					}
-				}
-				if !g.rounder.RoundedMode || precise {
-					original[i] = v
-					return original, newDelta
-				}
-			}
-			probabilities[i] = g.af[i/pgs.NumHplt][v]
+			//// If new SNP = 0 and original SNP = 1, delta = delta - weight.
+			//// If new SNP = 1 and original SNP = 0, delta = delta + weight.
+			//newDelta = delta + (float64(v)-float64(original[i]))*g.weights[i/pgs.NumHplt]
+			//if math.Abs(newDelta) <= g.roundingError {
+			//	precise := false
+			//	if g.rounder.RoundedMode {
+			//		cp := make([]uint8, len(original))
+			//		copy(cp, original)
+			//		cp[i] = v
+			//		score := CalculateBigIntScore(cp, g.rounder.ScaledWeights)
+			//		if score.Cmp(g.rounder.ScaledTarget) == 0 {
+			//			precise = true
+			//		}
+			//	}
+			//	if !g.rounder.RoundedMode || precise {
+			//		original[i] = v
+			//		return original, newDelta
+			//	}
+			//}
+			oldIdx = tools.ValueToBinIdx(g.af[i/pgs.NumHplt][original[i]], g.p.NumSpecBins)
+			newIdx = tools.ValueToBinIdx(g.af[i/pgs.NumHplt][v], g.p.NumSpecBins)
+			freqChange = g.specShiftFactor(newIdx, float64(v)-float64(original[i]), originalBins) *
+				g.specShiftFactor(oldIdx, float64(original[i])-float64(v), originalBins)
+			probabilities[i] = 1 / (afToLikelihood(g.af[i/pgs.NumHplt][v]) * freqChange)
 			//probabilities[i] = 1 / math.Abs(newDelta)
 			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
-			// Falling into a local minimum
-			if math.Abs(newDelta) > g.roundingError && math.Abs(newDelta) < g.minWeight {
-				newDelta = delta
-			}
+			//// Falling into a local minimum
+			//if math.Abs(newDelta) > g.roundingError && math.Abs(newDelta) < g.minWeight {
+			//	newDelta = delta
+			//}
 			//probabilities[i] = deltaToFitness(newDelta, T)
 			//fmt.Printf("%f/%f, ", newDelta, probabilities[i])
 			mutations[i] = v
 		}
 	}
-	//fmt.Println()
+	//fmt.Println(probabilities)
 	mutationId := tools.SampleFromDistribution(probabilities)
 	newDelta = delta + (float64(mutations[mutationId])-float64(original[mutationId]))*g.weights[mutationId/pgs.NumHplt]
 	original[mutationId] = mutations[mutationId]
 	return original, newDelta
+}
+
+func (g *Genetic) specShiftFactor(idx int, shift float64, currentSpec []float64) float64 {
+	diff := math.Abs(g.freqSpec[idx] - currentSpec[idx])
+	newDiff := math.Abs(diff + shift)
+	if newDiff < 1 {
+		return math.E
+	}
+	return math.Exp(math.Pow(diff/newDiff, 2))
 }
 
 func deltaToFitness(delta float64, T float64) float64 {
