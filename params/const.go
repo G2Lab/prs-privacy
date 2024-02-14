@@ -9,6 +9,4 @@ const ITERATIONS = 10000
 
 const HeapSize = 1000
 
-const LikelihoodPositionThreshold = 10
-
 const PrecisionsLimit = 8

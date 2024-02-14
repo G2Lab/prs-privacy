@@ -20,20 +20,19 @@ type Genetic struct {
 	weights       []float64
 	minWeight     float64
 	roundingError float64
-	af            [][]float64
-	freqSpec      []float64
+	stats         *pgs.Statistics
 	rounder       *Rounder
 	solHeap       *individualHeap
 }
 
 func NewGenetic(target *apd.Decimal, p *pgs.PGS, ppl string) *Genetic {
 	s := &Genetic{
-		ogTarget: target,
-		p:        p,
-		af:       p.PopulationEAF[ppl],
-		freqSpec: p.FreqSpec[ppl],
-		rounder:  newRounder(),
-		solHeap:  newIndividualHeap(),
+		ogTarget:      target,
+		p:             p,
+		roundingError: 0,
+		stats:         p.PopulationStats[ppl],
+		rounder:       newRounder(),
+		solHeap:       newIndividualHeap(),
 	}
 	return s
 }
@@ -48,7 +47,7 @@ func (g *Genetic) Solve() map[string][]uint8 {
 	// Initialize mutations solutions according to the allele frequency and frequency spectrum in the population
 	var err error
 	for i := 0; i < len(candidates); i++ {
-		candidates[i], err = SampleFromPopulation(g.af)
+		candidates[i], err = SampleFromPopulation(g.stats.EAF)
 		if err != nil {
 			fmt.Println(err)
 			return nil
@@ -91,7 +90,7 @@ func (g *Genetic) checkForSolutions(population [][]uint8, deltas []float64) ([][
 			} else {
 				g.solHeap.PushIfUnseen(population[i], deltaToFitness(deltas[i], 0), params.HeapSize)
 			}
-			population[i], err = SampleFromPopulation(g.af)
+			population[i], err = SampleFromPopulation(g.stats.EAF)
 			if err != nil {
 				log.Fatalf("Error resampling in solution check: %v\n", err)
 				return nil, nil
@@ -210,7 +209,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	})
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	originalBins := CalculateAlleleFrequency(original, g.af)
+	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.EAF, g.stats.FreqBinBounds)
 	var newIdx, oldIdx int
 	var freqChange float64
 	for _, i := range indices {
@@ -237,11 +236,11 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 			//		return original, newDelta
 			//	}
 			//}
-			oldIdx = tools.ValueToBinIdx(g.af[i/pgs.NumHplt][original[i]], g.p.NumSpecBins)
-			newIdx = tools.ValueToBinIdx(g.af[i/pgs.NumHplt][v], g.p.NumSpecBins)
+			oldIdx = tools.ValueToBinIdx(g.stats.EAF[i/pgs.NumHplt][original[i]], g.stats.FreqBinBounds)
+			newIdx = tools.ValueToBinIdx(g.stats.EAF[i/pgs.NumHplt][v], g.stats.FreqBinBounds)
 			freqChange = g.specShiftFactor(newIdx, float64(v)-float64(original[i]), originalBins) *
 				g.specShiftFactor(oldIdx, float64(original[i])-float64(v), originalBins)
-			probabilities[i] = 1 / (afToLikelihood(g.af[i/pgs.NumHplt][v]) * freqChange)
+			probabilities[i] = 1 / (afToLikelihood(g.stats.EAF[i/pgs.NumHplt][v]) * freqChange)
 			//probabilities[i] = 1 / math.Abs(newDelta)
 			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
 			//// Falling into a local minimum
@@ -261,7 +260,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 }
 
 func (g *Genetic) specShiftFactor(idx int, shift float64, currentSpec []float64) float64 {
-	diff := math.Abs(g.freqSpec[idx] - currentSpec[idx])
+	diff := math.Abs(g.stats.FreqSpectrum[idx] - currentSpec[idx])
 	newDiff := math.Abs(diff + shift)
 	if newDiff < 1 {
 		return math.E

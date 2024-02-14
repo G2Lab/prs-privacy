@@ -14,7 +14,7 @@ import (
 type DP struct {
 	target  *apd.Decimal
 	p       *pgs.PGS
-	af      [][]float64
+	stats   *pgs.Statistics
 	rounder *Rounder
 }
 
@@ -48,7 +48,7 @@ func NewDP(target *apd.Decimal, p *pgs.PGS, ppl string) *DP {
 	s := &DP{
 		target:  target,
 		p:       p,
-		af:      p.PopulationEAF[ppl],
+		stats:   p.PopulationStats[ppl],
 		rounder: newRounder(),
 	}
 	return s
@@ -81,7 +81,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 	if len(weights) > 50 {
 		tables := make([]map[int64]*Node, numSegments)
 		for i := 0; i < numSegments; i++ {
-			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.af)
+			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.stats.EAF)
 			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 		}
 		dp.probabilisticMitM(numSegments, tables, betas, targets, solutionHeap)
@@ -177,7 +177,7 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 			for _, halfSum := range halfSums[i] {
 				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
 				for j := range combinations {
-					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.af)
+					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.stats.EAF)
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
 			}

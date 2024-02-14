@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -112,6 +113,12 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 	return 0.0
 }
 
+type Statistics struct {
+	EAF           [][]float64 // Effect Allele Frequency
+	FreqSpectrum  []float64   // Allele Frequency Spectrum
+	FreqBinBounds []float64   // Bounds of the frequency spectrum bins
+}
+
 type PGS struct {
 	PgsID           string
 	TraitName       string
@@ -126,11 +133,10 @@ type PGS struct {
 	Weights         []*apd.Decimal
 	Context         *apd.Context
 	WeightPrecision uint32
+	StudyEAF        [][]float64 // [reference, effect] allele frequency from the study / catalogue file
+	PopulationStats map[string]*Statistics
+	NumSpecBins     int
 	//Maf             [][]float64 // [major, minor] allele frequency from the population
-	PopulationEAF map[string][][]float64
-	StudyEAF      [][]float64          // [reference, effect] allele frequency from the study / catalogue file
-	FreqSpec      map[string][]float64 // Allele Frequency Spectrum per population
-	NumSpecBins   int
 }
 
 func NewPGS() *PGS {
@@ -240,9 +246,16 @@ scannerLoop:
 	}
 	p.WeightPrecision = maxPrecision
 	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
-	p.PopulationEAF = make(map[string][][]float64, len(POPULATIONS))
-	p.FreqSpec = make(map[string][]float64, len(POPULATIONS))
+
 	p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
+	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))
+	for _, population := range POPULATIONS {
+		p.PopulationStats[population] = &Statistics{
+			EAF:           make([][]float64, 0),
+			FreqSpectrum:  make([]float64, p.NumSpecBins),
+			FreqBinBounds: make([]float64, p.NumSpecBins),
+		}
+	}
 
 	if err = scanner.Err(); err != nil {
 		return err
@@ -311,34 +324,32 @@ func (p *PGS) GetUnSortedVariantLoci() []string {
 }
 
 func (p *PGS) LoadStats() {
-	p.loadDatasetEAF()
-	p.LoadFrequencySpectrumData()
+	p.LoadDatasetStats()
 }
 
-func (p *PGS) loadDatasetEAF() {
-	filename := fmt.Sprintf("%s/%s.eaf", params.DataFolder, p.PgsID)
+func (p *PGS) LoadDatasetStats() {
+	filename := fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
-		p.extractEAF(filename)
-	}
-	eafFile, err := os.Open(filename)
-	if err != nil {
-		log.Printf("Error opening MAF file: %v\n", err)
-		return
-	}
-	defer eafFile.Close()
-	decoder := json.NewDecoder(eafFile)
-	err = decoder.Decode(&p.PopulationEAF)
-	if err != nil {
-		log.Printf("Error decoding json PopulationEAF: %v", err)
+		p.extractEAF()
+		p.computeFrequencySpectrum()
+		p.SaveStats()
+	} else {
+		statsFile, err := os.Open(filename)
+		if err != nil {
+			log.Printf("Error opening stats file: %v\n", err)
+			return
+		}
+		defer statsFile.Close()
+		decoder := json.NewDecoder(statsFile)
+		err = decoder.Decode(&(p.PopulationStats))
+		if err != nil {
+			log.Printf("Error decoding population stats json: %v", err)
+		}
 	}
 }
 
-func (p *PGS) extractEAF(filename string) {
-	eaf := make(map[string][][]float64, len(POPULATIONS))
-	for i := range POPULATIONS {
-		eaf[POPULATIONS[i]] = make([][]float64, 0, len(p.Loci))
-	}
+func (p *PGS) extractEAF() {
 	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
 	var freq, parsed float64
 	for _, locus := range p.Loci {
@@ -355,7 +366,8 @@ func (p *PGS) extractEAF(filename string) {
 		if len(lines[:len(lines)-1]) == 0 {
 			log.Printf("No data for locus %s, inserting default EAF", locus)
 			for i := range POPULATIONS {
-				eaf[POPULATIONS[i]] = append(eaf[POPULATIONS[i]], []float64{1 - MissingEAF, MissingEAF})
+				p.PopulationStats[POPULATIONS[i]].EAF = append(p.PopulationStats[POPULATIONS[i]].EAF,
+					[]float64{1 - MissingEAF, MissingEAF})
 			}
 			continue
 		}
@@ -387,73 +399,75 @@ func (p *PGS) extractEAF(filename string) {
 				if freq > 1 || freq < 0 {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
-				eaf[population] = append(eaf[population], []float64{1 - freq, freq})
+				p.PopulationStats[population].EAF = append(p.PopulationStats[population].EAF, []float64{1 - freq, freq})
 			}
 		}
 	}
-	// save the output
-	file, err := os.Create(filename)
-	if err != nil {
-		log.Printf("Error creating PopulationEAF file: %v", err)
-		return
-	}
-	defer file.Close()
-	encoder := json.NewEncoder(file)
-	err = encoder.Encode(eaf)
-	if err != nil {
-		log.Printf("Error encoding json PopulationEAF: %v", err)
+}
+
+func (p *PGS) computeFrequencySpectrum() {
+	p.assignFreqBins()
+	p.querySampleFrequencies()
+	//for _, ppl := range POPULATIONS {
+	//	eaf := make([]float64, len(p.PopulationStats[ppl].EAF))
+	//	for i := range p.PopulationStats[ppl].EAF {
+	//		eaf[i] = p.PopulationStats[ppl].EAF[i][1]
+	//	}
+	//	sort.Float64s(eaf)
+	//	elementsPerBin := len(eaf) / p.NumSpecBins
+	//	var endIdx int
+	//	for i := 0; i < p.NumSpecBins; i++ {
+	//		endIdx = (i + 1) * elementsPerBin
+	//		// If we're at the last bin, adjust the endIndex to include all remaining elements
+	//		if i == p.NumSpecBins-1 {
+	//			endIdx = len(eaf)
+	//		}
+	//		p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
+	//	}
+	//	for i := 0; i < len(eaf); i++ {
+	//		binIdx := tools.ValueToBinIdx(eaf[i], p.PopulationStats[ppl].FreqBinBounds)
+	//		p.PopulationStats[ppl].FreqSpectrum[binIdx] += eaf[i]
+	//	}
+	//}
+}
+
+func (p *PGS) assignFreqBins() {
+	for _, ppl := range POPULATIONS {
+		eaf := make([]float64, len(p.PopulationStats[ppl].EAF))
+		for i := range p.PopulationStats[ppl].EAF {
+			eaf[i] = p.PopulationStats[ppl].EAF[i][1]
+		}
+		sort.Float64s(eaf)
+		elementsPerBin := len(eaf) / p.NumSpecBins
+		var endIdx int
+		for i := 0; i < p.NumSpecBins; i++ {
+			endIdx = (i + 1) * elementsPerBin
+			// If we're at the last bin, adjust the endIndex to include all remaining elements
+			if i == p.NumSpecBins-1 {
+				endIdx = len(eaf)
+			}
+			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
+		}
 	}
 }
 
-func (p *PGS) LoadFrequencySpectrumData() {
-	filename := fmt.Sprintf("%s/%s.freqspec", params.DataFolder, p.PgsID)
-	_, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		p.computeFrequencySpectrum(filename)
-	}
-	freqSpecFile, err := os.Open(filename)
-	if err != nil {
-		log.Printf("Error opening freqspec file: %v", err)
-		return
-	}
-	defer freqSpecFile.Close()
-	decoder := json.NewDecoder(freqSpecFile)
-	err = decoder.Decode(&p.FreqSpec)
-	if err != nil {
-		log.Printf("Error decoding json freqspec: %v", err)
-	}
-}
-
-func (p *PGS) computeFrequencySpectrum(filename string) {
-	freqSpec := make(map[string][]float64, len(POPULATIONS))
-	for _, population := range POPULATIONS {
-		freqSpec[population] = make([]float64, p.NumSpecBins)
-	}
+func (p *PGS) querySampleFrequencies() {
 	ancestry := tools.LoadAncestry()
 	ancestrySizes := make(map[string]int, len(ancestry))
-	//var popNames []string
-	for _, popName := range ancestry {
-		if strings.Contains(popName, ",") {
-			popName = strings.Split(popName, ",")[0]
+	var popNames []string
+	for _, popNameStr := range ancestry {
+		// Some samples are assigned multiple comma-separated ancestries
+		popNames = strings.Split(popNameStr, ",")
+		for _, popName := range popNames {
+			if _, exists := ancestrySizes[popName]; !exists {
+				ancestrySizes[popName] = 0
+			}
+			ancestrySizes[popName]++
 		}
-		if _, exists := ancestrySizes[popName]; !exists {
-			//// If the individual has multiple ancestries, we count all
-			//if strings.Contains(popName, ",") {
-			//	popNames = strings.Split(popName, ",")
-			//	for _, p := range popNames {
-			//		if _, exists = ancestrySizes[p]; !exists {
-			//			ancestrySizes[p] = 0
-			//		}
-			//		ancestrySizes[p]++
-			//	}
-			//	continue
-			//}
-			ancestrySizes[popName] = 0
-		}
-		ancestrySizes[popName]++
 	}
-	var digit int
-	var normalized, sample, ancs string
+	var normalized, sample, anc string
+	var ancs []string
+	var val int
 	for k, locus := range p.Loci {
 		chr, pos := tools.SplitLocus(locus)
 		query, args := tools.RangeGenotypesQuery(chr, pos, pos)
@@ -465,11 +479,11 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 		}
 		lines := strings.Split(string(output), "\n")
 		if len(lines[:len(lines)-1]) == 0 {
-			log.Printf("No data for locus %s, inserting all as reference + one effect", locus)
+			log.Printf("No data for locus %s in frequency spectrum", locus)
 			for _, ppl := range POPULATIONS {
 				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
-				freqSpec[ppl][tools.ValueToBinIdx(p.PopulationEAF[ppl][k][0], p.NumSpecBins)] += float64(ancestrySizes[ppl])
-				freqSpec[ppl][tools.ValueToBinIdx(p.PopulationEAF[ppl][k][1], p.NumSpecBins)] += 1
+				p.PopulationStats[ppl].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[ppl].EAF[k][1],
+					p.PopulationStats[ppl].FreqBinBounds)] += 1
 			}
 			continue
 		}
@@ -482,10 +496,7 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 			samples := strings.Split(fields[1], "\t")
 			for _, sample = range samples[:len(samples)-1] {
 				gtp := strings.Split(sample, "=")
-				ancs = ancestry[gtp[0]]
-				if strings.Contains(ancs, ",") {
-					ancs = strings.Split(ancs, ",")[0]
-				}
+				ancs = strings.Split(ancestry[gtp[0]], ",")
 				alleles := strings.Split(gtp[1], "|")
 				for _, allele := range alleles {
 					normalized, err = tools.NormalizeAllele(allele)
@@ -495,118 +506,131 @@ func (p *PGS) computeFrequencySpectrum(filename string) {
 						}
 						continue
 					}
-					digit, err = strconv.Atoi(normalized)
+					val, err = strconv.Atoi(normalized)
 					if err != nil {
 						log.Printf("Error converting %s to int: %v", normalized, err)
 						continue
 					}
-					freqSpec[ancs][tools.ValueToBinIdx(p.PopulationEAF[ancs][k][digit], p.NumSpecBins)]++
+					if val == 0 {
+						continue
+					}
+					for _, anc = range ancs {
+						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].EAF[k][1],
+							p.PopulationStats[anc].FreqBinBounds)]++
+					}
 				}
 			}
 		}
 	}
 	// Normalize the frequency spectrum
-	for _, population := range POPULATIONS {
+	for _, ppl := range POPULATIONS {
 		for i := 0; i < p.NumSpecBins; i++ {
-			freqSpec[population][i] /= float64(ancestrySizes[population])
+			p.PopulationStats[ppl].FreqSpectrum[i] /= float64(ancestrySizes[ppl])
 		}
 	}
-	// save the output
+}
+
+func (p *PGS) SaveStats() {
+	filename := fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
 	file, err := os.Create(filename)
 	if err != nil {
-		log.Printf("Error creating freqspec file: %v", err)
+		log.Printf("Error creating stats file: %v", err)
 		return
 	}
 	defer file.Close()
 	encoder := json.NewEncoder(file)
-	err = encoder.Encode(freqSpec)
+	err = encoder.Encode(p.PopulationStats)
 	if err != nil {
-		log.Printf("Error encoding json freqspec: %v", err)
+		log.Printf("Error encoding json PopulationStats: %v", err)
 	}
 }
 
-//func (p *PGS) loadMAFOld() {
-//	filename := fmt.Sprintf("%s/%s.maf", params.DataFolder, p.PgsID)
+//func (p *PGS) loadDatasetEAF() {
+//	filename := fmt.Sprintf("%s/%s.eaf", params.DataFolder, p.PgsID)
 //	_, err := os.Stat(filename)
 //	if os.IsNotExist(err) {
-//		p.assembleMAF(filename)
+//		p.extractEAF(filename)
 //	}
-//	mafFile, err := os.Open(filename)
+//	eafFile, err := os.Open(filename)
 //	if err != nil {
 //		log.Printf("Error opening MAF file: %v\n", err)
 //		return
 //	}
-//	defer mafFile.Close()
-//	reader := csv.NewReader(mafFile)
-//	// Read header
-//	_, err = reader.Read()
+//	defer eafFile.Close()
+//	decoder := json.NewDecoder(eafFile)
+//	err = decoder.Decode(p.PopulationStats)
 //	if err != nil {
-//		log.Printf("Error reading header: %v", err)
-//		return
+//		log.Printf("Error decoding json PopulationEAF: %v", err)
 //	}
-//	p.Maf = make([][]float64, 0, len(p.Loci))
-//	for {
-//		row, err := reader.Read()
+//}
+
+//func (p *PGS) extractEAF(filename string) {
+//	eaf := make(map[string][][]float64, len(POPULATIONS))
+//	for i := range POPULATIONS {
+//		eaf[POPULATIONS[i]] = make([][]float64, 0, len(p.Loci))
+//	}
+//	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
+//	var freq, parsed float64
+//	for _, locus := range p.Loci {
+//		chr, pos := tools.SplitLocus(locus)
+//		query, args := tools.RangeQuery(populationQ, chr, pos, pos)
+//		cmd := exec.Command(query, args...)
+//		output, err := cmd.Output()
 //		if err != nil {
-//			break // Reached end of file or encountered an error
-//		}
-//		effectLikelihood, err := strconv.ParseFloat(row[2], 64)
-//		if err != nil {
-//			log.Printf("Error converting %s to float: %v", row[2], err)
+//			log.Printf("Error executing bcftools command: %v", err)
 //			continue
 //		}
-//		if effectLikelihood == 0 {
-//			effectLikelihood = MissingEAF
+//		lines := strings.Split(string(output), "\n")
+//		//fmt.Printf("Locus %s: %d lines\n", locus, len(lines))
+//		if len(lines[:len(lines)-1]) == 0 {
+//			log.Printf("No data for locus %s, inserting default EAF", locus)
+//			for i := range POPULATIONS {
+//				eaf[POPULATIONS[i]] = append(eaf[POPULATIONS[i]], []float64{1 - MissingEAF, MissingEAF})
+//			}
+//			continue
 //		}
-//		p.Maf = append(p.Maf, []float64{1 - effectLikelihood, effectLikelihood})
+//		for _, line := range lines[:len(lines)-1] {
+//			fields := strings.Split(line, "-")
+//			if fields[0] != locus {
+//				fmt.Printf("Locus %s does not match %s\n", locus, fields[0])
+//				continue
+//			}
+//			afPerPopulation := strings.Split(fields[1], "\t")
+//			for i, population := range POPULATIONS {
+//				altAfs := strings.Split(afPerPopulation[i], ",")
+//				freq = 0
+//				for _, altAf := range altAfs {
+//					parsed, err = strconv.ParseFloat(altAf, 64)
+//					if err != nil {
+//						log.Printf("Error parsing %s at %s: %v", afPerPopulation[i], locus, err)
+//						parsed = MissingEAF
+//					}
+//					freq += parsed
+//				}
+//				switch freq {
+//				case 0:
+//					freq = MissingEAF
+//				case 1:
+//					freq = 1 - MissingEAF
+//				default:
+//				}
+//				if freq > 1 || freq < 0 {
+//					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
+//				}
+//				eaf[population] = append(eaf[population], []float64{1 - freq, freq})
+//			}
+//		}
 //	}
-//	//for i := 0; i < len(p.Loci); i++ {
-//	//	p.Maf[i] = p.StudyEAF[i]
-//	//}
-//}
-//
-//// Retrieve Minor-Allele Frequency for each variant from the database
-//func (p *PGS) assembleMAF(filename string) {
+//	// save the output
 //	file, err := os.Create(filename)
 //	if err != nil {
-//		log.Printf("Error creating priors file: %v", err)
+//		log.Printf("Error creating PopulationEAF file: %v", err)
 //		return
 //	}
 //	defer file.Close()
-//	writer := csv.NewWriter(file)
-//	writer.Write([]string{"chromosome", "position", "MAF"})
-//	for _, locus := range p.Loci {
-//		chr, pos := tools.SplitLocus(locus)
-//		f, err := os.Open(fmt.Sprintf("data/prior/chr%s.csv", chr))
-//		if err != nil {
-//			log.Printf("Error opening file chr%s.csv: %s", chr, err)
-//			continue
-//		}
-//		reader := csv.NewReader(f)
-//		// Read header
-//		_, err = reader.Read()
-//		if err != nil {
-//			fmt.Printf("Error reading MAF file chr%s.csv: %v", chr, err)
-//			continue
-//		}
-//		found := false
-//		for {
-//			row, err := reader.Read()
-//			if err != nil {
-//				break // Reached end of file or encountered an error
-//			}
-//			if row[0] != pos {
-//				continue
-//			}
-//			writer.Write([]string{chr, pos, row[1]})
-//			found = true
-//			break
-//		}
-//		if !found {
-//			writer.Write([]string{chr, pos, strconv.FormatFloat(MissingEAF, 'f', 6, 64)})
-//			log.Printf("No MAF found for locus %s", locus)
-//		}
-//		writer.Flush()
-//		f.Close()
+//	encoder := json.NewEncoder(file)
+//	err = encoder.Encode(eaf)
+//	if err != nil {
+//		log.Printf("Error encoding json PopulationEAF: %v", err)
 //	}
 //}

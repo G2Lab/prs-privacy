@@ -2,14 +2,22 @@ package tools
 
 import "math"
 
-func ValueToBinIdx(value float64, numBins int) int {
-	idx := int(value * float64(numBins))
-	if idx == numBins {
-		idx--
+func ValueToBinIdx(value float64, bounds []float64) int {
+	low := 0
+	high := len(bounds) - 1
+
+	for low <= high {
+		mid := (low + high) / 2
+		if value <= bounds[mid] {
+			high = mid - 1
+		} else {
+			low = mid + 1
+		}
 	}
-	return idx
+
+	return low
 }
 
 func DeriveNumSpectrumBins(l int) int {
-	return int(math.Ceil(math.Sqrt(float64(l)))) + 1
+	return int(math.Ceil(math.Sqrt(float64(l))))
 }

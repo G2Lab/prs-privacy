@@ -13,6 +13,11 @@ import (
 	"github.com/nikirill/prs/pgs"
 )
 
+const (
+	ReferenceAllele = 0
+	EffectAllele    = 1
+)
+
 type Solver interface {
 	Solve() map[string][]uint8
 }
@@ -204,29 +209,30 @@ func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
 	return flattened
 }
 
-func CalculateAlleleFrequency(sequence []uint8, af [][]float64) []float64 {
-	numSpectrumBins := tools.DeriveNumSpectrumBins(len(sequence) / 2)
-	alfreq := make([]float64, numSpectrumBins)
+func CalculateEffectAlleleSpectrum(sequence []uint8, af [][]float64, bins []float64) []float64 {
+	spectrum := make([]float64, len(bins))
 	for i := 0; i < len(sequence); i += 2 {
 		for j := 0; j < pgs.NumHplt; j++ {
-			alfreq[tools.ValueToBinIdx(af[i/pgs.NumHplt][sequence[i+j]], numSpectrumBins)]++
+			if sequence[i+j] == EffectAllele {
+				spectrum[tools.ValueToBinIdx(af[i/pgs.NumHplt][EffectAllele], bins)]++
+			}
 		}
 	}
-	return alfreq
+	return spectrum
 }
 
-func SortByLikelihoodAndFrequency(solutions map[string][]uint8, alleleFreq [][]float64, freqSpec []float64) [][]uint8 {
+func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
 	laf := make([]float64, len(solutions))
 	var chi float64
 	for _, solution := range solutions {
 		flattened[i] = solution
-		chi = ChiSquaredValue(CalculateAlleleFrequency(solution, alleleFreq), freqSpec)
-		if chi > 1 {
+		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.EAF, stats.FreqBinBounds), stats.FreqSpectrum)
+		if chi < 1 {
 			chi = math.Sqrt(chi)
 		}
-		laf[i] = CalculateFullSequenceLikelihood(solution, alleleFreq) + chi
+		laf[i] = CalculateFullSequenceLikelihood(solution, stats.EAF) + chi
 		i++
 	}
 	sortBy(flattened, laf, false)
@@ -258,6 +264,10 @@ func ChiSquaredValue(observed, expected []float64) float64 {
 		chi += math.Pow(observed[i]-expected[i], 2) / expected[i]
 	}
 	return chi
+}
+
+func CalculateSampleDistance(solution []uint8, stats *pgs.Statistics) float64 {
+	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.EAF, stats.FreqBinBounds), stats.FreqSpectrum)
 }
 
 func findAbsMin(values []float64) float64 {
