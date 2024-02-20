@@ -47,7 +47,7 @@ func (g *Genetic) Solve() map[string][]uint8 {
 	// Initialize mutations solutions according to the allele frequency and frequency spectrum in the population
 	var err error
 	for i := 0; i < len(candidates); i++ {
-		candidates[i], err = SampleFromPopulation(g.stats.EAF)
+		candidates[i], err = SampleFromPopulation(g.stats.AF)
 		if err != nil {
 			fmt.Println(err)
 			return nil
@@ -90,7 +90,7 @@ func (g *Genetic) checkForSolutions(population [][]uint8, deltas []float64) ([][
 			} else {
 				g.solHeap.PushIfUnseen(population[i], deltaToFitness(deltas[i], 0), params.HeapSize)
 			}
-			population[i], err = SampleFromPopulation(g.stats.EAF)
+			population[i], err = SampleFromPopulation(g.stats.AF)
 			if err != nil {
 				log.Fatalf("Error resampling in solution check: %v\n", err)
 				return nil, nil
@@ -209,7 +209,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	})
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.EAF, g.stats.FreqBinBounds)
+	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.AF, g.stats.FreqBinBounds)
 	var newIdx, oldIdx int
 	var freqChange float64
 	for _, i := range indices {
@@ -236,11 +236,11 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 			//		return original, newDelta
 			//	}
 			//}
-			oldIdx = tools.ValueToBinIdx(g.stats.EAF[i/pgs.NumHplt][original[i]], g.stats.FreqBinBounds)
-			newIdx = tools.ValueToBinIdx(g.stats.EAF[i/pgs.NumHplt][v], g.stats.FreqBinBounds)
+			oldIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.NumHplt][original[i]], g.stats.FreqBinBounds)
+			newIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.NumHplt][v], g.stats.FreqBinBounds)
 			freqChange = g.specShiftFactor(newIdx, float64(v)-float64(original[i]), originalBins) *
 				g.specShiftFactor(oldIdx, float64(original[i])-float64(v), originalBins)
-			probabilities[i] = 1 / (afToLikelihood(g.stats.EAF[i/pgs.NumHplt][v]) * freqChange)
+			probabilities[i] = 1 / (afToLikelihood(g.stats.AF[i/pgs.NumHplt][v]) * freqChange)
 			//probabilities[i] = 1 / math.Abs(newDelta)
 			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
 			//// Falling into a local minimum

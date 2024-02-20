@@ -81,7 +81,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 	if len(weights) > 50 {
 		tables := make([]map[int64]*Node, numSegments)
 		for i := 0; i < numSegments; i++ {
-			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.stats.EAF)
+			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], upper, lower, dp.stats)
 			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 		}
 		dp.probabilisticMitM(numSegments, tables, betas, targets, solutionHeap)
@@ -177,7 +177,7 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 			for _, halfSum := range halfSums[i] {
 				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
 				for j := range combinations {
-					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.stats.EAF)
+					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.stats.AF)
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
 			}
@@ -200,7 +200,7 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, lowerBound int64, af [][]float64) map[int64]*Node {
+func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, lowerBound int64, stats *pgs.Statistics) map[int64]*Node {
 	// Fill out the table using dynamic programming
 	table := make(map[int64]*Node)
 	indices := make([]uint16, 0, len(betas))
@@ -212,7 +212,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, l
 	})
 	// the fitness of all the snps being 0
 	allZeroLikelihood := calculateNegativeLikelihood([]uint16{}, int(indices[0])*pgs.NumHplt,
-		int(indices[len(indices)-1])*pgs.NumHplt, af)
+		int(indices[len(indices)-1])*pgs.NumHplt, stats.AF)
 	// add the zero weight
 	table[0] = newNode(allZeroLikelihood, math.MaxUint16)
 	existingSums := make([]int64, 1)
@@ -240,8 +240,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, upperBound, l
 				if nextSum < lowerBound || nextSum > upperBound {
 					continue
 				}
-				nextLikelihood = table[prevSum].topLikelihood + float64(k)*afToLikelihood(af[pos][1]) -
-					float64(k)*afToLikelihood(af[pos][0])
+				nextLikelihood = table[prevSum].topLikelihood + float64(k)*afToLikelihood(stats.AF[pos][1]) -
+					float64(k)*afToLikelihood(stats.AF[pos][0])
 				if _, ok = table[nextSum]; !ok {
 					table[nextSum] = newNode(nextLikelihood, nextPtr)
 					newSums = append(newSums, nextSum)

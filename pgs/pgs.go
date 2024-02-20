@@ -114,7 +114,7 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 }
 
 type Statistics struct {
-	EAF           [][]float64 // Effect Allele Frequency
+	AF            [][]float64 // Effect Allele Frequency
 	FreqSpectrum  []float64   // Allele Frequency Spectrum
 	FreqBinBounds []float64   // Bounds of the frequency spectrum bins
 }
@@ -251,7 +251,7 @@ scannerLoop:
 	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))
 	for _, population := range POPULATIONS {
 		p.PopulationStats[population] = &Statistics{
-			EAF:           make([][]float64, 0),
+			AF:            make([][]float64, 0),
 			FreqSpectrum:  make([]float64, p.NumSpecBins),
 			FreqBinBounds: make([]float64, p.NumSpecBins),
 		}
@@ -364,9 +364,9 @@ func (p *PGS) extractEAF() {
 		lines := strings.Split(string(output), "\n")
 		//fmt.Printf("Locus %s: %d lines\n", locus, len(lines))
 		if len(lines[:len(lines)-1]) == 0 {
-			log.Printf("No data for locus %s, inserting default EAF", locus)
+			log.Printf("No data for locus %s, inserting default AF", locus)
 			for i := range POPULATIONS {
-				p.PopulationStats[POPULATIONS[i]].EAF = append(p.PopulationStats[POPULATIONS[i]].EAF,
+				p.PopulationStats[POPULATIONS[i]].AF = append(p.PopulationStats[POPULATIONS[i]].AF,
 					[]float64{1 - MissingEAF, MissingEAF})
 			}
 			continue
@@ -399,7 +399,7 @@ func (p *PGS) extractEAF() {
 				if freq > 1 || freq < 0 {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
-				p.PopulationStats[population].EAF = append(p.PopulationStats[population].EAF, []float64{1 - freq, freq})
+				p.PopulationStats[population].AF = append(p.PopulationStats[population].AF, []float64{1 - freq, freq})
 			}
 		}
 	}
@@ -409,9 +409,9 @@ func (p *PGS) computeFrequencySpectrum() {
 	p.assignFreqBins()
 	p.querySampleFrequencies()
 	//for _, ppl := range POPULATIONS {
-	//	eaf := make([]float64, len(p.PopulationStats[ppl].EAF))
-	//	for i := range p.PopulationStats[ppl].EAF {
-	//		eaf[i] = p.PopulationStats[ppl].EAF[i][1]
+	//	eaf := make([]float64, len(p.PopulationStats[ppl].AF))
+	//	for i := range p.PopulationStats[ppl].AF {
+	//		eaf[i] = p.PopulationStats[ppl].AF[i][1]
 	//	}
 	//	sort.Float64s(eaf)
 	//	elementsPerBin := len(eaf) / p.NumSpecBins
@@ -433,9 +433,9 @@ func (p *PGS) computeFrequencySpectrum() {
 
 func (p *PGS) assignFreqBins() {
 	for _, ppl := range POPULATIONS {
-		eaf := make([]float64, len(p.PopulationStats[ppl].EAF))
-		for i := range p.PopulationStats[ppl].EAF {
-			eaf[i] = p.PopulationStats[ppl].EAF[i][1]
+		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
+		for i := range p.PopulationStats[ppl].AF {
+			eaf[i] = p.PopulationStats[ppl].AF[i][1]
 		}
 		sort.Float64s(eaf)
 		elementsPerBin := len(eaf) / p.NumSpecBins
@@ -482,7 +482,7 @@ func (p *PGS) querySampleFrequencies() {
 			log.Printf("No data for locus %s in frequency spectrum", locus)
 			for _, ppl := range POPULATIONS {
 				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
-				p.PopulationStats[ppl].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[ppl].EAF[k][1],
+				p.PopulationStats[ppl].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[ppl].AF[k][1],
 					p.PopulationStats[ppl].FreqBinBounds)] += 1
 			}
 			continue
@@ -515,7 +515,7 @@ func (p *PGS) querySampleFrequencies() {
 						continue
 					}
 					for _, anc = range ancs {
-						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].EAF[k][1],
+						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].AF[k][1],
 							p.PopulationStats[anc].FreqBinBounds)]++
 					}
 				}
@@ -583,7 +583,7 @@ func (p *PGS) SaveStats() {
 //		lines := strings.Split(string(output), "\n")
 //		//fmt.Printf("Locus %s: %d lines\n", locus, len(lines))
 //		if len(lines[:len(lines)-1]) == 0 {
-//			log.Printf("No data for locus %s, inserting default EAF", locus)
+//			log.Printf("No data for locus %s, inserting default AF", locus)
 //			for i := range POPULATIONS {
 //				eaf[POPULATIONS[i]] = append(eaf[POPULATIONS[i]], []float64{1 - MissingEAF, MissingEAF})
 //			}

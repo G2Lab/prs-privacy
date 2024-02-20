@@ -228,11 +228,11 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 	var chi float64
 	for _, solution := range solutions {
 		flattened[i] = solution
-		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.EAF, stats.FreqBinBounds), stats.FreqSpectrum)
+		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
 		if chi < 1 {
 			chi = math.Sqrt(chi)
 		}
-		laf[i] = CalculateFullSequenceLikelihood(solution, stats.EAF) + chi
+		laf[i] = CalculateFullSequenceLikelihood(solution, stats.AF) + chi
 		i++
 	}
 	sortBy(flattened, laf, false)
@@ -266,8 +266,8 @@ func ChiSquaredValue(observed, expected []float64) float64 {
 	return chi
 }
 
-func CalculateSampleDistance(solution []uint8, stats *pgs.Statistics) float64 {
-	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.EAF, stats.FreqBinBounds), stats.FreqSpectrum)
+func CalculateSpectrumDistance(solution []uint8, stats *pgs.Statistics) float64 {
+	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
 }
 
 func findAbsMin(values []float64) float64 {
