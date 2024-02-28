@@ -131,7 +131,7 @@ func evaluateGA() {
 	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop])
 	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop].AF),
-		solver.CalculateSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))
+		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	for _, solution := range solutions {
@@ -139,7 +139,7 @@ func evaluateGA() {
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
 		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[indPop].AF),
-			solver.CalculateSpectrumDistance(solution, p.PopulationStats[indPop]))
+			solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[indPop]))
 	}
 }
 
@@ -516,7 +516,7 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -524,14 +524,14 @@ func findAllSolutions() {
 	//INDIVIDUAL := "NA20872"
 	//INDIVIDUAL := "NA20507"
 	//INDIVIDUAL := "NA07037"
-	//INDIVIDUAL := "HG03015"
+	INDIVIDUAL := "HG03015"
 	//INDIVIDUAL := "HG03363"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
@@ -540,7 +540,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS000307_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000534_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -571,7 +571,7 @@ func findAllSolutions() {
 	fmt.Println(p.Loci)
 	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop].AF),
-		solver.CalculateSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))
+		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
@@ -582,7 +582,7 @@ func findAllSolutions() {
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
 		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
 			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[indPop].AF),
-			solver.CalculateSpectrumDistance(solution, p.PopulationStats[indPop]))
+			solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[indPop]))
 	}
 	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Guessed %d:\n", len(solutions))

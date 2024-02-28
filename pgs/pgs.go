@@ -114,9 +114,9 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 }
 
 type Statistics struct {
-	AF            [][]float64 // Effect Allele Frequency
-	FreqSpectrum  []float64   // Allele Frequency Spectrum
-	FreqBinBounds []float64   // Bounds of the frequency spectrum bins
+	AF            map[int][]float64 // Effect Allele Frequency
+	FreqSpectrum  []float64         // Allele Frequency Spectrum
+	FreqBinBounds []float64         // Bounds of the frequency spectrum bins
 }
 
 type PGS struct {
@@ -251,7 +251,7 @@ scannerLoop:
 	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))
 	for _, population := range POPULATIONS {
 		p.PopulationStats[population] = &Statistics{
-			AF:            make([][]float64, 0),
+			AF:            make(map[int][]float64, len(p.Loci)),
 			FreqSpectrum:  make([]float64, p.NumSpecBins),
 			FreqBinBounds: make([]float64, p.NumSpecBins),
 		}
@@ -352,7 +352,7 @@ func (p *PGS) LoadDatasetStats() {
 func (p *PGS) extractEAF() {
 	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
 	var freq, parsed float64
-	for _, locus := range p.Loci {
+	for k, locus := range p.Loci {
 		chr, pos := tools.SplitLocus(locus)
 		query, args := tools.RangeQuery(populationQ, chr, pos, pos)
 		cmd := exec.Command(query, args...)
@@ -366,8 +366,7 @@ func (p *PGS) extractEAF() {
 		if len(lines[:len(lines)-1]) == 0 {
 			log.Printf("No data for locus %s, inserting default AF", locus)
 			for i := range POPULATIONS {
-				p.PopulationStats[POPULATIONS[i]].AF = append(p.PopulationStats[POPULATIONS[i]].AF,
-					[]float64{1 - MissingEAF, MissingEAF})
+				p.PopulationStats[POPULATIONS[i]].AF[k] = []float64{1 - MissingEAF, MissingEAF}
 			}
 			continue
 		}
@@ -399,7 +398,7 @@ func (p *PGS) extractEAF() {
 				if freq > 1 || freq < 0 {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
-				p.PopulationStats[population].AF = append(p.PopulationStats[population].AF, []float64{1 - freq, freq})
+				p.PopulationStats[population].AF[k] = []float64{1 - freq, freq}
 			}
 		}
 	}

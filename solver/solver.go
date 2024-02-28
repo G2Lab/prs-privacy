@@ -3,7 +3,6 @@ package solver
 import (
 	"errors"
 	"fmt"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 )
 
 const (
@@ -23,7 +23,7 @@ type Solver interface {
 }
 
 // Smaller the negative fitness, the more likely the sequence is
-func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af [][]float64) float64 {
+func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af map[int][]float64) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
 	for _, pos := range mutatedLoci {
@@ -46,7 +46,7 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af 
 	return likelihood
 }
 
-func CalculateFullSequenceLikelihood(sequence []uint8, af [][]float64) float64 {
+func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float64) float64 {
 	likelihood := 0.0
 	//if len(sequence) != len(p.Weights)*pgs.NumHplt {
 	//	fmt.Printf("Error: sequence length %d does not match the number of variants %d\n", len(sequence), len(p.Weights))
@@ -67,7 +67,7 @@ func afToLikelihood(af float64) float64 {
 }
 
 // SampleFromPopulation samples a individual according to the MAF
-func SampleFromPopulation(af [][]float64) ([]uint8, error) {
+func SampleFromPopulation(af map[int][]float64) ([]uint8, error) {
 	sample := make([]uint8, len(af)*pgs.NumHplt)
 	// Initial sample based on individual priors
 	for i := range af {
@@ -105,7 +105,7 @@ func LocusLikelihood(sequence []uint8, i int, af [][]float64) float64 {
 	return likelihood
 }
 
-func AllReferenceAlleleSample(af [][]float64) []uint8 {
+func AllReferenceAlleleSample(af map[int][]float64) []uint8 {
 	sample := make([]uint8, 2*len(af))
 	for i := 0; i < len(af); i++ {
 		if af[i][0] > 0.5 {
@@ -196,7 +196,7 @@ func SortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
 	return flattened
 }
 
-func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
+func SortByLikelihood(solutions map[string][]uint8, af map[int][]float64) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
 	likelihoods := make([]float64, len(solutions))
@@ -209,7 +209,7 @@ func SortByLikelihood(solutions map[string][]uint8, af [][]float64) [][]uint8 {
 	return flattened
 }
 
-func CalculateEffectAlleleSpectrum(sequence []uint8, af [][]float64, bins []float64) []float64 {
+func CalculateEffectAlleleSpectrum(sequence []uint8, af map[int][]float64, bins []float64) []float64 {
 	spectrum := make([]float64, len(bins))
 	for i := 0; i < len(sequence); i += 2 {
 		for j := 0; j < pgs.NumHplt; j++ {
@@ -266,8 +266,20 @@ func ChiSquaredValue(observed, expected []float64) float64 {
 	return chi
 }
 
-func CalculateSpectrumDistance(solution []uint8, stats *pgs.Statistics) float64 {
+func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics) float64 {
 	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
+}
+
+func CalculateTwoSpectrumDistance(spectrum1, spectrum2 []float64) float64 {
+	return ChiSquaredValue(spectrum1, spectrum2)
+}
+
+func IncrementObservedInSpectrum(prevBinCount, expectedBinCount float64) float64 {
+	return (2*(prevBinCount-expectedBinCount) + 1) / expectedBinCount
+}
+
+func CombineLikelihoodAndChiSquared(likelihood, chiSquared float64) float64 {
+	return likelihood + chiSquared
 }
 
 func findAbsMin(values []float64) float64 {
