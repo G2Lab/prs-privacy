@@ -261,6 +261,9 @@ func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
 func ChiSquaredValue(observed, expected []float64) float64 {
 	var chi float64
 	for i := 0; i < len(observed); i++ {
+		if expected[i] == 0 {
+			continue
+		}
 		chi += math.Pow(observed[i]-expected[i], 2) / expected[i]
 	}
 	return chi

@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -407,48 +406,39 @@ func (p *PGS) extractEAF() {
 func (p *PGS) computeFrequencySpectrum() {
 	p.assignFreqBins()
 	p.querySampleFrequencies()
-	//for _, ppl := range POPULATIONS {
-	//	eaf := make([]float64, len(p.PopulationStats[ppl].AF))
-	//	for i := range p.PopulationStats[ppl].AF {
-	//		eaf[i] = p.PopulationStats[ppl].AF[i][1]
-	//	}
-	//	sort.Float64s(eaf)
-	//	elementsPerBin := len(eaf) / p.NumSpecBins
-	//	var endIdx int
-	//	for i := 0; i < p.NumSpecBins; i++ {
-	//		endIdx = (i + 1) * elementsPerBin
-	//		// If we're at the last bin, adjust the endIndex to include all remaining elements
-	//		if i == p.NumSpecBins-1 {
-	//			endIdx = len(eaf)
-	//		}
-	//		p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
-	//	}
-	//	for i := 0; i < len(eaf); i++ {
-	//		binIdx := tools.ValueToBinIdx(eaf[i], p.PopulationStats[ppl].FreqBinBounds)
-	//		p.PopulationStats[ppl].FreqSpectrum[binIdx] += eaf[i]
-	//	}
-	//}
 }
 
 func (p *PGS) assignFreqBins() {
+	var step float64 = 1 / float64(p.NumSpecBins)
 	for _, ppl := range POPULATIONS {
-		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
-		for i := range p.PopulationStats[ppl].AF {
-			eaf[i] = p.PopulationStats[ppl].AF[i][1]
-		}
-		sort.Float64s(eaf)
-		elementsPerBin := len(eaf) / p.NumSpecBins
-		var endIdx int
 		for i := 0; i < p.NumSpecBins; i++ {
-			endIdx = (i + 1) * elementsPerBin
-			// If we're at the last bin, adjust the endIndex to include all remaining elements
+			p.PopulationStats[ppl].FreqBinBounds[i] = float64(i+1) * step
 			if i == p.NumSpecBins-1 {
-				endIdx = len(eaf)
+				p.PopulationStats[ppl].FreqBinBounds[i] = 1
 			}
-			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
 		}
 	}
 }
+
+//func (p *PGS) assignFreqBins() {
+//	for _, ppl := range POPULATIONS {
+//		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
+//		for i := range p.PopulationStats[ppl].AF {
+//			eaf[i] = p.PopulationStats[ppl].AF[i][1]
+//		}
+//		sort.Float64s(eaf)
+//		elementsPerBin := len(eaf) / p.NumSpecBins
+//		var endIdx int
+//		for i := 0; i < p.NumSpecBins; i++ {
+//			endIdx = (i + 1) * elementsPerBin
+//			// If we're at the last bin, adjust the endIndex to include all remaining elements
+//			if i == p.NumSpecBins-1 {
+//				endIdx = len(eaf)
+//			}
+//			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
+//		}
+//	}
+//}
 
 func (p *PGS) querySampleFrequencies() {
 	ancestry := tools.LoadAncestry()
