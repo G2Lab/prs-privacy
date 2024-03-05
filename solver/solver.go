@@ -23,6 +23,29 @@ type Solver interface {
 }
 
 // Smaller the negative fitness, the more likely the sequence is
+func calculateLikelihoodForSelectedIndices(mutatedLoci []uint16, indices []int, af map[int][]float64) float64 {
+	var likelihood float64 = 0
+	indexed := make(map[uint16]struct{})
+	for _, pos := range mutatedLoci {
+		indexed[pos] = struct{}{}
+	}
+	var single, double bool
+	for _, j := range indices {
+		_, single = indexed[uint16(pgs.Ploidy*j)]
+		_, double = indexed[uint16(pgs.Ploidy*j+1)]
+		switch {
+		case single:
+			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[j][0]) + afToLikelihood(af[j][1])
+		case double:
+			likelihood += afToLikelihood(af[j][1]) * pgs.Ploidy
+		default:
+			likelihood += afToLikelihood(af[j][0]) * pgs.Ploidy
+		}
+	}
+	return likelihood
+}
+
+// Smaller the negative fitness, the more likely the sequence is
 func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af map[int][]float64) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
@@ -30,17 +53,18 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af 
 		indexed[pos] = struct{}{}
 	}
 	var single, double bool
-	for j := startIdx; j < endIdx; j += pgs.NumHplt {
+	for j := startIdx; j < endIdx; j += pgs.Ploidy {
 		_, single = indexed[uint16(j)]
 		_, double = indexed[uint16(j+1)]
 		switch {
 		case single:
-			likelihood += afToLikelihood(af[j/2][0])
-			likelihood += afToLikelihood(af[j/2][1])
+			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[j/2][0]) + afToLikelihood(af[j/2][1])
+			//likelihood += afToLikelihood(af[j/2][0])
+			//likelihood += afToLikelihood(af[j/2][1])
 		case double:
-			likelihood += afToLikelihood(af[j/2][1]) * pgs.NumHplt
+			likelihood += afToLikelihood(af[j/2][1]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(af[j/2][0]) * pgs.NumHplt
+			likelihood += afToLikelihood(af[j/2][0]) * pgs.Ploidy
 		}
 	}
 	return likelihood
@@ -48,16 +72,24 @@ func calculateNegativeLikelihood(mutatedLoci []uint16, startIdx, endIdx int, af 
 
 func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float64) float64 {
 	likelihood := 0.0
-	//if len(sequence) != len(p.Weights)*pgs.NumHplt {
+	//if len(sequence) != len(p.Weights)*pgs.Ploidy {
 	//	fmt.Printf("Error: sequence length %d does not match the number of variants %d\n", len(sequence), len(p.Weights))
 	//	fmt.Println(sequence)
 	//	return 0.0
 	//}
 	for i := 0; i < len(sequence); i += 2 {
-		for j := 0; j < pgs.NumHplt; j++ {
-			likelihood += afToLikelihood(af[i/pgs.NumHplt][sequence[i+j]])
-			//fitness += afToLikelihood(p.StudyEAF[i/pgs.NumHplt][sequence[i+j]])
+		switch {
+		case sequence[i] == 0 && sequence[i+1] == 0:
+			likelihood += afToLikelihood(af[i/pgs.Ploidy][0]) * pgs.Ploidy
+		case sequence[i] == 1 && sequence[i+1] == 1:
+			likelihood += afToLikelihood(af[i/pgs.Ploidy][1]) * pgs.Ploidy
+		default:
+			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[i/pgs.Ploidy][0]) + afToLikelihood(af[i/pgs.Ploidy][1])
 		}
+		//for j := 0; j < pgs.Ploidy; j++ {
+		//	likelihood += afToLikelihood(af[i/pgs.Ploidy][sequence[i+j]])
+		//	//fitness += afToLikelihood(p.StudyEAF[i/pgs.Ploidy][sequence[i+j]])
+		//}
 	}
 	return likelihood
 }
@@ -68,13 +100,13 @@ func afToLikelihood(af float64) float64 {
 
 // SampleFromPopulation samples a individual according to the MAF
 func SampleFromPopulation(af map[int][]float64) ([]uint8, error) {
-	sample := make([]uint8, len(af)*pgs.NumHplt)
+	sample := make([]uint8, len(af)*pgs.Ploidy)
 	// Initial sample based on individual priors
 	for i := range af {
-		for j := 0; j < pgs.NumHplt; j++ {
+		for j := 0; j < pgs.Ploidy; j++ {
 			ind := tools.SampleFromDistribution(af[i])
-			sample[i*pgs.NumHplt+j] = pgs.GENOTYPES[ind]
-			if sample[i*pgs.NumHplt+j] == 255 {
+			sample[i*pgs.Ploidy+j] = pgs.GENOTYPES[ind]
+			if sample[i*pgs.Ploidy+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -83,13 +115,13 @@ func SampleFromPopulation(af map[int][]float64) ([]uint8, error) {
 }
 
 func SampleSegmentFromPopulation(start, end int, af [][]float64) ([]uint8, error) {
-	sample := make([]uint8, (end-start)*pgs.NumHplt)
+	sample := make([]uint8, (end-start)*pgs.Ploidy)
 	// Initial sample based on individual priors
 	for i := start; i < end; i++ {
-		for j := 0; j < pgs.NumHplt; j++ {
+		for j := 0; j < pgs.Ploidy; j++ {
 			ind := tools.SampleFromDistribution(af[i])
-			sample[(i-start)*pgs.NumHplt+j] = pgs.GENOTYPES[ind]
-			if sample[(i-start)*pgs.NumHplt+j] == 255 {
+			sample[(i-start)*pgs.Ploidy+j] = pgs.GENOTYPES[ind]
+			if sample[(i-start)*pgs.Ploidy+j] == 255 {
 				return nil, errors.New("error in population sampling")
 			}
 		}
@@ -99,8 +131,8 @@ func SampleSegmentFromPopulation(start, end int, af [][]float64) ([]uint8, error
 
 func LocusLikelihood(sequence []uint8, i int, af [][]float64) float64 {
 	likelihood := 0.0
-	for j := 0; j < pgs.NumHplt; j++ {
-		likelihood += afToLikelihood(af[i][sequence[i*pgs.NumHplt+j]])
+	for j := 0; j < pgs.Ploidy; j++ {
+		likelihood += afToLikelihood(af[i][sequence[i*pgs.Ploidy+j]])
 	}
 	return likelihood
 }
@@ -121,7 +153,7 @@ func AllReferenceAlleleSample(af map[int][]float64) []uint8 {
 
 func locusAlreadyExists(v uint16, array []uint16) bool {
 	for _, a := range array {
-		if a == v || (v%pgs.NumHplt == 0 && a == v+1) || (v%pgs.NumHplt == 1 && a == v-1) {
+		if a == v || (v%pgs.Ploidy == 0 && a == v+1) || (v%pgs.Ploidy == 1 && a == v-1) {
 			return true
 		}
 	}
@@ -130,13 +162,13 @@ func locusAlreadyExists(v uint16, array []uint16) bool {
 
 func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
 	score := apd.New(0, 0)
-	for i := 0; i < len(snps); i += pgs.NumHplt {
-		for j := 0; j < pgs.NumHplt; j++ {
+	for i := 0; i < len(snps); i += pgs.Ploidy {
+		for j := 0; j < pgs.Ploidy; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
 			case 1:
-				ctx.Add(score, score, weights[i/pgs.NumHplt])
+				ctx.Add(score, score, weights[i/pgs.Ploidy])
 			default:
 				log.Printf("Invalid alelle value: %d", snps[i+j])
 			}
@@ -147,13 +179,13 @@ func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decima
 
 func CalculateBigIntScore(snps []uint8, weights []*apd.BigInt) *apd.BigInt {
 	score := apd.NewBigInt(0)
-	for i := 0; i < len(snps); i += pgs.NumHplt {
-		for j := 0; j < pgs.NumHplt; j++ {
+	for i := 0; i < len(snps); i += pgs.Ploidy {
+		for j := 0; j < pgs.Ploidy; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
 			case 1:
-				score.Add(score, weights[i/pgs.NumHplt])
+				score.Add(score, weights[i/pgs.Ploidy])
 			default:
 				log.Printf("Invalid alelle value: %d", snps[i+j])
 			}
@@ -167,18 +199,18 @@ func Accuracy(solution []uint8, target []uint8) float64 {
 		return 0.0
 	}
 	acc := 0.0
-	for i := 0; i < len(solution); i += pgs.NumHplt {
+	for i := 0; i < len(solution); i += pgs.Ploidy {
 		if solution[i]+solution[i+1] == target[i]+target[i+1] {
 			acc++
 		}
 	}
-	return acc * pgs.NumHplt / float64(len(solution))
+	return acc * pgs.Ploidy / float64(len(solution))
 }
 
 func ArrayToString(array []uint8) string {
 	str := make([]string, len(array)/2)
-	for i := 0; i < len(array); i += pgs.NumHplt {
-		str[i/pgs.NumHplt] = fmt.Sprint(array[i] + array[i+1])
+	for i := 0; i < len(array); i += pgs.Ploidy {
+		str[i/pgs.Ploidy] = fmt.Sprint(array[i] + array[i+1])
 	}
 	return strings.Join(str, "")
 }
@@ -212,9 +244,9 @@ func SortByLikelihood(solutions map[string][]uint8, af map[int][]float64) [][]ui
 func CalculateEffectAlleleSpectrum(sequence []uint8, af map[int][]float64, bins []float64) []float64 {
 	spectrum := make([]float64, len(bins))
 	for i := 0; i < len(sequence); i += 2 {
-		for j := 0; j < pgs.NumHplt; j++ {
+		for j := 0; j < pgs.Ploidy; j++ {
 			if sequence[i+j] == EffectAllele {
-				spectrum[tools.ValueToBinIdx(af[i/pgs.NumHplt][EffectAllele], bins)]++
+				spectrum[tools.ValueToBinIdx(af[i/pgs.Ploidy][EffectAllele], bins)]++
 			}
 		}
 	}

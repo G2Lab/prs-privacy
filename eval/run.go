@@ -512,11 +512,11 @@ func distribution() {
 
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
-	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -531,12 +531,12 @@ func findAllSolutions() {
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000307_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
@@ -651,7 +651,7 @@ func findAllSolutions() {
 //	}
 //	for _, sample := range samples {
 //		for i := 0; i < len(indices)-1; i++ {
-//			score, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype[indices[i]*pgs.NumHplt:indices[i+1]*pgs.NumHplt],
+//			score, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype[indices[i]*pgs.Ploidy:indices[i+1]*pgs.Ploidy],
 //				p.Weights[indices[i]:indices[i+1]]).Float64()
 //			scores[i] = append(scores[i], score)
 //		}
@@ -712,7 +712,7 @@ func numSNPs(seq []uint8) int {
 
 func numHeterozygous(seq []uint8) int {
 	num := 0
-	for i := 0; i < len(seq); i += pgs.NumHplt {
+	for i := 0; i < len(seq); i += pgs.Ploidy {
 		if seq[i] == 1 && seq[i+1] == 1 {
 			num++
 		}

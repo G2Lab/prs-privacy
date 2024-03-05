@@ -44,19 +44,18 @@ func (h *genHeap) Pop() interface{} {
 }
 
 func (h *genHeap) addToGenHeap(lkl float64, sol []uint16, heapSize int) bool {
-	switch {
-	case (*h).Len() < heapSize:
+	if (*h).Len() < heapSize {
 		ng := newGenotype(sol, lkl)
 		heap.Push(h, *ng)
 		return true
-	case lkl < (*h)[0].likelihood:
+	}
+	if lkl < (*h)[0].likelihood {
 		heap.Pop(h)
 		ng := newGenotype(sol, lkl)
 		heap.Push(h, *ng)
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 type match struct {
@@ -68,6 +67,7 @@ func newMatch(sums []int64, likelihood float64) *match {
 	return &match{sums, likelihood}
 }
 
+// Implement as maxheap, i.e., the first element is the largest
 type matchHeap []match
 
 func newMatchHeap() *matchHeap {
@@ -99,19 +99,18 @@ func (h *matchHeap) Pop() interface{} {
 }
 
 func (h *matchHeap) addToMatchHeap(lkl float64, sums []int64, heapSize int) bool {
-	switch {
-	case h.Len() < heapSize:
+	if h.Len() < heapSize {
 		m := newMatch(sums, lkl)
 		heap.Push(h, *m)
 		return true
-	case lkl < (*h)[0].likelihood:
+	}
+	if lkl < (*h)[0].likelihood {
 		heap.Pop(h)
 		m := newMatch(sums, lkl)
 		heap.Push(h, *m)
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 type individual struct {

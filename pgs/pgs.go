@@ -35,9 +35,8 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	NumHplt    = 2
+	Ploidy     = 2
 	MissingEAF = 0.0004
-	//NumSpectrumBins = 20
 )
 
 var (

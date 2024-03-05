@@ -119,7 +119,7 @@ func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
 		// ...
 		// n: first first first first ... first second
 
-		//likelihoods := make([]float64, len(parents[first])/pgs.NumHplt-1)
+		//likelihoods := make([]float64, len(parents[first])/pgs.Ploidy-1)
 		//likelihood := CalculateFullSequenceLikelihood(parents[second], g.af)
 		//for k := 0; k < len(g.af)-1; k++ {
 		//	likelihood += LocusLikelihood(parents[first], k, g.af)
@@ -128,18 +128,18 @@ func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
 		//}
 		//fitness := FitnessFromLikelihoods(likelihoods, T)
 
-		deltas := make([]float64, len(parents[first])/pgs.NumHplt-1)
+		deltas := make([]float64, len(parents[first])/pgs.Ploidy-1)
 		delta := CalculateFloatScore(parents[second], g.weights) - g.target
 		for k := 0; k < len(g.p.Weights)-1; k++ {
-			delta += (float64(parents[first][k*pgs.NumHplt]) + float64(parents[first][k*pgs.NumHplt+1])) * g.weights[k]
-			delta -= (float64(parents[second][k*pgs.NumHplt]) + float64(parents[second][k*pgs.NumHplt+1])) * g.weights[k]
+			delta += (float64(parents[first][k*pgs.Ploidy]) + float64(parents[first][k*pgs.Ploidy+1])) * g.weights[k]
+			delta -= (float64(parents[second][k*pgs.Ploidy]) + float64(parents[second][k*pgs.Ploidy+1])) * g.weights[k]
 		}
 		fitness := FitnessFromDeltas(deltas, T)
 
 		selectedIndex := tools.SampleFromDistribution(fitness) + 1
 		child := make([]uint8, len(parents[first]))
-		copy(child[:selectedIndex*pgs.NumHplt], parents[first][:selectedIndex*pgs.NumHplt])
-		copy(child[selectedIndex*pgs.NumHplt:], parents[second][selectedIndex*pgs.NumHplt:])
+		copy(child[:selectedIndex*pgs.Ploidy], parents[first][:selectedIndex*pgs.Ploidy])
+		copy(child[selectedIndex*pgs.Ploidy:], parents[second][selectedIndex*pgs.Ploidy:])
 		return child
 	}
 	offspring := make([][]uint8, 0, len(parents))
@@ -219,7 +219,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 			}
 			//// If new SNP = 0 and original SNP = 1, delta = delta - weight.
 			//// If new SNP = 1 and original SNP = 0, delta = delta + weight.
-			//newDelta = delta + (float64(v)-float64(original[i]))*g.weights[i/pgs.NumHplt]
+			//newDelta = delta + (float64(v)-float64(original[i]))*g.weights[i/pgs.Ploidy]
 			//if math.Abs(newDelta) <= g.roundingError {
 			//	precise := false
 			//	if g.rounder.RoundedMode {
@@ -236,11 +236,11 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 			//		return original, newDelta
 			//	}
 			//}
-			oldIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.NumHplt][original[i]], g.stats.FreqBinBounds)
-			newIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.NumHplt][v], g.stats.FreqBinBounds)
+			oldIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.Ploidy][original[i]], g.stats.FreqBinBounds)
+			newIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.Ploidy][v], g.stats.FreqBinBounds)
 			freqChange = g.specShiftFactor(newIdx, float64(v)-float64(original[i]), originalBins) *
 				g.specShiftFactor(oldIdx, float64(original[i])-float64(v), originalBins)
-			probabilities[i] = 1 / (afToLikelihood(g.stats.AF[i/pgs.NumHplt][v]) * freqChange)
+			probabilities[i] = 1 / (afToLikelihood(g.stats.AF[i/pgs.Ploidy][v]) * freqChange)
 			//probabilities[i] = 1 / math.Abs(newDelta)
 			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
 			//// Falling into a local minimum
@@ -254,7 +254,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	}
 	//fmt.Println(probabilities)
 	mutationId := tools.SampleFromDistribution(probabilities)
-	//newDelta = delta + (float64(mutations[mutationId])-float64(original[mutationId]))*g.weights[mutationId/pgs.NumHplt]
+	//newDelta = delta + (float64(mutations[mutationId])-float64(original[mutationId]))*g.weights[mutationId/pgs.Ploidy]
 	original[mutationId] = mutations[mutationId]
 	return original
 }
@@ -275,8 +275,8 @@ func deltaToFitness(delta float64, T float64) float64 {
 
 func CalculateFloatScore(snps []uint8, weights []float64) float64 {
 	score := float64(0)
-	for i := 0; i < len(snps); i += pgs.NumHplt {
-		for j := 0; j < pgs.NumHplt; j++ {
+	for i := 0; i < len(snps); i += pgs.Ploidy {
+		for j := 0; j < pgs.Ploidy; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
@@ -297,11 +297,11 @@ func shuffleIndicesByLikelihood(original []uint8, eaf [][]float64) []int {
 	var lkl float64
 	weightedIndices := make([]int, 0)
 	for i, freq := range eaf {
-		for j := 0; j < pgs.NumHplt; j++ {
-			weightedIndices = append(weightedIndices, pgs.NumHplt*i+j)
-			lkl = 1 - freq[original[pgs.NumHplt*i+j]]
+		for j := 0; j < pgs.Ploidy; j++ {
+			weightedIndices = append(weightedIndices, pgs.Ploidy*i+j)
+			lkl = 1 - freq[original[pgs.Ploidy*i+j]]
 			for k := 0; k < int(lkl*100); k++ {
-				weightedIndices = append(weightedIndices, pgs.NumHplt*i+j)
+				weightedIndices = append(weightedIndices, pgs.Ploidy*i+j)
 			}
 		}
 	}

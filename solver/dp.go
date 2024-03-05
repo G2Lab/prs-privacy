@@ -81,6 +81,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 
 	var splitIdxs []int
 	splitIdxs = []int{0, len(weights) / 2, len(weights)}
+	fmt.Printf("SplitIdx before %v\n", splitIdxs)
 	// Make sure that the frequency bins are not split
 	prevBin := tools.ValueToBinIdx(dp.stats.AF[splitIdxs[1]-1][EffectAllele], dp.stats.FreqBinBounds)
 	nextBin := tools.ValueToBinIdx(dp.stats.AF[splitIdxs[1]][EffectAllele], dp.stats.FreqBinBounds)
@@ -88,6 +89,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 		splitIdxs[1]++
 		nextBin = tools.ValueToBinIdx(dp.stats.AF[splitIdxs[1]][EffectAllele], dp.stats.FreqBinBounds)
 	}
+	fmt.Printf("SplitIdx after %v\n", splitIdxs)
 
 	betas := make([]map[uint16]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
@@ -105,7 +107,8 @@ func (dp *DP) Solve() map[string][]uint8 {
 	}
 
 	solutionHeap := newGenHeap()
-	if len(weights) > 50 {
+	//if len(weights) > 50 {
+	if len(weights) > 5 {
 		tables := make([]map[int64]*Node, numSegments)
 		for i := 0; i < numSegments; i++ {
 			tables[i] = calculateSubsetSumTableWithLikelihood(betas[i], freqSortedIndices[splitIdxs[i]:splitIdxs[i+1]], upper, lower, dp.stats)
@@ -119,24 +122,29 @@ func (dp *DP) Solve() map[string][]uint8 {
 			fmt.Printf("Table %d len: %d\n", i, len(tables[i]))
 		}
 		// Do recursion to explore all the combinations
-		dp.deterministicMitM(numSegments, splitIdxs, tables, betas, targets, solutionHeap)
+		dp.deterministicMitM(numSegments, freqSortedIndices, splitIdxs, tables, betas, targets, solutionHeap)
 	}
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.NumHplt)
+		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy)
 		solutions[ArrayToString(subset)] = subset
 	}
 	return solutions
 }
 
 func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint16]int64, targets []int64, solHeap *genHeap) {
-	matchHeapSize := 1000 * dp.p.NumVariants
+	matchHeapSize := 10000 * dp.p.NumVariants
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
 	mheap := newMatchHeap()
+	for rightSum := range tables[1] {
+		if tables[1][rightSum].topLikelihood < 135 {
+			fmt.Printf("Likelihood: %f\n", tables[1][rightSum].topLikelihood)
+		}
+	}
 	var s int
 	var ok bool
 	var leftSum int64
@@ -146,7 +154,6 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 		}
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {
-				//fmt.Println("==", leftSum, t-leftSum, tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood)
 				//mheap.addToMatchHeap(tables[0][leftSum].topLikelihood+tables[1][t-leftSum].topLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
 				mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].topLikelihood, tables[0][leftSum].topChiValue)+
 					CombineLikelihoodAndChiSquared(tables[1][t-leftSum].topLikelihood, tables[1][t-leftSum].topChiValue),
@@ -161,6 +168,7 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 			solution = append(solution, backtrackWithPointers(mtch.sums[i], tables[i], betas[i])...)
 		}
 		if dp.rounder.RoundedMode {
+			score.SetUint64(0)
 			score.Set(lociToScore(solution, dp.rounder.ScaledWeights))
 			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
 				continue
@@ -170,7 +178,7 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 	}
 }
 
-func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64,
+func (dp *DP) deterministicMitM(numSegments int, indices []int, splitIdxs []int, tables []map[int64][]uint16, betas []map[uint16]int64,
 	targets []int64, solHeap *genHeap) {
 	halfSums := make([][]int64, numSegments)
 	backtracked := make([]map[int64][]*genotype, numSegments)
@@ -207,7 +215,8 @@ func (dp *DP) deterministicMitM(numSegments int, splitIdxs []int, tables []map[i
 			for _, halfSum := range halfSums[i] {
 				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
 				for j := range combinations {
-					lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.NumHplt, splitIdxs[i+1]*pgs.NumHplt, dp.stats.AF)
+					//lkl = calculateNegativeLikelihood(combinations[j], splitIdxs[i]*pgs.Ploidy, splitIdxs[i+1]*pgs.Ploidy, dp.stats.AF)
+					lkl = calculateLikelihoodForSelectedIndices(combinations[j], indices[splitIdxs[0]:splitIdxs[i+1]], dp.stats.AF)
 					halfSols[i] = append(halfSols[i], newGenotype(combinations[j], lkl))
 				}
 			}
@@ -234,11 +243,17 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 	// Fill out the table using dynamic programming
 	table := make(map[int64]*Node)
 	// the fitness of all the snps being 0
-	allZeroLikelihood := calculateNegativeLikelihood([]uint16{}, indices[0]*pgs.NumHplt,
-		indices[len(indices)-1]*pgs.NumHplt, stats.AF)
-	allZeroFreqSpec := make([]float64, len(stats.FreqSpectrum))
+	allZeroLikelihood := calculateLikelihoodForSelectedIndices([]uint16{}, indices, stats.AF)
+	fmt.Printf("Indices %v\n", indices)
+	fmt.Printf("All zero likelihood: %f\n", allZeroLikelihood)
+
+	firstBucketIdx := tools.ValueToBinIdx(stats.AF[indices[0]][EffectAllele], stats.FreqBinBounds)
+	lastBucketIdx := tools.ValueToBinIdx(stats.AF[indices[len(indices)-1]][EffectAllele], stats.FreqBinBounds)
+	allZeroFreqSpec := make([]float64, lastBucketIdx-firstBucketIdx+1)
+	freqSpecSegment := stats.FreqSpectrum[firstBucketIdx : lastBucketIdx+1]
+	allZeroDistance := CalculateTwoSpectrumDistance(allZeroFreqSpec, freqSpecSegment)
 	// add the zero weight
-	table[0] = newNode(math.MaxUint16, allZeroLikelihood, CalculateTwoSpectrumDistance(allZeroFreqSpec, stats.FreqSpectrum), 0, 0)
+	table[0] = newNode(math.MaxUint16, allZeroLikelihood, allZeroDistance, 0, 0)
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
 
@@ -251,23 +266,23 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 	for i, pos := range indices {
 		fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[uint16(pos)] > 0 {
-			lowerBound += pgs.NumHplt * betas[uint16(pos)]
+			lowerBound += pgs.Ploidy * betas[uint16(pos)]
 		} else {
-			upperBound += pgs.NumHplt * betas[uint16(pos)]
+			upperBound += pgs.Ploidy * betas[uint16(pos)]
 		}
 		updates = make([]Update, 0)
 		newSums := make([]int64, 0)
 		nextBinIdx = uint8(tools.ValueToBinIdx(stats.AF[pos][EffectAllele], stats.FreqBinBounds))
 		for _, prevSum = range existingSums {
-			for k = 1; k <= pgs.NumHplt; k++ {
-				nextPtr = pgs.NumHplt*uint16(pos) + k - 1
+			for k = 1; k <= pgs.Ploidy; k++ {
+				nextPtr = pgs.Ploidy*uint16(pos) + k - 1
 				weight = betas[uint16(pos)] * int64(k)
 				nextSum = prevSum + weight
 				if nextSum < lowerBound || nextSum > upperBound {
 					continue
 				}
 				nextLikelihood = table[prevSum].topLikelihood + float64(k)*afToLikelihood(stats.AF[pos][EffectAllele]) -
-					float64(k)*afToLikelihood(stats.AF[pos][ReferenceAllele])
+					float64(k)*afToLikelihood(stats.AF[pos][ReferenceAllele]) + float64(pgs.Ploidy-k)*afToLikelihood(pgs.Ploidy)
 				nextBinCount = table[prevSum].currentBinCount + uint8(k)
 				if nextBinIdx != table[prevSum].currentBinIdx {
 					nextBinCount = uint8(k)
@@ -278,6 +293,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 					newSums = append(newSums, nextSum)
 				}
 				table[nextSum].pointers[nextPtr] = table[prevSum].topPointer
+				//if nextLikelihood < table[nextSum].topLikelihood {
 				if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
 					CombineLikelihoodAndChiSquared(table[nextSum].topLikelihood, table[nextSum].topChiValue) {
 					updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].topPointer))
@@ -319,13 +335,13 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 		i++
 		//fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[pos] > 0 {
-			lowerBound += pgs.NumHplt * betas[pos]
+			lowerBound += pgs.Ploidy * betas[pos]
 		} else {
-			upperBound += pgs.NumHplt * betas[pos]
+			upperBound += pgs.Ploidy * betas[pos]
 		}
 		newSums := make([]int64, 0)
 		for _, prevSum = range existingSums {
-			for k = 1; k <= pgs.NumHplt; k++ {
+			for k = 1; k <= pgs.Ploidy; k++ {
 				weight = betas[pos] * int64(k)
 				nextSum = prevSum + weight
 				if nextSum >= lowerBound && nextSum <= upperBound {
@@ -333,7 +349,7 @@ func calculateSubsetSumTable(betas map[uint16]int64, upperBound, lowerBound int6
 						table[nextSum] = make([]uint16, 0)
 						newSums = append(newSums, nextSum)
 					}
-					table[nextSum] = append(table[nextSum], pgs.NumHplt*pos+k-1)
+					table[nextSum] = append(table[nextSum], pgs.Ploidy*pos+k-1)
 				}
 			}
 		}
@@ -392,6 +408,7 @@ func backtrack(path []uint16, result *[][]uint16, sum int64, table map[int64][]u
 		*result = append(*result, sol)
 	}
 	for _, ptr := range table[sum] {
+		//if locusAlreadyExists(ptr, path) {
 		if locusAlreadyExists(ptr, path) || (len(path) > 0 && ptr > path[len(path)-1]) {
 			continue
 		}
@@ -449,7 +466,7 @@ func lociToScore(loci []uint16, weights []*apd.BigInt) *apd.BigInt {
 	score := apd.NewBigInt(0)
 	for _, locus := range loci {
 		score.Add(score, weights[locus/2])
-		if locus%pgs.NumHplt == 1 {
+		if locus%pgs.Ploidy == 1 {
 			score.Add(score, weights[locus/2])
 		}
 	}
@@ -481,8 +498,8 @@ func sortByEffectiveAlleleFreq(m map[int][]float64) []int {
 
 func genotypeToScore(start, end int, snps []uint8, betas map[uint16]int64) int64 {
 	score := int64(0)
-	for i := 0; i < len(snps); i += pgs.NumHplt {
-		for j := 0; j < pgs.NumHplt; j++ {
+	for i := 0; i < len(snps); i += pgs.Ploidy {
+		for j := 0; j < pgs.Ploidy; j++ {
 			switch snps[i+j] {
 			case 0:
 				continue
