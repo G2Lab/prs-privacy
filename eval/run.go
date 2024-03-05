@@ -530,8 +530,8 @@ func findAllSolutions() {
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000043_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
