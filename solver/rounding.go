@@ -28,7 +28,7 @@ func getTargetAndWeightsAsInts(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([
 	var roundingError int64 = 0
 	multiplier := apd.New(1, int32(p.WeightPrecision))
 	if p.WeightPrecision > params.PrecisionsLimit {
-		//roundingError = int64(dp.p.NumVariants) * 5 / 4
+		//roundingError = int64(p.NumVariants) * 5 / 4
 		roundingError = int64(p.NumVariants)
 		rdr.RoundedMode = true
 		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)

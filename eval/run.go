@@ -512,11 +512,11 @@ func distribution() {
 
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -530,10 +530,10 @@ func findAllSolutions() {
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
@@ -555,7 +555,7 @@ func findAllSolutions() {
 	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop)
 
 	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
-	fmt.Printf("Accuracy with major: %f\n",
+	fmt.Printf("Accuracy with reference: %f\n",
 		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
 	//return
 
@@ -568,7 +568,6 @@ func findAllSolutions() {
 	//	p.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype))
 	//fmt.Printf("Major likelihood: %f\n", p.CalculateFullSequenceLikelihood(majorReference))
 
-	fmt.Println(p.Loci)
 	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop].AF),
 		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))

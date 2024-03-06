@@ -100,7 +100,7 @@ func (dp *DP) Solve() map[string][]uint8 {
 	}
 
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
-	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive
+	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
 
 	targets := []int64{target}
 	if dp.rounder.RoundedMode {
@@ -143,11 +143,6 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 		step = 1
 	}
 	mheap := newMatchHeap()
-	//for rightSum := range tables[1] {
-	//	if tables[1][rightSum].topLikelihood < 135 {
-	//		fmt.Printf("Likelihood: %f\n", tables[1][rightSum].topLikelihood)
-	//	}
-	//}
 	var s int
 	var ok bool
 	var leftSum int64

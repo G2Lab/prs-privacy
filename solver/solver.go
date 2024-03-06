@@ -261,9 +261,6 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 	for _, solution := range solutions {
 		flattened[i] = solution
 		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
-		if chi < 1 {
-			chi = math.Sqrt(chi)
-		}
 		laf[i] = CalculateFullSequenceLikelihood(solution, stats.AF) + chi
 		i++
 	}
