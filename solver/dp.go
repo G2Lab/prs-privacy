@@ -288,7 +288,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 				if nextBinIdx != table[prevSum].currentBinIdx {
 					nextBinCount = uint8(k)
 				}
-				nextChi = table[prevSum].topChiValue + IncrementObservedInSpectrum(float64(nextBinCount)-1, stats.FreqSpectrum[nextBinIdx])
+				nextChi = table[prevSum].topChiValue + IncrementObservedInSpectrum(float64(k), float64(nextBinCount)-1, stats.FreqSpectrum[nextBinIdx])
 				if _, ok = table[nextSum]; !ok {
 					table[nextSum] = newNode(nextPtr, nextLikelihood, nextChi, nextBinIdx, nextBinCount)
 					newSums = append(newSums, nextSum)

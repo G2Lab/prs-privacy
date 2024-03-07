@@ -306,8 +306,8 @@ func CalculateTwoSpectrumDistance(spectrum1, spectrum2 []float64) float64 {
 	return ChiSquaredValue(spectrum1, spectrum2)
 }
 
-func IncrementObservedInSpectrum(prevBinCount, expectedBinCount float64) float64 {
-	return (2*(prevBinCount-expectedBinCount) + 1) / expectedBinCount
+func IncrementObservedInSpectrum(increment, prevBinCount, expectedBinCount float64) float64 {
+	return (2*increment*(prevBinCount-expectedBinCount) + math.Pow(increment, 2)) / expectedBinCount
 }
 
 func CombineLikelihoodAndChiSquared(likelihood, chiSquared float64) float64 {
