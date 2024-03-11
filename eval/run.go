@@ -41,7 +41,6 @@ func main() {
 		defer f.Close()
 	}
 
-	findAllSolutions()
 	//evaluateGA()
 	//scoreDistribution()
 	//likelihoodEffect()
@@ -51,6 +50,8 @@ func main() {
 	//samples()
 	//distribution()
 	//evaluateReferences()
+	findAllSolutions()
+	//buildDPTables()
 }
 
 type Result struct {
@@ -189,7 +190,8 @@ func accuracyLikelihood() {
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -202,7 +204,7 @@ func accuracyLikelihood() {
 	cohort := solver.NewCohort(p)
 	//samples := cohort.SortByScore()[len(cohort)-100:]
 	samples := allSamples()
-	// Create csv result file
+	// Create a result file
 	chunkNum, chunkSize := getChunkInfo(len(samples))
 	filepath := path.Join(resFolder, fmt.Sprintf("%s-%d.json", p.PgsID, chunkNum))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
@@ -221,7 +223,7 @@ func accuracyLikelihood() {
 		indPop := populations[samples[i]]
 		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
 		solmap := slv.Solve()
-		solutions := solver.SortByLikelihood(solmap, p.PopulationStats[indPop].AF)
+		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop])
 		result := NewResult(samples[i], cohort[samples[i]].Score)
 		solved = false
 		for _, solution := range solutions {
@@ -557,7 +559,6 @@ func findAllSolutions() {
 	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
 	fmt.Printf("Accuracy with reference: %f\n",
 		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
-	//return
 
 	solmap := slv.Solve()
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
@@ -573,9 +574,6 @@ func findAllSolutions() {
 		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop]))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
-	//fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solutions[0]),
-	//	solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype),
-	//	cohort[INDIVIDUAL].Score-solver.CalculateDecimalScore(solutions[0], p.Weights), p.CalculateFullSequenceLikelihood(solutions[0]))
 	for _, solution := range solutions {
 		diff := new(apd.Decimal)
 		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights))
@@ -583,11 +581,49 @@ func findAllSolutions() {
 			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[indPop].AF),
 			solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[indPop]))
 	}
-	//fmt.Printf("\nTrue:\n%s\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype))
-	//fmt.Printf("Guessed %d:\n", len(solutions))
-	//for _, solution := range solutions {
-	//	fmt.Printf("%s (acc %.3f)\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype))
-	//}
+}
+
+func buildDPTables() {
+	p := pgs.NewPGS()
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	p.LoadStats()
+	populations := tools.LoadAncestry()
+	fmt.Printf("%s\n", p.PgsID)
+	cohort := solver.NewCohort(p)
+	samples := cohort.SortByScore()
+
+	fmt.Println(pgs.POPULATIONS)
+	for _, ppl := range pgs.POPULATIONS {
+		filepath := path.Join(params.DataFolder, fmt.Sprintf("%s-%s.dp", p.PgsID, ppl))
+		fmt.Println(filepath)
+		if _, err = os.Stat(filepath); os.IsNotExist(err) {
+			fmt.Println("Creating DP table for", ppl)
+			for i := len(samples) - 1; i > 0; i-- {
+				indPop := populations[samples[i]]
+				fmt.Println(ppl, indPop)
+				if indPop != ppl {
+					continue
+				}
+				fmt.Printf("Creating DP table for %s using %s\n", ppl, samples[i])
+				slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
+				state := slv.BuildState(2)
+				fmt.Printf("Tables length %d, %d\n", len(state.Nodes[0]), len(state.Nodes[1]))
+				solver.SaveState(state, filepath)
+				state = nil
+				break
+			}
+		}
+	}
 }
 
 //func scoreDistribution() {

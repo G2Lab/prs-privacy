@@ -214,7 +214,6 @@ def accuracy_likelihood(pgs_id):
     scores, accuracies, likelihoods = [], [], []
     chosen_acc, chosen_like = [], []
     true_like = []
-    lowest_index = 0
     lowest_like, lowest_like_acc = [], []
     for filepath in filepaths:
         with open(filepath, 'r') as file:
@@ -229,18 +228,13 @@ def accuracy_likelihood(pgs_id):
                 lowest_index = acc.index(min(acc))
                 lowest_like.append(float(data["Likelihoods"][lowest_index]))
                 lowest_like_acc.append(float(data["Accuracies"][lowest_index]))
-                # if len(data["Accuracies"]) > 1:
-                #     accuracies.append(list(map(lambda x: float(x), data["Accuracies"][1:])))
-                #     likelihoods.append(list(map(lambda x: float(x), data["Likelihoods"][1:])))
-                # else:
-                #     accuracies.append([])
-                #     likelihoods.append([])
 
-    plt.scatter(chosen_like, chosen_acc, color='black', s=1, label="Chosen solutions")
+    # plt.scatter(chosen_like, chosen_acc, color='black', s=1, label="Chosen solutions")
     # plt.scatter(true_like, [1.0 for x in range(0, len(true_like))], color='turquoise', alpha=0.2, s=0.5, label="True solutions")
     # plt.scatter(lowest_like, lowest_like_acc, color='salmon', alpha=0.2, s=0.5, label="Lowest-likelihood solutions")
-    plt.scatter(true_like, [1.0 for x in range(0, len(true_like))], color='turquoise', alpha=0.5, s=1, label="True solutions")
-    plt.scatter(lowest_like, lowest_like_acc, color='salmon', alpha=0.5, s=1, label="Lowest-likelihood solutions")
+    # plt.scatter(true_like, [1.0 for x in range(0, len(true_like))], color='turquoise', alpha=0.5, s=1, label="True solutions")
+    # plt.scatter(lowest_like, lowest_like_acc, color='salmon', alpha=0.5, s=1, label="Lowest-likelihood solutions")
+    plt.scatter(true_like, chosen_acc, color='purple', alpha=0.5, s=1)
     # for i in range(0, len(scores)):
     #     plt.scatter(likelihoods[i], accuracies[i], alpha=0.05, color='moccasin', s=0.1)
     plt.title(pgs_id)
@@ -373,10 +367,10 @@ if __name__ == "__main__":
     # score_to_likelihood_position("PGS000037", 15)
     # score_to_likelihood_position("PGS000639", 20)
     # score_to_likelihood_position("PGS001827", 33)
-    # accuracy_likelihood("PGS000639")
+    accuracy_likelihood("PGS000040")
     # accuracy_likelihood("PGS000073")
     # accuracy_likelihood("PGS000037")
     # accuracy_likelihood("PGS002302")
     # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
-    score_deviation()
+    # score_deviation()

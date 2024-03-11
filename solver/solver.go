@@ -324,7 +324,7 @@ func findAbsMin(values []float64) float64 {
 	return minV
 }
 
-//func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, betas map[uint16]int64, af [][]float64) (int64, int64) {
+//func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, Betas map[uint16]int64, af [][]float64) (int64, int64) {
 //	var err error
 //	var sample []uint8
 //	var score, maxScore, minScore int64
@@ -333,7 +333,7 @@ func findAbsMin(values []float64) float64 {
 //		if err != nil {
 //			log.Fatalf("Error sampling segment: %v", err)
 //		}
-//		score = genotypeToScore(segmentStart, segmentEnd, sample, betas)
+//		score = genotypeToScore(segmentStart, segmentEnd, sample, Betas)
 //		if score > maxScore {
 //			maxScore = score
 //		}
