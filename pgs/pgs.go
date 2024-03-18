@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -129,9 +130,11 @@ type PGS struct {
 	Variants        map[string]*Variant
 	Loci            []string
 	Weights         []*apd.Decimal
+	ScoreAlleles    []string // [effect] alleles
+	EffectAlleles   []uint8  // 0 if the effect allele is the reference allele, 1 if it is the alternative allele
 	Context         *apd.Context
 	WeightPrecision uint32
-	StudyEAF        [][]float64 // [reference, effect] allele frequency from the study / catalogue file
+	StudyEAF        [][]float64 // [other, effect] allele frequency from the study / catalogue file
 	PopulationStats map[string]*Statistics
 	NumSpecBins     int
 	//Maf             [][]float64 // [major, minor] allele frequency from the population
@@ -234,12 +237,15 @@ scannerLoop:
 	}
 
 	p.Weights = make([]*apd.Decimal, len(p.Loci))
+	p.ScoreAlleles = make([]string, len(p.Loci))
+	p.EffectAlleles = make([]uint8, len(p.Loci))
 	p.StudyEAF = make([][]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
 		if err != nil {
 			log.Fatalf("Variant %s, %v: %v\n", loc, err, p.Variants[loc].fields["effect_weight"])
 		}
+		p.ScoreAlleles[i] = p.Variants[loc].fields["effect_allele"].(string)
 		p.StudyEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
@@ -326,6 +332,7 @@ func (p *PGS) LoadStats() {
 }
 
 func (p *PGS) LoadDatasetStats() {
+	p.extractPopulationAlleles()
 	filename := fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
@@ -343,6 +350,46 @@ func (p *PGS) LoadDatasetStats() {
 		err = decoder.Decode(&(p.PopulationStats))
 		if err != nil {
 			log.Printf("Error decoding population stats json: %v", err)
+		}
+	}
+}
+
+func (p *PGS) extractPopulationAlleles() {
+	refAltQ := "%CHROM:%POS-%REF\t%ALT\n"
+	var alt, ref string
+	for k, locus := range p.Loci {
+		chr, pos := tools.SplitLocus(locus)
+		query, args := tools.RangeQuery(refAltQ, chr, pos, pos)
+		cmd := exec.Command(query, args...)
+		output, err := cmd.Output()
+		if err != nil {
+			log.Printf("Error executing bcftools command: %v", err)
+			continue
+		}
+		lines := strings.Split(string(output), "\n")
+		if len(lines[:len(lines)-1]) == 0 {
+			log.Printf("No data for locus %s, insert alt as the effect", locus)
+			p.EffectAlleles[k] = 1
+			continue
+		}
+		for _, line := range lines[:len(lines)-1] {
+			fields := strings.Split(line, "-")
+			if fields[0] != locus {
+				fmt.Printf("Locus %s does not match %s\n", locus, fields[0])
+				continue
+			}
+			ref = strings.Split(fields[1], "\t")[0]
+			alt = strings.Split(fields[1], "\t")[1]
+			switch {
+			case strings.Contains(alt, p.ScoreAlleles[k]):
+				p.EffectAlleles[k] = 1
+			case strings.Contains(ref, p.ScoreAlleles[k]):
+				p.EffectAlleles[k] = 0
+			default:
+				log.Printf("Effect/other and reference/alternative alleles do not match at locus %s: %v vs %v",
+					locus, p.ScoreAlleles[k], []string{ref, alt})
+				p.EffectAlleles[k] = 1
+			}
 		}
 	}
 }
@@ -407,37 +454,37 @@ func (p *PGS) computeFrequencySpectrum() {
 	p.querySampleFrequencies()
 }
 
-func (p *PGS) assignFreqBins() {
-	var step float64 = 1 / float64(p.NumSpecBins)
-	for _, ppl := range POPULATIONS {
-		for i := 0; i < p.NumSpecBins; i++ {
-			p.PopulationStats[ppl].FreqBinBounds[i] = float64(i+1) * step
-			if i == p.NumSpecBins-1 {
-				p.PopulationStats[ppl].FreqBinBounds[i] = 1
-			}
-		}
-	}
-}
-
 //func (p *PGS) assignFreqBins() {
+//	var step float64 = 1 / float64(p.NumSpecBins)
 //	for _, ppl := range POPULATIONS {
-//		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
-//		for i := range p.PopulationStats[ppl].AF {
-//			eaf[i] = p.PopulationStats[ppl].AF[i][1]
-//		}
-//		sort.Float64s(eaf)
-//		elementsPerBin := len(eaf) / p.NumSpecBins
-//		var endIdx int
 //		for i := 0; i < p.NumSpecBins; i++ {
-//			endIdx = (i + 1) * elementsPerBin
-//			// If we're at the last bin, adjust the endIndex to include all remaining elements
+//			p.PopulationStats[ppl].FreqBinBounds[i] = float64(i+1) * step
 //			if i == p.NumSpecBins-1 {
-//				endIdx = len(eaf)
+//				p.PopulationStats[ppl].FreqBinBounds[i] = 1
 //			}
-//			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
 //		}
 //	}
 //}
+
+func (p *PGS) assignFreqBins() {
+	for _, ppl := range POPULATIONS {
+		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
+		for i := range p.PopulationStats[ppl].AF {
+			eaf[i] = p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]]
+		}
+		sort.Float64s(eaf)
+		elementsPerBin := len(eaf) / p.NumSpecBins
+		var endIdx int
+		for i := 0; i < p.NumSpecBins; i++ {
+			endIdx = (i + 1) * elementsPerBin
+			// If we're at the last bin, adjust the endIndex to include all remaining elements
+			if i == p.NumSpecBins-1 {
+				endIdx = len(eaf)
+			}
+			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
+		}
+	}
+}
 
 func (p *PGS) querySampleFrequencies() {
 	ancestry := tools.LoadAncestry()
@@ -499,11 +546,11 @@ func (p *PGS) querySampleFrequencies() {
 						log.Printf("Error converting %s to int: %v", normalized, err)
 						continue
 					}
-					if val == 0 {
+					if uint8(val) != p.EffectAlleles[k] {
 						continue
 					}
 					for _, anc = range ancs {
-						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].AF[k][1],
+						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].AF[k][p.EffectAlleles[k]],
 							p.PopulationStats[anc].FreqBinBounds)]++
 					}
 				}
@@ -532,25 +579,6 @@ func (p *PGS) SaveStats() {
 		log.Printf("Error encoding json PopulationStats: %v", err)
 	}
 }
-
-//func (p *PGS) loadDatasetEAF() {
-//	filename := fmt.Sprintf("%s/%s.eaf", params.DataFolder, p.PgsID)
-//	_, err := os.Stat(filename)
-//	if os.IsNotExist(err) {
-//		p.extractEAF(filename)
-//	}
-//	eafFile, err := os.Open(filename)
-//	if err != nil {
-//		log.Printf("Error opening MAF file: %v\n", err)
-//		return
-//	}
-//	defer eafFile.Close()
-//	decoder := json.NewDecoder(eafFile)
-//	err = decoder.Decode(p.PopulationStats)
-//	if err != nil {
-//		log.Printf("Error decoding json PopulationEAF: %v", err)
-//	}
-//}
 
 //func (p *PGS) extractEAF(filename string) {
 //	eaf := make(map[string][][]float64, len(POPULATIONS))

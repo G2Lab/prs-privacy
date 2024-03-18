@@ -55,7 +55,7 @@ func (c Cohort) Populate(p *pgs.PGS) {
 func (c Cohort) RetrieveGenotypesAndCalculatePRS(p *pgs.PGS) {
 	ctx := p.Context
 	var err error
-	var k uint8
+	var k int
 	var output []byte
 	var allele []uint8
 	var fields []string
@@ -111,10 +111,13 @@ func (c Cohort) RetrieveGenotypesAndCalculatePRS(p *pgs.PGS) {
 				c[indv] = NewIndividual()
 			}
 			c[indv].Genotype = append(c[indv].Genotype, allele...)
-			for k = 0; k < allele[0]+allele[1]; k++ {
+			for k = range allele {
+				if allele[k] != p.EffectAlleles[i] {
+					continue
+				}
 				_, err = ctx.Add(c[indv].Score, c[indv].Score, p.Weights[i])
 				if err != nil {
-					log.Println("Error adding to score:", err)
+					log.Printf("Error adding to score at locus %s for sample %s: %v\n", locus, sample, err)
 					return
 				}
 			}
@@ -122,6 +125,15 @@ func (c Cohort) RetrieveGenotypesAndCalculatePRS(p *pgs.PGS) {
 				fmt.Printf("More samples than individuls at %s: %d vs %d\n", locus, len(samples), len(c))
 				break
 			}
+		}
+	}
+	// Normalize the score for each individual by the number of loci
+	divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
+	for indv := range c {
+		_, err = ctx.Quo(c[indv].Score, c[indv].Score, divisor)
+		if err != nil {
+			log.Println("Error dividing score by the number of loci:", err)
+			return
 		}
 	}
 }

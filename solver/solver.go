@@ -14,16 +14,28 @@ import (
 )
 
 const (
-	ReferenceAllele = 0
-	EffectAllele    = 1
+	ReferenceAllele   = 0
+	AlternativeAllele = 1
 )
 
 type Solver interface {
-	Solve() map[string][]uint8
+	SolveFromScratch() map[string][]uint8
+	SolveFromSaved() map[string][]uint8
+}
+
+func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
+	target := new(apd.Decimal)
+	multiplier := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
+	_, err := p.Context.Mul(target, score, multiplier)
+	if err != nil {
+		log.Printf("Error caluclating target from the score: %v", err)
+		return nil
+	}
+	return target
 }
 
 // Smaller the negative fitness, the more likely the sequence is
-func calculateLikelihoodForSelectedIndices(mutatedLoci []uint16, indices []int, af map[int][]float64) float64 {
+func calculateLikelihoodForSelectedIndices(mutatedLoci []uint16, indices []int, af map[int][]float64, efal []uint8) float64 {
 	var likelihood float64 = 0
 	indexed := make(map[uint16]struct{})
 	for _, pos := range mutatedLoci {
@@ -37,9 +49,9 @@ func calculateLikelihoodForSelectedIndices(mutatedLoci []uint16, indices []int, 
 		case single:
 			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[j][0]) + afToLikelihood(af[j][1])
 		case double:
-			likelihood += afToLikelihood(af[j][1]) * pgs.Ploidy
+			likelihood += afToLikelihood(af[j][efal[j]]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(af[j][0]) * pgs.Ploidy
+			likelihood += afToLikelihood(af[j][efal[j]]) * pgs.Ploidy
 		}
 	}
 	return likelihood
@@ -160,17 +172,15 @@ func locusAlreadyExists(v uint16, array []uint16) bool {
 	return false
 }
 
-func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal) *apd.Decimal {
+func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal, efal []uint8) *apd.Decimal {
 	score := apd.New(0, 0)
 	for i := 0; i < len(snps); i += pgs.Ploidy {
 		for j := 0; j < pgs.Ploidy; j++ {
-			switch snps[i+j] {
-			case 0:
-				continue
-			case 1:
+			switch snps[i+j] == efal[i/pgs.Ploidy] {
+			case true:
 				ctx.Add(score, score, weights[i/pgs.Ploidy])
-			default:
-				log.Printf("Invalid alelle value: %d", snps[i+j])
+			case false:
+				continue
 			}
 		}
 	}
@@ -241,26 +251,26 @@ func SortByLikelihood(solutions map[string][]uint8, af map[int][]float64) [][]ui
 	return flattened
 }
 
-func CalculateEffectAlleleSpectrum(sequence []uint8, af map[int][]float64, bins []float64) []float64 {
+func CalculateEffectAlleleSpectrum(sequence []uint8, af map[int][]float64, bins []float64, effectAlleles []uint8) []float64 {
 	spectrum := make([]float64, len(bins))
 	for i := 0; i < len(sequence); i += 2 {
 		for j := 0; j < pgs.Ploidy; j++ {
-			if sequence[i+j] == EffectAllele {
-				spectrum[tools.ValueToBinIdx(af[i/pgs.Ploidy][EffectAllele], bins)]++
+			if sequence[i+j] == effectAlleles[i/pgs.Ploidy] {
+				spectrum[tools.ValueToBinIdx(af[i/pgs.Ploidy][effectAlleles[i/pgs.Ploidy]], bins)]++
 			}
 		}
 	}
 	return spectrum
 }
 
-func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics) [][]uint8 {
+func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics, effectAlleles []uint8) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
 	laf := make([]float64, len(solutions))
 	var chi float64
 	for _, solution := range solutions {
 		flattened[i] = solution
-		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
+		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
 		laf[i] = CalculateFullSequenceLikelihood(solution, stats.AF) + chi
 		i++
 	}
@@ -298,8 +308,8 @@ func ChiSquaredValue(observed, expected []float64) float64 {
 	return chi
 }
 
-func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics) float64 {
-	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds), stats.FreqSpectrum)
+func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics, effectAlleles []uint8) float64 {
+	return ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
 }
 
 func CalculateTwoSpectrumDistance(spectrum1, spectrum2 []float64) float64 {

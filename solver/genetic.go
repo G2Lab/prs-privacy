@@ -25,9 +25,9 @@ type Genetic struct {
 	solHeap       *individualHeap
 }
 
-func NewGenetic(target *apd.Decimal, p *pgs.PGS, ppl string) *Genetic {
+func NewGenetic(score *apd.Decimal, p *pgs.PGS, ppl string) *Genetic {
 	s := &Genetic{
-		ogTarget:      target,
+		ogTarget:      ScoreToTarget(score, p),
 		p:             p,
 		roundingError: 0,
 		stats:         p.PopulationStats[ppl],
@@ -209,7 +209,7 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	})
 	mutations := make([]uint8, len(original))
 	probabilities := make([]float64, len(original))
-	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.AF, g.stats.FreqBinBounds)
+	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.AF, g.stats.FreqBinBounds, g.p.EffectAlleles)
 	var newIdx, oldIdx int
 	var freqChange float64
 	for _, i := range indices {
