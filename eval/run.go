@@ -514,11 +514,11 @@ func distribution() {
 
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -532,7 +532,7 @@ func findAllSolutions() {
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
@@ -543,7 +543,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000011_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -572,7 +572,8 @@ func findAllSolutions() {
 		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop], p.EffectAlleles))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
-	target := solver.ScoreToTarget(cohort[INDIVIDUAL].Score, p)
+	//target := solver.ScoreToTarget(cohort[INDIVIDUAL].Score, p)
+	target := cohort[INDIVIDUAL].Score
 	for _, solution := range solutions {
 		diff := new(apd.Decimal)
 		p.Context.Sub(diff, target, solver.CalculateDecimalScore(p.Context, solution, p.Weights, p.EffectAlleles))

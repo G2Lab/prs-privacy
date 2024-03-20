@@ -72,7 +72,8 @@ func newUpdate(sum int64, likelihood, chi float64, binIdx, binCount uint8, fptr,
 
 func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string) *DP {
 	s := &DP{
-		target:  ScoreToTarget(score, p),
+		//target:  ScoreToTarget(score, p),
+		target:  score,
 		p:       p,
 		stats:   p.PopulationStats[ppl],
 		ppl:     ppl,
@@ -110,13 +111,10 @@ func (dp *DP) SolveFromScratch() map[string][]uint8 {
 
 	state := dp.BuildState(numSegments)
 	//state := loadState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
-	//targets := []int64{target}
 	targets := make([]int64, 0)
-	//if dp.rounder.RoundedMode {
-	for w := target + roundingError; w > target-roundingError; w-- {
+	for w := target; w > target-roundingError-1; w-- {
 		targets = append(targets, w)
 	}
-	//}
 	//fmt.Printf("Target: %d\n", target)
 	//fmt.Printf("Targets: %d\n", targets)
 

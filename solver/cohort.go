@@ -127,15 +127,16 @@ func (c Cohort) RetrieveGenotypesAndCalculatePRS(p *pgs.PGS) {
 			}
 		}
 	}
-	// Normalize the score for each individual by the number of loci
-	divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
-	for indv := range c {
-		_, err = ctx.Quo(c[indv].Score, c[indv].Score, divisor)
-		if err != nil {
-			log.Println("Error dividing score by the number of loci:", err)
-			return
-		}
-	}
+	// TODO: Storing the linear sum for now to avoid precision issues with division
+	//// Normalize the score for each individual by the number of loci
+	//divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
+	//for indv := range c {
+	//	_, err = ctx.Quo(c[indv].Score, c[indv].Score, divisor)
+	//	if err != nil {
+	//		log.Println("Error dividing score by the number of loci:", err)
+	//		return
+	//	}
+	//}
 }
 
 func (c Cohort) SortByScore() []string {
