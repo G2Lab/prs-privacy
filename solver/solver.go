@@ -272,6 +272,7 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 		flattened[i] = solution
 		chi = ChiSquaredValue(CalculateEffectAlleleSpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
 		laf[i] = CalculateFullSequenceLikelihood(solution, stats.AF) + chi
+		//laf[i] = chi
 		i++
 	}
 	sortBy(flattened, laf, false)

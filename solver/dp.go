@@ -374,6 +374,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 				table[nextSum].Pointers[nextPtr] = table[prevSum].TopPointer
 				if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
 					CombineLikelihoodAndChiSquared(table[nextSum].TopLikelihood, table[nextSum].TopChiValue) {
+					//if nextLikelihood < table[nextSum].TopLikelihood {
+					//if nextChi < table[nextSum].TopChiValue {
 					updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
 				}
 			}
@@ -383,6 +385,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint16]int64, indices []int
 			// If we have already updated with something better, sum1 + 1k = sum2 +2k
 			if CombineLikelihoodAndChiSquared(table[updates[u].sum].TopLikelihood, table[updates[u].sum].TopChiValue) <
 				CombineLikelihoodAndChiSquared(updates[u].likelihood, updates[u].chi) {
+				//if table[updates[u].sum].TopLikelihood < updates[u].likelihood {
+				//if table[updates[u].sum].TopChiValue < updates[u].chi {
 				continue
 			}
 			table[updates[u].sum].TopLikelihood = updates[u].likelihood

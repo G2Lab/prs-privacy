@@ -514,11 +514,11 @@ func distribution() {
 
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
-	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -543,8 +543,10 @@ func findAllSolutions() {
 	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000011_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002264_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
