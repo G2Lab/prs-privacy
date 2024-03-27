@@ -350,6 +350,41 @@ def score_deviation():
     plt.show()
 
 
+def weight_to_af():
+    # Load the JSON data
+    # with open('results/weights/PGS000648.json', 'r') as f:
+    with open('results/weights/PGS002302.json', 'r') as f:
+        data = json.load(f)
+
+    # Extract the Weights and AF data
+    weights = data['Weights']
+    af_data = data['AF']
+
+    # Sort the weights in ascending order
+    sorted_indices = sorted(range(len(weights)), key=lambda i: weights[i])
+    sorted_weights = [weights[i] for i in sorted_indices]
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    # Plot the sorted weights on the X-axis
+    ax.plot(sorted_weights, [0] * len(sorted_weights), 'ko', markersize=2)
+    ax.set_xlabel('Sorted Weights')
+
+    # Plot the corresponding AF values for each key on the Y-axis
+    colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k']
+    for i, (key, af_values) in enumerate(af_data.items()):
+        sorted_af = [af_values[j] for j in sorted_indices]
+        ax.plot(sorted_weights, sorted_af, f'{colors[i % len(colors)]}-', label=key)
+
+    # Set the Y-axis label and legend
+    ax.set_ylabel('AF Values')
+    ax.legend()
+
+    # Show the plot
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -367,10 +402,11 @@ if __name__ == "__main__":
     # score_to_likelihood_position("PGS000037", 15)
     # score_to_likelihood_position("PGS000639", 20)
     # score_to_likelihood_position("PGS001827", 33)
-    accuracy_likelihood("PGS000040")
+    # accuracy_likelihood("PGS000040")
     # accuracy_likelihood("PGS000073")
     # accuracy_likelihood("PGS000037")
     # accuracy_likelihood("PGS002302")
     # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # score_deviation()
+    weight_to_af()

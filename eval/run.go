@@ -52,6 +52,7 @@ func main() {
 	//accuracyLikelihood()
 	findAllSolutions()
 	//buildDPTables()
+	//likelihoodWeight()
 }
 
 type Result struct {
@@ -216,7 +217,7 @@ func accuracyLikelihood() {
 	}
 	defer resFile.Close()
 	encoder := json.NewEncoder(resFile)
-	var acc float64
+	var acc float32
 	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
 		if i >= len(samples) {
 			break
@@ -495,8 +496,8 @@ func distribution() {
 		//for _, solution := range solutions {
 		//	fmt.Printf("%s -- %.3f, %.12f, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[sorted[i]].Genotype),
 		//		cohort[sorted[i]].Score-solver.CalculateDecimalScore(solution, p.Weights), p.CalculateFullSequenceLikelihood(solution))
-		acc := 0.0
-		likelihood := 0.0
+		var acc float32 = 0.0
+		var likelihood float32 = 0.0
 		for j, solution := range solutions {
 			if j == 0 {
 				acc = solver.Accuracy(solution, cohort[sorted[i]].Genotype)
@@ -514,11 +515,11 @@ func distribution() {
 
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
-	INDIVIDUAL := "HG02182" // lowest score for PGS000040
+	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00551" // low 648
 	//INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
@@ -535,7 +536,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
@@ -545,8 +546,8 @@ func findAllSolutions() {
 	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002264_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002264_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -565,6 +566,7 @@ func findAllSolutions() {
 		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
 
 	solmap := slv.SolveFromScratch()
+	//solmap := slv.SolveFromScratchDeterministic()
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
 	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles)
@@ -621,6 +623,65 @@ func buildDPTables() {
 				break
 			}
 		}
+	}
+}
+
+func likelihoodWeight() {
+	p := pgs.NewPGS()
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000307_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002264_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	p.LoadStats()
+	fmt.Printf("%s\n", p.PgsID)
+	type Relation struct {
+		Weights []float64
+		AF      map[string][]float32
+	}
+	r := new(Relation)
+	r.Weights = make([]float64, len(p.Weights))
+	for i := 0; i < len(p.Weights); i++ {
+		r.Weights[i], err = p.Weights[i].Float64()
+		if err != nil {
+			log.Fatalf("Error converting weight %d: %v\n", i, err)
+		}
+	}
+	r.AF = make(map[string][]float32)
+	for _, pop := range pgs.POPULATIONS {
+		r.AF[pop] = make([]float32, len(p.PopulationStats[pop].AF))
+		for i := 0; i < len(p.PopulationStats[pop].AF); i++ {
+			r.AF[pop][i] = p.PopulationStats[pop].AF[i][p.EffectAlleles[i]]
+		}
+	}
+
+	resFolder := "results/weights"
+	filepath := path.Join(resFolder, fmt.Sprintf("%s.json", p.PgsID))
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(r); err != nil {
+		log.Fatal("Cannot encode json", err)
 	}
 }
 

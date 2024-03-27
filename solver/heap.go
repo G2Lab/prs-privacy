@@ -3,12 +3,12 @@ package solver
 import "container/heap"
 
 type genotype struct {
-	mutations  []uint16
-	likelihood float64
+	mutations  []uint8
+	likelihood float32
 }
 
-func newGenotype(mutations []uint16, likelihood float64) *genotype {
-	mtt := make([]uint16, len(mutations))
+func newGenotype(mutations []uint8, likelihood float32) *genotype {
+	mtt := make([]uint8, len(mutations))
 	copy(mtt, mutations)
 	return &genotype{mtt, likelihood}
 }
@@ -43,7 +43,7 @@ func (h *genHeap) Pop() interface{} {
 	return x
 }
 
-func (h *genHeap) addToGenHeap(lkl float64, sol []uint16, heapSize int) bool {
+func (h *genHeap) addToGenHeap(lkl float32, sol []uint8, heapSize int) bool {
 	if (*h).Len() < heapSize {
 		ng := newGenotype(sol, lkl)
 		heap.Push(h, *ng)
@@ -60,10 +60,10 @@ func (h *genHeap) addToGenHeap(lkl float64, sol []uint16, heapSize int) bool {
 
 type match struct {
 	sums       []int64
-	likelihood float64
+	likelihood float32
 }
 
-func newMatch(sums []int64, likelihood float64) *match {
+func newMatch(sums []int64, likelihood float32) *match {
 	return &match{sums, likelihood}
 }
 
@@ -98,7 +98,7 @@ func (h *matchHeap) Pop() interface{} {
 	return x
 }
 
-func (h *matchHeap) addToMatchHeap(lkl float64, sums []int64, heapSize int) bool {
+func (h *matchHeap) addToMatchHeap(lkl float32, sums []int64, heapSize int) bool {
 	if h.Len() < heapSize {
 		m := newMatch(sums, lkl)
 		heap.Push(h, *m)
@@ -115,10 +115,10 @@ func (h *matchHeap) addToMatchHeap(lkl float64, sums []int64, heapSize int) bool
 
 type individual struct {
 	sequence []uint8
-	fitness  float64
+	fitness  float32
 }
 
-func newIndividual(seq []uint8, fitness float64) *individual {
+func newIndividual(seq []uint8, fitness float32) *individual {
 	sq := make([]uint8, len(seq))
 	copy(sq, seq)
 	return &individual{sq, fitness}
@@ -163,7 +163,7 @@ func (h *individualHeap) Pop() interface{} {
 	return x
 }
 
-func (h *individualHeap) PushIfUnseen(seq []uint8, fitness float64, heapSize int) {
+func (h *individualHeap) PushIfUnseen(seq []uint8, fitness float32, heapSize int) {
 	seqstr := ArrayToString(seq)
 	if _, exists := h.seen[seqstr]; !exists {
 		switch {

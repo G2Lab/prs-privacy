@@ -5,12 +5,12 @@ import (
 	"math/rand"
 )
 
-func SampleFromDistribution(distribution []float64) int {
-	cumulative := 0.0
+func SampleFromDistribution(distribution []float32) int {
+	var cumulative float32 = 0.0
 	for _, p := range distribution {
 		cumulative += p
 	}
-	r := rand.Float64() * cumulative
+	r := rand.Float32() * cumulative
 	for k, v := range distribution {
 		r -= v
 		if r <= 0.0 {

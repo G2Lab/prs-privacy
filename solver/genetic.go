@@ -74,8 +74,8 @@ func (g *Genetic) Solve() map[string][]uint8 {
 	return solutions
 }
 
-func iterationToTemperature(iteration int) float64 {
-	return 1 + float64(params.ITERATIONS-iteration)/2000
+func iterationToTemperature(iteration int) float32 {
+	return 1 + float32(params.ITERATIONS-iteration)/2000
 }
 
 func (g *Genetic) checkForSolutions(population [][]uint8, deltas []float64) ([][]uint8, []float64) {
@@ -109,7 +109,7 @@ func (g *Genetic) calculateDeltas(population [][]uint8) []float64 {
 	return deltas
 }
 
-func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
+func (g *Genetic) crossover(population [][]uint8, T float32) [][]uint8 {
 	parents := tools.Shuffle(population)
 	splice := func(first, second int) []uint8 {
 		// Likelihoods/deltas for the possible crossovers in the form of:
@@ -149,7 +149,7 @@ func (g *Genetic) crossover(population [][]uint8, T float64) [][]uint8 {
 	return offspring
 }
 
-func (g *Genetic) tournament(population [][]uint8, deltas []float64, populationSize int, T float64) [][]uint8 {
+func (g *Genetic) tournament(population [][]uint8, deltas []float64, populationSize int, T float32) [][]uint8 {
 	fitness := FitnessFromDeltas(deltas, T)
 	scores := make([]float64, len(population))
 	var opponentIdx int
@@ -168,15 +168,15 @@ func (g *Genetic) tournament(population [][]uint8, deltas []float64, populationS
 	return population[:populationSize]
 }
 
-func (g *Genetic) mutate(population [][]uint8, T float64) [][]uint8 {
+func (g *Genetic) mutate(population [][]uint8, T float32) [][]uint8 {
 	for j, original := range population {
 		population[j] = g.MutateGenome(original, T)
 	}
 	return population
 }
 
-func FitnessFromDeltas(deltas []float64, T float64) []float64 {
-	fitness := make([]float64, len(deltas))
+func FitnessFromDeltas(deltas []float64, T float32) []float32 {
+	fitness := make([]float32, len(deltas))
 	for i := range deltas {
 		// smaller the delta, higher the fitness
 		//fitness[i] = 1 / math.Exp(math.Pow(deltas[i], 2))
@@ -185,8 +185,8 @@ func FitnessFromDeltas(deltas []float64, T float64) []float64 {
 	return fitness
 }
 
-func FitnessFromLikelihoods(likelihoods []float64, T float64) []float64 {
-	fitness := make([]float64, len(likelihoods))
+func FitnessFromLikelihoods(likelihoods []float32, T float64) []float32 {
+	fitness := make([]float32, len(likelihoods))
 	for i, likelihood := range likelihoods {
 		// lower the negative likelihood, higher the fitness
 		fitness[i] = 1 / likelihood
@@ -195,7 +195,7 @@ func FitnessFromLikelihoods(likelihoods []float64, T float64) []float64 {
 	return fitness
 }
 
-func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
+func (g *Genetic) MutateGenome(original []uint8, T float32) []uint8 {
 	//indices := shuffleIndicesByLikelihood(original, g.af)
 	//if len(indices) != len(original) {
 	//	log.Fatalf("Error shuffling indices: %d != %d", len(indices), len(original))
@@ -208,10 +208,10 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 		indices[i], indices[j] = indices[j], indices[i]
 	})
 	mutations := make([]uint8, len(original))
-	probabilities := make([]float64, len(original))
-	originalBins := CalculateEffectAlleleSpectrum(original, g.stats.AF, g.stats.FreqBinBounds, g.p.EffectAlleles)
+	probabilities := make([]float32, len(original))
+	originalBins := CalculateSequenceEASpectrum(original, g.stats.AF, g.stats.FreqBinBounds, g.p.EffectAlleles)
 	var newIdx, oldIdx int
-	var freqChange float64
+	var freqChange float32
 	for _, i := range indices {
 		for _, v := range pgs.GENOTYPES {
 			if v == original[i] {
@@ -238,8 +238,8 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 			//}
 			oldIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.Ploidy][original[i]], g.stats.FreqBinBounds)
 			newIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.Ploidy][v], g.stats.FreqBinBounds)
-			freqChange = g.specShiftFactor(newIdx, float64(v)-float64(original[i]), originalBins) *
-				g.specShiftFactor(oldIdx, float64(original[i])-float64(v), originalBins)
+			freqChange = g.specShiftFactor(newIdx, float32(v)-float32(original[i]), originalBins) *
+				g.specShiftFactor(oldIdx, float32(original[i])-float32(v), originalBins)
 			probabilities[i] = 1 / (afToLikelihood(g.stats.AF[i/pgs.Ploidy][v]) * freqChange)
 			//probabilities[i] = 1 / math.Abs(newDelta)
 			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
@@ -259,18 +259,18 @@ func (g *Genetic) MutateGenome(original []uint8, T float64) []uint8 {
 	return original
 }
 
-func (g *Genetic) specShiftFactor(idx int, shift float64, currentSpec []float64) float64 {
-	diff := math.Abs(g.stats.FreqSpectrum[idx] - currentSpec[idx])
-	newDiff := math.Abs(diff + shift)
+func (g *Genetic) specShiftFactor(idx int, shift float32, currentSpec []float32) float32 {
+	diff := math.Abs(float64(g.stats.FreqSpectrum[idx]) - float64(currentSpec[idx]))
+	newDiff := math.Abs(diff + float64(shift))
 	if newDiff < 1 {
 		return math.E
 	}
-	return math.Exp(math.Pow(diff/newDiff, 2))
+	return float32(math.Exp(math.Pow(diff/newDiff, 2)))
 }
 
-func deltaToFitness(delta float64, T float64) float64 {
+func deltaToFitness(delta float64, T float32) float32 {
 	//return 1 / math.Exp(math.Pow(delta, 2)/T)
-	return 1 / math.Exp(math.Pow(delta, 2))
+	return float32(1 / math.Exp(math.Pow(delta, 2)))
 }
 
 func CalculateFloatScore(snps []uint8, weights []float64) float64 {

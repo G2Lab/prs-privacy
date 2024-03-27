@@ -113,9 +113,9 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 }
 
 type Statistics struct {
-	AF            map[int][]float64 // Effect Allele Frequency
-	FreqSpectrum  []float64         // Allele Frequency Spectrum
-	FreqBinBounds []float64         // Bounds of the frequency spectrum bins
+	AF            map[int][]float32 // Effect Allele Frequency
+	FreqSpectrum  []float32         // Allele Frequency Spectrum
+	FreqBinBounds []float32         // Bounds of the frequency spectrum bins
 }
 
 type PGS struct {
@@ -255,9 +255,9 @@ scannerLoop:
 	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))
 	for _, population := range POPULATIONS {
 		p.PopulationStats[population] = &Statistics{
-			AF:            make(map[int][]float64, len(p.Loci)),
-			FreqSpectrum:  make([]float64, p.NumSpecBins),
-			FreqBinBounds: make([]float64, p.NumSpecBins),
+			AF:            make(map[int][]float32, len(p.Loci)),
+			FreqSpectrum:  make([]float32, p.NumSpecBins),
+			FreqBinBounds: make([]float32, p.NumSpecBins),
 		}
 	}
 
@@ -332,10 +332,28 @@ func (p *PGS) LoadStats() {
 }
 
 func (p *PGS) LoadDatasetStats() {
-	p.extractPopulationAlleles()
-	filename := fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
-	_, err := os.Stat(filename)
-	if os.IsNotExist(err) {
+	filename := fmt.Sprintf("%s/%s.efal", params.DataFolder, p.PgsID)
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		p.extractPopulationAlleles()
+		fmt.Println("Extracted population alleles", p.EffectAlleles)
+		p.savePopulationAlleles()
+	} else {
+		efalFile, err := os.Open(filename)
+		if err != nil {
+			log.Printf("Error opening efal file: %v\n", err)
+			return
+		}
+		defer efalFile.Close()
+		decoder := json.NewDecoder(efalFile)
+		err = decoder.Decode(&(p.EffectAlleles))
+		if err != nil {
+			log.Printf("Error decoding effect alleles json: %v", err)
+		}
+		fmt.Println("Loaded population alleles", p.EffectAlleles)
+	}
+
+	filename = fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		p.extractEAF()
 		p.computeFrequencySpectrum()
 		p.SaveStats()
@@ -394,9 +412,25 @@ func (p *PGS) extractPopulationAlleles() {
 	}
 }
 
+func (p *PGS) savePopulationAlleles() {
+	filename := fmt.Sprintf("%s/%s.efal", params.DataFolder, p.PgsID)
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Error creating effect alleles file: %v", err)
+		return
+	}
+	defer file.Close()
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(&(p.EffectAlleles))
+	if err != nil {
+		log.Printf("Error encoding json effect alleles: %v", err)
+	}
+}
+
 func (p *PGS) extractEAF() {
 	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
-	var freq, parsed float64
+	var freq float32
+	var parsed float64
 	for k, locus := range p.Loci {
 		chr, pos := tools.SplitLocus(locus)
 		query, args := tools.RangeQuery(populationQ, chr, pos, pos)
@@ -411,7 +445,7 @@ func (p *PGS) extractEAF() {
 		if len(lines[:len(lines)-1]) == 0 {
 			log.Printf("No data for locus %s, inserting default AF", locus)
 			for i := range POPULATIONS {
-				p.PopulationStats[POPULATIONS[i]].AF[k] = []float64{1 - MissingEAF, MissingEAF}
+				p.PopulationStats[POPULATIONS[i]].AF[k] = []float32{1 - MissingEAF, MissingEAF}
 			}
 			continue
 		}
@@ -426,12 +460,12 @@ func (p *PGS) extractEAF() {
 				altAfs := strings.Split(afPerPopulation[i], ",")
 				freq = 0
 				for _, altAf := range altAfs {
-					parsed, err = strconv.ParseFloat(altAf, 64)
+					parsed, err = strconv.ParseFloat(altAf, 32)
 					if err != nil {
 						log.Printf("Error parsing %s at %s: %v", afPerPopulation[i], locus, err)
 						parsed = MissingEAF
 					}
-					freq += parsed
+					freq += float32(parsed)
 				}
 				switch freq {
 				case 0:
@@ -443,7 +477,7 @@ func (p *PGS) extractEAF() {
 				if freq > 1 || freq < 0 {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
-				p.PopulationStats[population].AF[k] = []float64{1 - freq, freq}
+				p.PopulationStats[population].AF[k] = []float32{1 - freq, freq}
 			}
 		}
 	}
@@ -470,7 +504,7 @@ func (p *PGS) assignFreqBins() {
 	for _, ppl := range POPULATIONS {
 		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
 		for i := range p.PopulationStats[ppl].AF {
-			eaf[i] = p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]]
+			eaf[i] = float64(p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]])
 		}
 		sort.Float64s(eaf)
 		elementsPerBin := len(eaf) / p.NumSpecBins
@@ -481,7 +515,7 @@ func (p *PGS) assignFreqBins() {
 			if i == p.NumSpecBins-1 {
 				endIdx = len(eaf)
 			}
-			p.PopulationStats[ppl].FreqBinBounds[i] = eaf[endIdx-1]
+			p.PopulationStats[ppl].FreqBinBounds[i] = float32(eaf[endIdx-1])
 		}
 	}
 }
@@ -560,7 +594,7 @@ func (p *PGS) querySampleFrequencies() {
 	// Normalize the frequency spectrum
 	for _, ppl := range POPULATIONS {
 		for i := 0; i < p.NumSpecBins; i++ {
-			p.PopulationStats[ppl].FreqSpectrum[i] /= float64(ancestrySizes[ppl])
+			p.PopulationStats[ppl].FreqSpectrum[i] /= float32(ancestrySizes[ppl])
 		}
 	}
 }

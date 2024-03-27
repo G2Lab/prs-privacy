@@ -2,7 +2,7 @@ package tools
 
 import "math"
 
-func ValueToBinIdx(value float64, bounds []float64) int {
+func ValueToBinIdx(value float32, bounds []float32) int {
 	low := 0
 	high := len(bounds) - 1
 
