@@ -130,11 +130,12 @@ func (dp *DP) SolveFromScratch() map[string][]uint8 {
 }
 
 func (dp *DP) SolveFromScratchDeterministic() map[string][]uint8 {
+	fmt.Println("Solving deterministically")
 	numSegments := 2
 	fmt.Printf("Loci: %v\n", dp.p.Loci)
 	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
 
-	indices, splitIdxs, betas, tables := dp.BuildDeterministicState(numSegments)
+	indices, betas, tables := dp.BuildDeterministicState(numSegments)
 	//state := loadState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
 	targets := make([]int64, 0)
 	for w := target; w > target-roundingError-1; w-- {
@@ -142,7 +143,7 @@ func (dp *DP) SolveFromScratchDeterministic() map[string][]uint8 {
 	}
 
 	solutionHeap := newGenHeap()
-	dp.deterministicMitM(numSegments, indices, splitIdxs, tables, betas, targets, solutionHeap)
+	dp.deterministicMitM(numSegments, indices, tables, betas, targets, solutionHeap)
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
@@ -152,7 +153,7 @@ func (dp *DP) SolveFromScratchDeterministic() map[string][]uint8 {
 	return solutions
 }
 
-func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, []int, []int, []map[uint8]int64) {
+func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uint8]int64) {
 	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
 	freqSortedIndices := sortByEffectAlleleFreq(dp.stats.AF, dp.p.EffectAlleles)
 
@@ -177,23 +178,33 @@ func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, []int, []int, []ma
 			break
 		}
 	}
+	indices := make([][]int, numSeg)
+	for i := 0; i < numSeg; i++ {
+		indices[i] = make([]int, 0)
+		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
+			indices[i] = append(indices[i], freqSortedIndices[j])
+		}
+	}
 	betas := make([]map[uint8]int64, numSeg)
 	for i := 0; i < numSeg; i++ {
-		betas[i] = makeBetaMap(weights, freqSortedIndices, splitIdxs[i], splitIdxs[i+1])
+		betas[i] = makeBetaMap(weights, indices[i])
 	}
-	return weights, target, roundingError, freqSortedIndices, splitIdxs, betas
+	return weights, target, roundingError, indices, betas
 }
 
-func (dp *DP) BuildDeterministicState(numSegments int) ([]int, []int, []map[uint8]int64, []map[int64][]uint8) {
+func (dp *DP) BuildDeterministicState(numSegments int) ([][]int, []map[uint8]int64, []map[int64][]uint8) {
 	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-	indices := make([]int, len(weights))
-	for i := range weights {
-		indices[i] = i
-	}
 	splitIdxs := []int{0, len(weights) / 2, len(weights)}
+	indices := make([][]int, numSegments)
+	for i := 0; i < numSegments; i++ {
+		indices[i] = make([]int, 0)
+		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
+			indices[i] = append(indices[i], j)
+		}
+	}
 	betas := make([]map[uint8]int64, numSegments)
 	for i := 0; i < numSegments; i++ {
-		betas[i] = makeBetaMap(weights, indices, splitIdxs[i], splitIdxs[i+1])
+		betas[i] = makeBetaMap(weights, indices[i])
 	}
 
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
@@ -202,18 +213,18 @@ func (dp *DP) BuildDeterministicState(numSegments int) ([]int, []int, []map[uint
 	for i := 0; i < numSegments; i++ {
 		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
 	}
-	return indices, splitIdxs, betas, tables
+	return indices, betas, tables
 }
 
 func (dp *DP) BuildState(numSegments int) *State {
-	weights, target, roundingError, freqSortedIndices, splitIdxs, betas := dp.PrepareData(numSegments)
+	weights, target, roundingError, indices, betas := dp.PrepareData(numSegments)
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
 	state := new(State)
 	state.Betas = betas
 	state.Nodes = make([]map[int64]*Node, numSegments)
 	for i := 0; i < numSegments; i++ {
-		state.Nodes[i] = calculateSubsetSumTableWithLikelihood(betas[i], freqSortedIndices[splitIdxs[i]:splitIdxs[i+1]], upper, lower, dp.stats, dp.p.EffectAlleles)
+		state.Nodes[i] = calculateSubsetSumTableWithLikelihood(betas[i], indices[i], upper, lower, dp.stats, dp.p.EffectAlleles)
 	}
 	return state
 }
@@ -291,27 +302,34 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 	}
 }
 
-func (dp *DP) deterministicMitM(numSegments int, indices []int, splitIdxs []int, tables []map[int64][]uint8, betas []map[uint8]int64,
+func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[int64][]uint8, betas []map[uint8]int64,
 	targets []int64, solHeap *genHeap) {
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
+	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
+	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	var i, s int
 	var ok bool
-	var lkl, chi float32
+	//var lkl, chi float32
 	var leftSum int64
-	var combinations [][]uint8
+	tmp := make([][]uint8, 0)
 	// we need to save only the backtracking results on the right,
 	// because each left sum is used only once.
-	backtracked := make(map[int64][]*genotype)
+	backtracked := make(map[int64][][]uint8)
 	halfSums := make([][]int64, numSegments)
-	halfSols := make([][]*genotype, numSegments)
+	halfSols := make([][][]uint8, numSegments)
+	for i = 0; i < numSegments; i++ {
+		halfSums[i] = make([]int64, 0)
+		halfSols[i] = make([][]uint8, 0)
+	}
+	halfSums[0] = append(halfSums[0], 0)
 	for leftSum = range tables[0] {
 		if s++; s%step == 0 {
 			fmt.Printf("Progress: %d%%\n", s*10/step)
 		}
-		halfSums[1] = make([]int64, 0)
+		halfSums[1] = halfSums[1][:0]
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {
 				halfSums[1] = append(halfSums[1], t-leftSum)
@@ -320,10 +338,10 @@ func (dp *DP) deterministicMitM(numSegments int, indices []int, splitIdxs []int,
 		if len(halfSums[1]) == 0 {
 			continue
 		}
-		halfSums[0] = []int64{leftSum}
+		halfSums[0][0] = leftSum
 		// backtrack partial solutions
 		for i = 0; i < numSegments; i++ {
-			halfSols[i] = make([]*genotype, 0)
+			halfSols[i] = halfSols[i][:0]
 			for _, halfSum := range halfSums[i] {
 				if i == 1 && dp.rounder.RoundedMode {
 					if _, ok = backtracked[halfSum]; ok {
@@ -331,28 +349,28 @@ func (dp *DP) deterministicMitM(numSegments int, indices []int, splitIdxs []int,
 						continue
 					}
 				}
-				combinations = backtrackFromSum(halfSum, tables[i], betas[i])
-				for l := range combinations {
-					lkl = calculateLociLikelihood(combinations[l], indices[splitIdxs[i]:splitIdxs[i+1]], dp.stats.AF, dp.p.EffectAlleles)
-					chi = ChiSquaredValue(CalculateLociEASpectrum(combinations[l], dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
-					halfSols[i] = append(halfSols[i], newGenotype(combinations[l], CombineLikelihoodAndChiSquared(lkl, chi)))
-					if i == 1 && dp.rounder.RoundedMode {
-						backtracked[halfSum] = append(backtracked[halfSum], newGenotype(combinations[l], CombineLikelihoodAndChiSquared(lkl, chi)))
+				tmp = backtrackFromSum(halfSum, tables[i], betas[i])
+				if i == 1 && dp.rounder.RoundedMode {
+					backtracked[halfSum] = make([][]uint8, 0)
+					for _, sol := range tmp {
+						backtracked[halfSum] = append(backtracked[halfSum], make([]uint8, len(sol)))
+						copy(backtracked[halfSum][len(backtracked[halfSum])-1], sol)
 					}
 				}
+				halfSols[i] = append(halfSols[i], tmp...)
+				//for l := range combinations {
+				//	lkl = calculateLociLikelihood(combinations[l], indices[splitIdxs[i]:splitIdxs[i+1]], dp.stats.AF, dp.p.EffectAlleles)
+				//	chi = ChiSquaredValue(CalculateLociEASpectrum(combinations[l], dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
+				//	halfSols[i] = append(halfSols[i], newGenotype(combinations[l], CombineLikelihoodAndChiSquared(lkl, chi)))
+				//	if i == 1 && dp.rounder.RoundedMode {
+				//		backtracked[halfSum] = append(backtracked[halfSum], halfSols[i][len(halfSols[i])-1])
+				//	}
+				//}
 			}
-			//halfSols[i] = make([]*genotype, 0)
-			//for _, halfSum := range halfSums[i] {
-			//	combinations = backtrackFromSum(halfSum, tables[i], betas[i])
-			//	for j := range combinations {
-			//		lkl = calculateLociLikelihood(combinations[j], indices[splitIdxs[i]:splitIdxs[i+1]], dp.stats.AF, dp.p.EffectAlleles)
-			//		chi = ChiSquaredValue(CalculateLociEASpectrum(combinations[l], dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
-			//		halfSols[i] = append(halfSols[i], newGenotype(combinations[l], CombineLikelihoodAndChiSquared(lkl, chi)))
-			//	}
-			//}
 		}
 		// combine partial solutions
-		combinePartials(0, numSegments, make([]uint8, 0), 0, apd.NewBigInt(0), halfSols, solHeap, params.HeapSize, dp.rounder)
+		dp.combinePartials(0, numSegments, indices, make([]uint8, 0), 0, apd.NewBigInt(0), halfSols, solHeap,
+			params.HeapSize)
 	}
 }
 
@@ -504,26 +522,30 @@ func backtrackWithPointers(sum int64, table map[int64]*Node, weights map[uint8]i
 	return output
 }
 
-func combinePartials(segmentNum, totalSegments int, input []uint8, lkl float32, score *apd.BigInt, genotypes [][]*genotype, solHeap *genHeap, heapSize int, rnd *Rounder) {
+func (dp *DP) combinePartials(segmentNum, totalSegments int, indices [][]int, input []uint8, lkl float32, score *apd.BigInt,
+	genotypes [][][]uint8, solHeap *genHeap, heapSize int) {
+	var chi, newLkl float32
 	if segmentNum == totalSegments {
-		if rnd.RoundedMode {
-			if score.Cmp(rnd.ScaledTarget) != 0 {
+		if dp.rounder.RoundedMode {
+			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
 				return
 			}
 		}
-		solHeap.addToGenHeap(lkl, input, heapSize)
+		chi = ChiSquaredValue(CalculateLociEASpectrum(input, dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
+		solHeap.addToGenHeap(CombineLikelihoodAndChiSquared(lkl, chi), input, heapSize)
 		return
 	}
 	for _, sol := range genotypes[segmentNum] {
-		input = append(input, sol.mutations...)
-		if rnd.RoundedMode {
+		input = append(input, sol...)
+		newLkl = calculateLociLikelihood(sol, indices[segmentNum], dp.stats.AF, dp.p.EffectAlleles) + lkl
+		if dp.rounder.RoundedMode {
 			newScore := apd.NewBigInt(0)
-			newScore.Add(score, lociToScore(sol.mutations, rnd.ScaledWeights))
-			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, newScore, genotypes, solHeap, heapSize, rnd)
+			newScore.Add(score, lociToScore(sol, dp.rounder.ScaledWeights))
+			dp.combinePartials(segmentNum+1, totalSegments, indices, input, newLkl, newScore, genotypes, solHeap, heapSize)
 		} else {
-			combinePartials(segmentNum+1, totalSegments, input, lkl+sol.likelihood, score, genotypes, solHeap, heapSize, rnd)
+			dp.combinePartials(segmentNum+1, totalSegments, indices, input, newLkl, score, genotypes, solHeap, heapSize)
 		}
-		input = input[:len(input)-len(sol.mutations)]
+		input = input[:len(input)-len(sol)]
 	}
 }
 
@@ -552,10 +574,10 @@ func backtrack(path []uint8, result *[][]uint8, sum int64, table map[int64][]uin
 	}
 }
 
-func makeBetaMap(betas []int64, indices []int, start, end int) map[uint8]int64 {
-	bmap := make(map[uint8]int64, end-start)
-	for i := start; i < end; i++ {
-		bmap[uint8(indices[i])] = betas[indices[i]]
+func makeBetaMap(betas []int64, indices []int) map[uint8]int64 {
+	bmap := make(map[uint8]int64)
+	for _, idx := range indices {
+		bmap[uint8(idx)] = betas[idx]
 	}
 	return bmap
 }

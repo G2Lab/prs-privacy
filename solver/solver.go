@@ -51,32 +51,27 @@ func calculateLociLikelihood(mutatedLoci []uint8, indices []int, af map[int][]fl
 		case double:
 			likelihood += afToLikelihood(af[j][efal[j]]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(af[j][efal[j]]) * pgs.Ploidy
+			likelihood += afToLikelihood(af[j][^efal[j]&1]) * pgs.Ploidy
 		}
 	}
 	return likelihood
 }
 
-func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float32) float32 {
+func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float32, efal []uint8) float32 {
 	var likelihood float32 = 0.0
-	//if len(sequence) != len(p.Weights)*pgs.Ploidy {
-	//	fmt.Printf("Error: sequence length %d does not match the number of variants %d\n", len(sequence), len(p.Weights))
-	//	fmt.Println(sequence)
-	//	return 0.0
-	//}
+	var effect, other uint8
 	for i := 0; i < len(sequence); i += 2 {
+		effect = efal[i/pgs.Ploidy]
+		other = ^effect & 1
 		switch {
-		case sequence[i] == 0 && sequence[i+1] == 0:
-			likelihood += afToLikelihood(af[i/pgs.Ploidy][0]) * pgs.Ploidy
-		case sequence[i] == 1 && sequence[i+1] == 1:
-			likelihood += afToLikelihood(af[i/pgs.Ploidy][1]) * pgs.Ploidy
+		case sequence[i] == effect && sequence[i+1] == effect:
+			likelihood += afToLikelihood(af[i/pgs.Ploidy][effect]) * pgs.Ploidy
+		case sequence[i] == other && sequence[i+1] == other:
+			likelihood += afToLikelihood(af[i/pgs.Ploidy][other]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[i/pgs.Ploidy][0]) + afToLikelihood(af[i/pgs.Ploidy][1])
+			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[i/pgs.Ploidy][effect]) +
+				afToLikelihood(af[i/pgs.Ploidy][other])
 		}
-		//for j := 0; j < pgs.Ploidy; j++ {
-		//	likelihood += afToLikelihood(af[i/pgs.Ploidy][sequence[i+j]])
-		//	//fitness += afToLikelihood(p.StudyEAF[i/pgs.Ploidy][sequence[i+j]])
-		//}
 	}
 	return likelihood
 }
@@ -213,13 +208,13 @@ func SortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
 	return flattened
 }
 
-func SortByLikelihood(solutions map[string][]uint8, af map[int][]float32) [][]uint8 {
+func SortByLikelihood(solutions map[string][]uint8, af map[int][]float32, efal []uint8) [][]uint8 {
 	i := 0
 	flattened := make([][]uint8, len(solutions))
 	likelihoods := make([]float32, len(solutions))
 	for _, solution := range solutions {
 		flattened[i] = solution
-		likelihoods[i] = CalculateFullSequenceLikelihood(solution, af)
+		likelihoods[i] = CalculateFullSequenceLikelihood(solution, af, efal)
 		i++
 	}
 	sortBy(flattened, likelihoods, false)
@@ -258,7 +253,7 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 	for _, solution := range solutions {
 		flattened[i] = solution
 		chi = ChiSquaredValue(CalculateSequenceEASpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
-		laf[i] = CombineLikelihoodAndChiSquared(CalculateFullSequenceLikelihood(solution, stats.AF), chi)
+		laf[i] = CombineLikelihoodAndChiSquared(CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles), chi)
 		//laf[i] = chi
 		i++
 	}
