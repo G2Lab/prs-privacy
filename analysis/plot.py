@@ -385,6 +385,57 @@ def weight_to_af():
     plt.show()
 
 
+def likelihood_spectrum_accuracy(pgs_id):
+    directory = "results/sorting/"
+    filepath = os.path.join(directory, pgs_id+".json")
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    individuals, ancestry, scores, true_lkl, true_spec, ref_acc = [], [], [], [], [], []
+    lkl_acc, spec_acc, lkl_spec_acc = [], [], []
+    for result in data:
+        individuals.append(result["Individual"])
+        ancestry.append(result["Ancestry"])
+        scores.append(float(result["Score"]))
+        true_lkl.append(float(result["TrueLikelihood"]))
+        true_spec.append(float(result["TrueSpectrum"]))
+        ref_acc.append(float(result["ReferenceAccuracy"]))
+        lkl_acc.append(list(map(lambda x: float(x), result["LikelihoodAccuracies"])))
+        spec_acc.append(list(map(lambda x: float(x), result["SpectrumAccuracies"])))
+        lkl_spec_acc.append(list(map(lambda x: float(x), result["LikelihoodSpectrumAccuracies"])))
+
+    print(f"Median and mean likelihood accuracy: {np.median([l[0] for l in lkl_acc])}, {np.mean([l[0] for l in lkl_acc])}")
+    print(f"Median and mean spectrum accuracy: {np.median([l[0] for l in spec_acc])}, {np.mean([l[0] for l in spec_acc])}")
+    print(f"Median and mean likelihood+spectrum accuracy: {np.median([l[0] for l in lkl_spec_acc])}, {np.mean([l[0] for l in lkl_spec_acc])}")
+
+    colors = ['firebrick', 'sandybrown', 'forestgreen', 'mediumorchid', 'dodgerblue', 'limegreen', 'tomato']
+    markers = ['.', '*', 'v', "^", "+"]
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    # Plot the accuracies for each individual
+    for i, (anc, score, lkl, spec, lkl_spec) in enumerate(zip(ancestry, scores, lkl_acc, spec_acc, lkl_spec_acc)):
+        mrk = markers[i % 5]
+        ax.scatter(score, lkl[0], color=colors[0], s=6, marker=mrk, label="Likelihood" if i == 0 else None)
+        ax.scatter(score, spec[0], color=colors[1], s=6, marker=mrk, label="Spectrum" if i == 0 else None)
+        ax.scatter(score, lkl_spec[0], color=colors[2], s=6, marker=mrk, label="Likelihood+Spectrum" if i == 0 else None)
+
+    # for i in range(0, 5):
+    #     ax.plot([scores[j+i] for j in range(0, len(scores)-5, 5)], [lkl_acc[j+i][i] for j in range(0, len(scores)-5, 5)],
+    #             linestyle='-', color=colors[i])
+
+    # Set axis labels and title
+    ax.set_xlabel("Score")
+    ax.set_ylabel("Accuracy")
+    ax.set_title(f"{pgs_id}")
+
+    # Adjust the legend
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    # Show the plot
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -409,4 +460,5 @@ if __name__ == "__main__":
     # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # score_deviation()
-    weight_to_af()
+    # weight_to_af()
+    likelihood_spectrum_accuracy("PGS000154")

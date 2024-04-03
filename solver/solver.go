@@ -18,10 +18,16 @@ const (
 	AlternativeAllele = 1
 )
 
-type Solver interface {
-	SolveFromScratch() map[string][]uint8
-	SolveFromSaved() map[string][]uint8
-}
+const (
+	UseLikelihood = iota
+	UseSpectrum
+	UseLikelihoodAndSpectrum
+)
+
+//type Solver interface {
+//	SolveFromScratchProbabilistic() map[string][]uint8
+//	SolveFromSavedProbabilistic() map[string][]uint8
+//}
 
 func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
 	target := new(apd.Decimal)
@@ -245,19 +251,24 @@ func CalculateLociEASpectrum(mutatedLoci []uint8, af map[int][]float32, bins []f
 	return spectrum
 }
 
-func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics, effectAlleles []uint8) [][]uint8 {
-	i := 0
+func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics, effectAlleles []uint8, sorting uint8) [][]uint8 {
 	flattened := make([][]uint8, len(solutions))
-	laf := make([]float32, len(solutions))
-	var chi float32
+	fitness := make([]float32, len(solutions))
+	i := 0
 	for _, solution := range solutions {
 		flattened[i] = solution
-		chi = ChiSquaredValue(CalculateSequenceEASpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
-		laf[i] = CombineLikelihoodAndChiSquared(CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles), chi)
-		//laf[i] = chi
+		switch sorting {
+		case UseLikelihood:
+			fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles)
+		case UseSpectrum:
+			fitness[i] = CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
+		case UseLikelihoodAndSpectrum:
+			fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles) +
+				CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
+		}
 		i++
 	}
-	sortBy(flattened, laf, false)
+	sortBy(flattened, fitness, false)
 	return flattened
 }
 

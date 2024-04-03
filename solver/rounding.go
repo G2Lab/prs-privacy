@@ -32,12 +32,10 @@ func getTargetAndWeightsAsInts(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([
 		roundingError = int64(p.NumVariants)
 		rdr.RoundedMode = true
 		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)
-		sct := new(apd.Decimal)
-		p.Context.Mul(sct, target, multiplier)
-		rdr.ScaledTarget.SetString(sct.String(), 10)
+		rdr.ScaledTarget = DecimalToBigInt(p.Context, target, multiplier)
 		multiplier.SetFinite(1, params.PrecisionsLimit)
-		//fmt.Printf("Scaled ogTarget: %s\n", dp.rounder.ScaledTarget.String())
-		//fmt.Printf("Scaled weights: %v\n", dp.rounder.ScaledWeights)
+		//fmt.Printf("Scaled ogTarget: %s\n", rdr.ScaledTarget.String())
+		//fmt.Printf("Scaled weights: %v\n", rdr.ScaledWeights)
 	}
 	weights := DecimalsToInts(p.Context, p.Weights, multiplier)
 	tmp := new(apd.Decimal)
@@ -111,4 +109,16 @@ func DecimalsToFloats(decimals []*apd.Decimal, scale float64) []float64 {
 		floats[i] = float64(int64(flt*scale)) / scale
 	}
 	return floats
+}
+
+func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) *apd.BigInt {
+	tmp := new(apd.Decimal)
+	ctx.Mul(tmp, d, multiplier)
+	b := new(apd.BigInt)
+	b.Set(&tmp.Coeff)
+	b.Mul(b, apd.NewBigInt(int64(math.Pow(10, float64(tmp.Exponent)))))
+	if tmp.Negative {
+		b.Neg(b)
+	}
+	return b
 }
