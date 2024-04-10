@@ -50,10 +50,12 @@ func main() {
 	//distribution()
 	//evaluateReferences()
 	//accuracyLikelihood()
-	//findAllSolutions()
 	//buildDPTables()
 	//likelihoodWeight()
-	sortingChoice()
+	//findAllSolutions()
+	//sortingChoice()
+	//sortingChoiceParallel()
+	accuracyParallel()
 }
 
 type Result struct {
@@ -95,6 +97,91 @@ func test() {
 	fmt.Println("%" + strings.Join([]string{"EAS", "EUR", "AMR"}, "_AF\\t%") + "_AF")
 }
 
+type accuracyOutput struct {
+	Individual           string
+	Ancestry             string
+	Score                string
+	TrueLikelihood       string
+	ReferenceAccuracy    string
+	LikelihoodAccuracies []string
+}
+
+func newAccuracyOutput(ind string, pop string, score *apd.Decimal, trueLikelihood, refAcc float32) *accuracyOutput {
+	fscore, err := score.Float64()
+	if err != nil {
+		log.Fatalf("Error converting score to float64: %v", err)
+	}
+	return &accuracyOutput{
+		Individual:        ind,
+		Ancestry:          pop,
+		Score:             fmt.Sprintf("%.3f", fscore),
+		TrueLikelihood:    fmt.Sprintf("%.3f", trueLikelihood),
+		ReferenceAccuracy: fmt.Sprintf("%.3f", refAcc),
+	}
+}
+
+func accuracyParallel() {
+	DeterminismLimit := 35
+	resultFolder := "results/accuracy"
+	output := make([]*accuracyOutput, 0)
+	catalogFile := "PGS001835_hmPOS_GRCh38.txt"
+	p := pgs.NewPGS()
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	fmt.Printf("======== %s ========\n", p.PgsID)
+	p.LoadStats()
+	cohort := solver.NewCohort(p)
+	populations := tools.LoadAncestry()
+	individuals := allSamples()
+
+	chunkNum, chunkSize := getChunkInfo(len(individuals))
+	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
+	filepath := path.Join(resultFolder, fmt.Sprintf("%s-%d.json", p.PgsID, chunkNum))
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	var individual string
+	var solmap map[string][]uint8
+	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
+		if i >= len(individuals) {
+			break
+		}
+		individual = individuals[i]
+		fmt.Printf("%s\n", individual)
+		indPop := populations[individual]
+		if strings.Contains(indPop, ",") {
+			indPop = strings.Split(indPop, ",")[0]
+		}
+		majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
+		out := newAccuracyOutput(individual, indPop, cohort[individual].Score,
+			solver.CalculateFullSequenceLikelihood(cohort[individual].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles),
+			solver.Accuracy(majorReference, cohort[individual].Genotype))
+
+		slv := solver.NewDP(cohort[individual].Score, p, indPop)
+		//
+		if len(p.Loci) < DeterminismLimit {
+			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+		} else {
+			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+		}
+		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+		out.LikelihoodAccuracies = make([]string, 0, len(solutions))
+		for _, solution := range solutions {
+			out.LikelihoodAccuracies = append(out.LikelihoodAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
+		}
+		output = append(output, out)
+	}
+	if err = encoder.Encode(output); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+}
+
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
@@ -110,8 +197,8 @@ func findAllSolutions() {
 	//INDIVIDUAL := "NA20507"
 	//INDIVIDUAL := "NA07037"
 	//INDIVIDUAL := "HG03015"
-	INDIVIDUAL := "HG01253"
-	//INDIVIDUAL := "NA20765"
+	//INDIVIDUAL := "HG01253"
+	INDIVIDUAL := "NA20765"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
@@ -132,7 +219,10 @@ func findAllSolutions() {
 	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002264_hmPOS_GRCh38.txt"
-	catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS004246_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS004249_hmPOS_GRCh38.txt"
+	catalogFile := "PGS001868_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -144,6 +234,9 @@ func findAllSolutions() {
 
 	populations := tools.LoadAncestry()
 	indPop := populations[INDIVIDUAL]
+	if strings.Contains(indPop, ",") {
+		indPop = strings.Split(indPop, ",")[0]
+	}
 	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop)
 
 	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
@@ -160,8 +253,8 @@ func findAllSolutions() {
 		}
 	}
 	fmt.Println()
-	//solmap := slv.SolveFromScratchProbabilistic()
-	solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+	solmap := slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+	//solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
 	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
@@ -182,7 +275,7 @@ func findAllSolutions() {
 	}
 }
 
-type Output struct {
+type sortingOutput struct {
 	Individual                   string
 	Ancestry                     string
 	Score                        string
@@ -194,12 +287,12 @@ type Output struct {
 	LikelihoodSpectrumAccuracies []string
 }
 
-func newOutput(ind string, pop string, score *apd.Decimal, trueLikelihood, trueSpectrum, refAcc float32) *Output {
+func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood, trueSpectrum, refAcc float32) *sortingOutput {
 	fscore, err := score.Float64()
 	if err != nil {
 		log.Fatalf("Error converting score to float64: %v", err)
 	}
-	return &Output{
+	return &sortingOutput{
 		Individual:        ind,
 		Ancestry:          pop,
 		Score:             fmt.Sprintf("%.3f", fscore),
@@ -209,10 +302,10 @@ func newOutput(ind string, pop string, score *apd.Decimal, trueLikelihood, trueS
 	}
 }
 
-func sortingChoice() {
+func sortingChoiceParallel() {
+	DeterminismLimit := 35
 	resultFolder := "results/sorting"
-	output := make([]*Output, 0)
-	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	output := make([]*sortingOutput, 0)
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
@@ -220,6 +313,7 @@ func sortingChoice() {
 	//catalogFile := "PGS000753_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
 	catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000851_hmPOS_GRCh38.txt"
 	samplesPerPopulation := 10
 	p := pgs.NewPGS()
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
@@ -227,6 +321,123 @@ func sortingChoice() {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
 	}
+	fmt.Printf("======== %s ========\n", p.PgsID)
+	p.LoadStats()
+	cohort := solver.NewCohort(p)
+	populations := tools.LoadAncestry()
+	sortedSamples := cohort.SortByScore()
+	sortedScores := make([]float64, len(sortedSamples))
+	for i, sample := range sortedSamples {
+		sortedScores[i], _ = cohort[sample].Score.Float64()
+	}
+	minScore, maxScore := sortedScores[0], sortedScores[len(sortedScores)-1]
+	step := (maxScore - minScore) / float64(samplesPerPopulation)
+	individuals := make([]string, 0, samplesPerPopulation*len(pgs.POPULATIONS))
+	var count int
+	for _, ppl := range pgs.POPULATIONS {
+		score := minScore
+		count = 0
+		for i := 0; i < len(sortedSamples); i++ {
+			if sortedScores[i] < score || populations[sortedSamples[i]] != ppl || sortedScores[i] == 0 {
+				continue
+			}
+			individuals = append(individuals, sortedSamples[i])
+			score += step
+			count += 1
+			if count == samplesPerPopulation {
+				break
+			}
+		}
+	}
+	chunkNum, chunkSize := getChunkInfo(len(individuals))
+	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
+	filepath := path.Join(resultFolder, fmt.Sprintf("%s-%d.json", p.PgsID, chunkNum))
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	var individual string
+	var solmap map[string][]uint8
+	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
+		if i >= len(individuals) {
+			break
+		}
+		individual = individuals[i]
+		fmt.Printf("%s\n", individual)
+		indPop := populations[individual]
+		if strings.Contains(indPop, ",") {
+			indPop = strings.Split(indPop, ",")[0]
+		}
+		majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
+		out := newSortingOutput(individual, indPop, cohort[individual].Score,
+			solver.CalculateFullSequenceLikelihood(cohort[individual].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles),
+			solver.CalculateSolutionSpectrumDistance(cohort[individual].Genotype, p.PopulationStats[indPop], p.EffectAlleles),
+			solver.Accuracy(majorReference, cohort[individual].Genotype))
+
+		slv := solver.NewDP(cohort[individual].Score, p, indPop)
+		//
+		if len(p.Loci) < DeterminismLimit {
+			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+		} else {
+			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+		}
+		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+		out.LikelihoodAccuracies = make([]string, 0, len(solutions))
+		for _, solution := range solutions {
+			out.LikelihoodAccuracies = append(out.LikelihoodAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
+		}
+		//
+		if len(p.Loci) < DeterminismLimit {
+			solmap = slv.SolveFromScratchDeterministic(solver.UseSpectrum)
+		} else {
+			solmap = slv.SolveFromScratchProbabilistic(solver.UseSpectrum)
+		}
+		solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseSpectrum)
+		out.SpectrumAccuracies = make([]string, 0, len(solutions))
+		for _, solution := range solutions {
+			out.SpectrumAccuracies = append(out.SpectrumAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
+		}
+		//
+		if len(p.Loci) < DeterminismLimit {
+			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihoodAndSpectrum)
+		} else {
+			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihoodAndSpectrum)
+		}
+		solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihoodAndSpectrum)
+		out.LikelihoodSpectrumAccuracies = make([]string, 0, len(solutions))
+		for _, solution := range solutions {
+			out.LikelihoodSpectrumAccuracies = append(out.LikelihoodSpectrumAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
+		}
+		output = append(output, out)
+	}
+	if err = encoder.Encode(output); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+}
+
+func sortingChoice() {
+	DeterminismLimit := 35
+	resultFolder := "results/sorting"
+	output := make([]*sortingOutput, 0)
+	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000753_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000851_hmPOS_GRCh38.txt"
+	samplesPerPopulation := 10
+	p := pgs.NewPGS()
+	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	fmt.Printf("======== %s ========\n", p.PgsID)
 	p.LoadStats()
 	cohort := solver.NewCohort(p)
 	populations := tools.LoadAncestry()
@@ -255,19 +466,23 @@ func sortingChoice() {
 		}
 	}
 
+	fmt.Println(individuals)
 	var solmap map[string][]uint8
 	for _, individual := range individuals {
 		fmt.Printf("%s\n", individual)
 		indPop := populations[individual]
+		if strings.Contains(indPop, ",") {
+			indPop = strings.Split(indPop, ",")[0]
+		}
 		majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
-		out := newOutput(individual, indPop, cohort[individual].Score,
+		out := newSortingOutput(individual, indPop, cohort[individual].Score,
 			solver.CalculateFullSequenceLikelihood(cohort[individual].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles),
 			solver.CalculateSolutionSpectrumDistance(cohort[individual].Genotype, p.PopulationStats[indPop], p.EffectAlleles),
 			solver.Accuracy(majorReference, cohort[individual].Genotype))
 
 		slv := solver.NewDP(cohort[individual].Score, p, indPop)
 		//
-		if len(p.Loci) < 40 {
+		if len(p.Loci) < DeterminismLimit {
 			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
 		} else {
 			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
@@ -278,7 +493,7 @@ func sortingChoice() {
 			out.LikelihoodAccuracies = append(out.LikelihoodAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
 		}
 		//
-		if len(p.Loci) < 40 {
+		if len(p.Loci) < DeterminismLimit {
 			solmap = slv.SolveFromScratchDeterministic(solver.UseSpectrum)
 		} else {
 			solmap = slv.SolveFromScratchProbabilistic(solver.UseSpectrum)
@@ -289,7 +504,7 @@ func sortingChoice() {
 			out.SpectrumAccuracies = append(out.SpectrumAccuracies, fmt.Sprintf("%.3f", solver.Accuracy(solution, cohort[individual].Genotype)))
 		}
 		//
-		if len(p.Loci) < 40 {
+		if len(p.Loci) < DeterminismLimit {
 			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihoodAndSpectrum)
 		} else {
 			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihoodAndSpectrum)
@@ -449,10 +664,10 @@ func accuracyLikelihood() {
 	resFolder := "results/accuracyLikelihood"
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -486,8 +701,8 @@ func accuracyLikelihood() {
 			indPop = strings.Split(indPop, ",")[0]
 		}
 		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
-		solmap := slv.SolveFromSavedProbabilistic(solver.UseLikelihood)
-		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihoodAndSpectrum)
+		solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
 		result := NewResult(samples[i], cohort[samples[i]].Score)
 		for _, solution := range solutions {
 			acc = solver.Accuracy(solution, cohort[samples[i]].Genotype)
@@ -959,3 +1174,48 @@ func numHeterozygous(seq []uint8) int {
 	}
 	return num
 }
+
+//func selectPGS() {
+//	var pgsToNumVariants map[string]int
+//	var pgsToPgp map[string]string
+//	numVariantsFile, err := os.Open("results/filtered_pgs.json")
+//	if err != nil {
+//		log.Fatalf("Error opening file: %v", err)
+//	}
+//	defer numVariantsFile.Close()
+//	decoder := json.NewDecoder(numVariantsFile)
+//	err = decoder.Decode(&pgsToNumVariants)
+//	if err != nil {
+//		log.Fatalf("Error decoding num variants json: %v", err)
+//	}
+//	pgpFile, err := os.Open("results/pgs_pgp.json")
+//	if err != nil {
+//		log.Fatalf("Error opening file: %v", err)
+//	}
+//	defer pgpFile.Close()
+//	decoder = json.NewDecoder(pgpFile)
+//	err = decoder.Decode(&pgsToPgp)
+//	if err != nil {
+//		log.Fatalf("Error decoding pgp json: %v", err)
+//	}
+//
+//	baggedPgp := make(map[string]struct{})
+//	pgsToSelect := make(map[string]int)
+//
+//	for i := 5; i <= 50; i += 5 {
+//		if i == 50 {
+//			i = 49
+//		}
+//		for pgs, num := range pgsToNumVariants {
+//			if num == i {
+//				if _, ok := baggedPgp[pgsToPgp[pgs]]; ok {
+//					continue
+//				}
+//				pgsToSelect[pgs] = num
+//				baggedPgp[pgsToPgp[pgs]] = struct{}{}
+//				break
+//			}
+//		}
+//	}
+//	fmt.Println(pgsToSelect)
+//}

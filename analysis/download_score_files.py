@@ -13,7 +13,7 @@ ftp.login()
 
 # List all folders on the server
 # folders = ftp.nlst(ftp_path)
-folders = [f"PGS000{i}" for i in range(1000, 1000)] + [f"PGS00{i}" for i in range(2139, 3979)]
+folders = [f"PGS00{i}" for i in range(4254, 4859)]
 # print(folders)
 
 # Iterate through folders

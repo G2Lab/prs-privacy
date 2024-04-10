@@ -125,6 +125,7 @@ type PGS struct {
 	GenomeBuild     string
 	WeightType      string
 	HmPOSBuild      string
+	PgpID           string
 	NumVariants     int
 	Fieldnames      []string
 	Variants        map[string]*Variant
@@ -176,6 +177,8 @@ scannerLoop:
 				p.WeightType = fields[1]
 			case "hmpos_build":
 				p.HmPOSBuild = fields[1]
+			case "pgp_id":
+				p.PgpID = fields[1]
 			case "variants_number":
 				if value, err := strconv.Atoi(fields[1]); err == nil {
 					p.NumVariants = value
@@ -210,8 +213,9 @@ scannerLoop:
 				}
 				// If there is no mapping, we skip the variant
 				if len(value) == 0 {
-					fmt.Printf("No mapping for variant %s\n", values[0])
-					continue scannerLoop
+					//fmt.Printf("%s: No mapping for variant %s\n", p.PgsID, values[0])
+					value = "-1"
+					//continue scannerLoop
 				}
 			}
 			fields[p.Fieldnames[i]] = value
@@ -249,7 +253,7 @@ scannerLoop:
 		p.StudyEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
-	fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
+	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
 	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))

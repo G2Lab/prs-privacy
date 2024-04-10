@@ -6,6 +6,12 @@ import (
 )
 
 func ParseLocus(locus string) (int, int, error) {
+	if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") {
+		return 0, 0, nil
+	}
+	if strings.HasPrefix(locus, "-1") {
+		return 0, 0, nil
+	}
 	chr, err := strconv.Atoi(strings.Split(locus, ":")[0])
 	if err != nil {
 		return 0, 0, err

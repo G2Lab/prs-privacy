@@ -3,7 +3,6 @@ package solver
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"os"
@@ -24,12 +23,12 @@ type DP struct {
 }
 
 type Node struct {
-	Pointers        map[uint8]uint8
-	TopPointer      uint8
-	TopLikelihood   float32
-	TopChiValue     float32
-	CurrentBinIdx   uint8
-	CurrentBinCount uint8
+	Pointers      map[uint8]uint8
+	TopPointer    uint8
+	TopLikelihood float32
+	//TopChiValue     float32
+	//CurrentBinIdx   uint8
+	//CurrentBinCount uint8
 }
 
 type ProbabilisticState struct {
@@ -65,24 +64,26 @@ func newDeterministicState(indices [][]int, tables []map[int64][]uint8, betas []
 	return &DeterministicState{Indices: indices, Tables: tables, Betas: betas}
 }
 
-func newNode(ptr uint8, lkl, chi float32, idx, cnt uint8) *Node {
+func newNode(ptr uint8, lkl float32) *Node {
+	//func newNode(ptr uint8, lkl, chi float32, idx, cnt uint8) *Node {
 	return &Node{
-		Pointers:        make(map[uint8]uint8, 1),
-		TopPointer:      ptr,
-		TopLikelihood:   lkl,
-		TopChiValue:     chi,
-		CurrentBinIdx:   idx,
-		CurrentBinCount: cnt,
+		Pointers:      make(map[uint8]uint8, 1),
+		TopPointer:    ptr,
+		TopLikelihood: lkl,
+		//TopChiValue:     chi,
+		//CurrentBinIdx:   idx,
+		//CurrentBinCount: cnt,
 	}
 }
 
-func newUpdate(sum int64, likelihood, chi float32, binIdx, binCount uint8, fptr, bptr uint8) Update {
+func newUpdate(sum int64, likelihood float32, fptr, bptr uint8) Update {
+	//func newUpdate(sum int64, likelihood, chi float32, binIdx, binCount uint8, fptr, bptr uint8) Update {
 	return Update{
 		sum:        sum,
 		likelihood: likelihood,
-		chi:        chi,
-		binIdx:     binIdx,
-		binCount:   binCount,
+		//chi:        chi,
+		//binIdx:     binIdx,
+		//binCount:   binCount,
 		forwardPtr: fptr,
 		backPtr:    bptr,
 	}
@@ -124,6 +125,7 @@ func (dp *DP) SolveFromSavedProbabilistic(sorting uint8) map[string][]uint8 {
 }
 
 func (dp *DP) SolveFromScratchProbabilistic(sorting uint8) map[string][]uint8 {
+	fmt.Println("Solving probabilistically")
 	numSegments := 2
 	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
 
@@ -171,7 +173,7 @@ func (dp *DP) SolveFromSavedDeterministic(sorting uint8) map[string][]uint8 {
 func (dp *DP) SolveFromScratchDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
-	fmt.Printf("Loci: %v\n", dp.p.Loci)
+	//fmt.Printf("Loci: %v\n", dp.p.Loci)
 	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
 
 	state := dp.BuildDeterministicState(numSegments)
@@ -194,34 +196,35 @@ func (dp *DP) SolveFromScratchDeterministic(sorting uint8) map[string][]uint8 {
 
 func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uint8]int64) {
 	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-	freqSortedIndices := sortByEffectAlleleFreq(dp.stats.AF, dp.p.EffectAlleles)
+	//freqSortedIndices := sortByEffectAlleleFreq(dp.stats.AF, dp.p.EffectAlleles)
 
 	var splitIdxs []int
 	splitIdxs = []int{0, len(weights) / 2, len(weights)}
-	// Make sure that the frequency bins are not split
-	preSplitIdx := splitIdxs[1] - 1
-	postSplitIdx := splitIdxs[1]
-	prevBin := tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[preSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[preSplitIdx]]], dp.stats.FreqBinBounds)
-	nextBin := tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[postSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[postSplitIdx]]], dp.stats.FreqBinBounds)
-	for prevBin == nextBin && preSplitIdx > 0 && postSplitIdx < len(weights) {
-		preSplitIdx--
-		prevBin = tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[preSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[preSplitIdx]]], dp.stats.FreqBinBounds)
-		if prevBin != nextBin {
-			splitIdxs[1] = preSplitIdx + 1
-			break
-		}
-		postSplitIdx++
-		nextBin = tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[postSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[postSplitIdx]]], dp.stats.FreqBinBounds)
-		if prevBin != nextBin {
-			splitIdxs[1] = postSplitIdx
-			break
-		}
-	}
+	//// Make sure that the frequency bins are not split
+	//preSplitIdx := splitIdxs[1] - 1
+	//postSplitIdx := splitIdxs[1]
+	//prevBin := tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[preSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[preSplitIdx]]], dp.stats.FreqBinBounds)
+	//nextBin := tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[postSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[postSplitIdx]]], dp.stats.FreqBinBounds)
+	//for prevBin == nextBin && preSplitIdx > 0 && postSplitIdx < len(weights) {
+	//	preSplitIdx--
+	//	prevBin = tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[preSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[preSplitIdx]]], dp.stats.FreqBinBounds)
+	//	if prevBin != nextBin {
+	//		splitIdxs[1] = preSplitIdx + 1
+	//		break
+	//	}
+	//	postSplitIdx++
+	//	nextBin = tools.ValueToBinIdx(dp.stats.AF[freqSortedIndices[postSplitIdx]][dp.p.EffectAlleles[freqSortedIndices[postSplitIdx]]], dp.stats.FreqBinBounds)
+	//	if prevBin != nextBin {
+	//		splitIdxs[1] = postSplitIdx
+	//		break
+	//	}
+	//}
 	indices := make([][]int, numSeg)
 	for i := 0; i < numSeg; i++ {
 		indices[i] = make([]int, 0)
 		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
-			indices[i] = append(indices[i], freqSortedIndices[j])
+			indices[i] = append(indices[i], j)
+			//indices[i] = append(indices[i], freqSortedIndices[j])
 		}
 	}
 	betas := make([]map[uint8]int64, numSeg)
@@ -347,12 +350,12 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 				switch sorting {
 				case UseLikelihood:
 					mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
-				case UseSpectrum:
-					mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
-				case UseLikelihoodAndSpectrum:
-					mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].TopLikelihood, tables[0][leftSum].TopChiValue)+
-						CombineLikelihoodAndChiSquared(tables[1][t-leftSum].TopLikelihood, tables[1][t-leftSum].TopChiValue),
-						[]int64{leftSum, t - leftSum}, matchHeapSize)
+					//case UseSpectrum:
+					//	mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
+					//case UseLikelihoodAndSpectrum:
+					//	mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].TopLikelihood, tables[0][leftSum].TopChiValue)+
+					//		CombineLikelihoodAndChiSquared(tables[1][t-leftSum].TopLikelihood, tables[1][t-leftSum].TopChiValue),
+					//		[]int64{leftSum, t - leftSum}, matchHeapSize)
 				}
 				//mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
 				//mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
@@ -458,27 +461,29 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 	table := make(map[int64]*Node)
 	// the fitness of all the snps being 0
 	allNonEffectLikelihood := calculateLociLikelihood([]uint8{}, indices, stats.AF, effectAlleles)
-	fmt.Printf("Indices %v\n", indices)
-	fmt.Printf("All zero likelihood: %f\n", allNonEffectLikelihood)
-
-	firstBucketIdx := tools.ValueToBinIdx(stats.AF[indices[0]][effectAlleles[indices[0]]], stats.FreqBinBounds)
-	lastBucketIdx := tools.ValueToBinIdx(stats.AF[indices[len(indices)-1]][effectAlleles[indices[len(indices)-1]]], stats.FreqBinBounds)
-	allNonEffectFreqSpec := make([]float32, lastBucketIdx-firstBucketIdx+1)
-	freqSpecSegment := stats.FreqSpectrum[firstBucketIdx : lastBucketIdx+1]
-	allNonEffectDistance := CalculateTwoSpectrumDistance(allNonEffectFreqSpec, freqSpecSegment)
-	fmt.Printf("First bucket %d, last bucket %d, total %d\n", firstBucketIdx, lastBucketIdx, len(stats.FreqSpectrum))
-	fmt.Printf("All zero distance: %f\n", allNonEffectDistance)
+	//fmt.Printf("Indices %v\n", indices)
+	//fmt.Printf("All zero likelihood: %f\n", allNonEffectLikelihood)
+	//
+	//firstBucketIdx := tools.ValueToBinIdx(stats.AF[indices[0]][effectAlleles[indices[0]]], stats.FreqBinBounds)
+	//lastBucketIdx := tools.ValueToBinIdx(stats.AF[indices[len(indices)-1]][effectAlleles[indices[len(indices)-1]]], stats.FreqBinBounds)
+	//allNonEffectFreqSpec := make([]float32, lastBucketIdx-firstBucketIdx+1)
+	//freqSpecSegment := stats.FreqSpectrum[firstBucketIdx : lastBucketIdx+1]
+	//allNonEffectDistance := CalculateTwoSpectrumDistance(allNonEffectFreqSpec, freqSpecSegment)
+	//fmt.Printf("First bucket %d, last bucket %d, total %d\n", firstBucketIdx, lastBucketIdx, len(stats.FreqSpectrum))
+	//fmt.Printf("All zero distance: %f\n", allNonEffectDistance)
 	// add the zero weight
-	table[0] = newNode(math.MaxUint8, allNonEffectLikelihood, allNonEffectDistance, 0, 0)
+	//table[0] = newNode(math.MaxUint8, allNonEffectLikelihood, allNonEffectDistance, 0, 0)
+	table[0] = newNode(math.MaxUint8, allNonEffectLikelihood)
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
 
 	var updates []Update
 	var ok bool
 	var k, nextPtr uint8
-	var nextBinIdx, nextBinCount uint8
+	//var nextBinIdx, nextBinCount uint8
 	var effectAllele, referenceAllele uint8
-	var nextLikelihood, nextChi float32
+	var nextLikelihood float32
+	//var nextChi float32
 	var prevSum, nextSum, weight int64
 	for i, pos := range indices {
 		fmt.Printf("Position %d/%d\n", i, len(betas))
@@ -491,7 +496,7 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 		newSums := make([]int64, 0)
 		effectAllele = effectAlleles[pos]
 		referenceAllele = ^effectAllele & 1
-		nextBinIdx = uint8(tools.ValueToBinIdx(stats.AF[pos][effectAllele], stats.FreqBinBounds))
+		//nextBinIdx = uint8(tools.ValueToBinIdx(stats.AF[pos][effectAllele], stats.FreqBinBounds))
 		for _, prevSum = range existingSums {
 			for k = 1; k <= pgs.Ploidy; k++ {
 				nextPtr = pgs.Ploidy*uint8(pos) + k - 1
@@ -502,46 +507,49 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 				}
 				nextLikelihood = table[prevSum].TopLikelihood + float32(k)*afToLikelihood(stats.AF[pos][effectAllele]) -
 					float32(k)*afToLikelihood(stats.AF[pos][referenceAllele]) + float32(pgs.Ploidy-k)*afToLikelihood(pgs.Ploidy)
-				nextBinCount = table[prevSum].CurrentBinCount + k
-				if nextBinIdx != table[prevSum].CurrentBinIdx {
-					nextBinCount = k
-				}
-				nextChi = table[prevSum].TopChiValue + IncrementObservedInSpectrum(float32(k), float32(nextBinCount)-1, stats.FreqSpectrum[nextBinIdx])
+				//nextBinCount = table[prevSum].CurrentBinCount + k
+				//if nextBinIdx != table[prevSum].CurrentBinIdx {
+				//	nextBinCount = k
+				//}
+				//nextChi = table[prevSum].TopChiValue + IncrementObservedInSpectrum(float32(k), float32(nextBinCount)-1, stats.FreqSpectrum[nextBinIdx])
 				if _, ok = table[nextSum]; !ok {
-					table[nextSum] = newNode(nextPtr, nextLikelihood, nextChi, nextBinIdx, nextBinCount)
+					//table[nextSum] = newNode(nextPtr, nextLikelihood, nextChi, nextBinIdx, nextBinCount)
+					table[nextSum] = newNode(nextPtr, nextLikelihood)
 					newSums = append(newSums, nextSum)
 				}
 				table[nextSum].Pointers[nextPtr] = table[prevSum].TopPointer
 				switch sorting {
 				case UseLikelihood:
 					if nextLikelihood < table[nextSum].TopLikelihood {
-						updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+						//updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+						updates = append(updates, newUpdate(nextSum, nextLikelihood, nextPtr, table[prevSum].TopPointer))
 					}
-				case UseSpectrum:
-					if nextChi < table[nextSum].TopChiValue {
-						updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
-					}
-				case UseLikelihoodAndSpectrum:
-					if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
-						CombineLikelihoodAndChiSquared(table[nextSum].TopLikelihood, table[nextSum].TopChiValue) {
-						updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
-					}
+					//case UseSpectrum:
+					//	if nextChi < table[nextSum].TopChiValue {
+					//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+					//	}
+					//case UseLikelihoodAndSpectrum:
+					//	if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
+					//		CombineLikelihoodAndChiSquared(table[nextSum].TopLikelihood, table[nextSum].TopChiValue) {
+					//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+					//	}
 				}
 			}
 		}
 		// We postpone the updates to avoid the sums for the same locus stacking up on each other
 		for u := range updates {
 			// If we had updated with something better before, sum1 + 1k = sum2 +2k, which we do not want
-			if (sorting == UseLikelihood && table[updates[u].sum].TopLikelihood < updates[u].likelihood) ||
-				(sorting == UseSpectrum && table[updates[u].sum].TopChiValue < updates[u].chi) ||
-				(sorting == UseLikelihoodAndSpectrum && CombineLikelihoodAndChiSquared(table[updates[u].sum].TopLikelihood,
-					table[updates[u].sum].TopChiValue) < CombineLikelihoodAndChiSquared(updates[u].likelihood, updates[u].chi)) {
+			if table[updates[u].sum].TopLikelihood < updates[u].likelihood {
+				//if (sorting == UseLikelihood && table[updates[u].sum].TopLikelihood < updates[u].likelihood) ||
+				//(sorting == UseSpectrum && table[updates[u].sum].TopChiValue < updates[u].chi) ||
+				//(sorting == UseLikelihoodAndSpectrum && CombineLikelihoodAndChiSquared(table[updates[u].sum].TopLikelihood,
+				//	table[updates[u].sum].TopChiValue) < CombineLikelihoodAndChiSquared(updates[u].likelihood, updates[u].chi)) {
 				continue
 			}
 			table[updates[u].sum].TopLikelihood = updates[u].likelihood
-			table[updates[u].sum].TopChiValue = updates[u].chi
-			table[updates[u].sum].CurrentBinIdx = updates[u].binIdx
-			table[updates[u].sum].CurrentBinCount = updates[u].binCount
+			//table[updates[u].sum].TopChiValue = updates[u].chi
+			//table[updates[u].sum].CurrentBinIdx = updates[u].binIdx
+			//table[updates[u].sum].CurrentBinCount = updates[u].binCount
 			table[updates[u].sum].TopPointer = updates[u].forwardPtr
 		}
 		existingSums = append(existingSums, newSums...)
@@ -565,11 +573,11 @@ func calculateSubsetSumTable(betas map[uint8]int64, upperBound, lowerBound int64
 	})
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
-	var k, i uint8
+	var k uint8
 	var prevSum, nextSum, weight int64
 	for _, pos := range indices {
-		i++
-		fmt.Printf("Position %d/%d\n", i, len(indices))
+		//i++
+		//fmt.Printf("Position %d/%d\n", i, len(indices))
 		if betas[pos] > 0 {
 			lowerBound += pgs.Ploidy * betas[pos]
 		} else {
@@ -610,7 +618,8 @@ func backtrackWithPointers(sum int64, table map[int64]*Node, weights map[uint8]i
 
 func (dp *DP) combinePartials(segmentNum, totalSegments int, indices [][]int, input []uint8, lkl float32, score *apd.BigInt,
 	genotypes [][][]uint8, solHeap *genHeap, heapSize int, sorting uint8) {
-	var chi, newLkl float32
+	//var chi, newLkl float32
+	var newLkl float32
 	if segmentNum == totalSegments {
 		if dp.rounder.RoundedMode {
 			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
@@ -620,12 +629,12 @@ func (dp *DP) combinePartials(segmentNum, totalSegments int, indices [][]int, in
 		switch sorting {
 		case UseLikelihood:
 			solHeap.addToGenHeap(lkl, input, heapSize)
-		case UseSpectrum:
-			chi = ChiSquaredValue(CalculateLociEASpectrum(input, dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
-			solHeap.addToGenHeap(chi, input, heapSize)
-		case UseLikelihoodAndSpectrum:
-			chi = ChiSquaredValue(CalculateLociEASpectrum(input, dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
-			solHeap.addToGenHeap(CombineLikelihoodAndChiSquared(lkl, chi), input, heapSize)
+		//case UseSpectrum:
+		//	chi = ChiSquaredValue(CalculateLociEASpectrum(input, dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
+		//	solHeap.addToGenHeap(chi, input, heapSize)
+		//case UseLikelihoodAndSpectrum:
+		//	chi = ChiSquaredValue(CalculateLociEASpectrum(input, dp.stats.AF, dp.stats.FreqBinBounds, dp.p.EffectAlleles), dp.stats.FreqSpectrum)
+		//	solHeap.addToGenHeap(CombineLikelihoodAndChiSquared(lkl, chi), input, heapSize)
 		default:
 			log.Fatalln("Unknown sorting method")
 		}
@@ -759,11 +768,11 @@ func sortByEffectAlleleFreq(m map[int][]float32, efal []uint8) []int {
 	sort.Slice(indices, func(i, j int) bool {
 		return m[indices[i]][efal[indices[i]]] < m[indices[j]][efal[indices[j]]]
 	})
-	fmt.Println("Sorted indices by effect allele frequency:")
-	for i := range indices {
-		fmt.Printf("%d:%f ", indices[i], m[indices[i]][efal[indices[i]]])
-	}
-	fmt.Println()
+	//fmt.Println("Sorted indices by effect allele frequency:")
+	//for i := range indices {
+	//	fmt.Printf("%d:%f ", indices[i], m[indices[i]][efal[indices[i]]])
+	//}
+	//fmt.Println()
 
 	return indices
 }

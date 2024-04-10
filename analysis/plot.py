@@ -1,9 +1,12 @@
+from collections import defaultdict
 import csv
 import fnmatch
 import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pandas as pd
+import seaborn as sns
 import statistics
 
 
@@ -210,21 +213,23 @@ def bisect(array, value):
 def accuracy_likelihood(pgs_id):
     directory = "results/accuracyLikelihood/"
     filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                 fnmatch.fnmatch(filename, f"*{pgs_id}-s-eaf*")]
+                 fnmatch.fnmatch(filename, f"*{pgs_id}-*")]
     scores, accuracies, likelihoods = [], [], []
     chosen_acc, chosen_like = [], []
     true_like = []
     lowest_like, lowest_like_acc = [], []
     for filepath in filepaths:
+        print(filepath)
         with open(filepath, 'r') as file:
             for row in file:
+                # print(row)
                 row = row.strip()
                 data = json.loads(row)
                 scores.append(float(data["Score"]))
                 chosen_acc.append(float(data["Accuracies"][0]))
                 chosen_like.append(float(data["Likelihoods"][0]))
                 acc = list(map(lambda x: float(x), data["Accuracies"]))
-                true_like.append(float(data["Likelihoods"][acc.index(1.0)]))
+                true_like.append(float(data["Likelihoods"][acc.index(1.0)]) if 1.0 in acc else 0.0)
                 lowest_index = acc.index(min(acc))
                 lowest_like.append(float(data["Likelihoods"][lowest_index]))
                 lowest_like_acc.append(float(data["Accuracies"][lowest_index]))
@@ -385,7 +390,17 @@ def weight_to_af():
     plt.show()
 
 
-def likelihood_spectrum_accuracy(pgs_id):
+def likelihood_spectrum_select(pgs_id):
+    num_variants = {
+        "PGS000073": 10,
+        "PGS000037": 15,
+        "PGS000639": 20,
+        "PGS002302": 28,
+        "PGS000154": 30,
+        "PGS000851": 37,
+        "PGS003760": 49,
+    }
+    pops = ["AFR", "AMR", "EAS", "EUR", "SAS"]
     directory = "results/sorting/"
     filepath = os.path.join(directory, pgs_id+".json")
     with open(filepath, 'r') as f:
@@ -403,37 +418,248 @@ def likelihood_spectrum_accuracy(pgs_id):
         spec_acc.append(list(map(lambda x: float(x), result["SpectrumAccuracies"])))
         lkl_spec_acc.append(list(map(lambda x: float(x), result["LikelihoodSpectrumAccuracies"])))
 
-    print(f"Median and mean likelihood accuracy: {np.median([l[0] for l in lkl_acc])}, {np.mean([l[0] for l in lkl_acc])}")
-    print(f"Median and mean spectrum accuracy: {np.median([l[0] for l in spec_acc])}, {np.mean([l[0] for l in spec_acc])}")
-    print(f"Median and mean likelihood+spectrum accuracy: {np.median([l[0] for l in lkl_spec_acc])}, {np.mean([l[0] for l in lkl_spec_acc])}")
+    # print(f"Median and mean likelihood accuracy: {np.median([l[0] for l in lkl_acc])}, {np.mean([l[0] for l in lkl_acc])}")
+    # print(f"Median and mean spectrum accuracy: {np.median([l[0] for l in spec_acc])}, {np.mean([l[0] for l in spec_acc])}")
+    # print(f"Median and mean likelihood+spectrum accuracy: {np.median([l[0] for l in lkl_spec_acc])}, {np.mean([l[0] for l in lkl_spec_acc])}")
 
     colors = ['firebrick', 'sandybrown', 'forestgreen', 'mediumorchid', 'dodgerblue', 'limegreen', 'tomato']
     markers = ['.', '*', 'v', "^", "+"]
 
     # Create a figure and axis
-    fig, ax = plt.subplots()
+    fig1, ax1 = plt.subplots(figsize=(12, 4))
+    for i, pop in enumerate(pops):
+        score, acc = [], []
+        for j, ind in enumerate(individuals):
+            if pop == ancestry[j]:
+                score.append(scores[j])
+                acc.append(lkl_acc[j][0])
+        ax1.scatter(score, acc, color=colors[i], s=10, label=pop)
 
-    # Plot the accuracies for each individual
-    for i, (anc, score, lkl, spec, lkl_spec) in enumerate(zip(ancestry, scores, lkl_acc, spec_acc, lkl_spec_acc)):
-        mrk = markers[i % 5]
-        ax.scatter(score, lkl[0], color=colors[0], s=6, marker=mrk, label="Likelihood" if i == 0 else None)
-        ax.scatter(score, spec[0], color=colors[1], s=6, marker=mrk, label="Spectrum" if i == 0 else None)
-        ax.scatter(score, lkl_spec[0], color=colors[2], s=6, marker=mrk, label="Likelihood+Spectrum" if i == 0 else None)
+    fig2, ax2 = plt.subplots(figsize=(12, 4))
+    tlkl, acc = [], []
+    for j, ind in enumerate(individuals):
+        tlkl.append(true_lkl[j])
+        acc.append(lkl_acc[j][0])
 
-    # for i in range(0, 5):
-    #     ax.plot([scores[j+i] for j in range(0, len(scores)-5, 5)], [lkl_acc[j+i][i] for j in range(0, len(scores)-5, 5)],
-    #             linestyle='-', color=colors[i])
+    ax2.scatter(tlkl, acc, color=colors[0], s=10)
 
     # Set axis labels and title
-    ax.set_xlabel("Score")
-    ax.set_ylabel("Accuracy")
-    ax.set_title(f"{pgs_id}")
+    ax1.set_xlabel("Score")
+    ax1.set_ylabel("Accuracy")
+    ax1.set_title(f"{pgs_id}({num_variants[pgs_id]} variants): The effect of ancestry and score")
+
+    ax2.set_xlabel("True Likelihood (less is more common)")
+    ax2.set_ylabel("Accuracy")
+    ax2.set_title(f"{pgs_id}({num_variants[pgs_id]} variants): The effect of the true likelihood")
 
     # Adjust the legend
-    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax1.legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
+    plt.tight_layout()
+    fig1.savefig(f'{pgs_id}_ancestry.png', dpi=300, bbox_inches='tight')
+    fig2.savefig(f'{pgs_id}_likelihood.png', dpi=300, bbox_inches='tight')
     # Show the plot
-    plt.show()
+    # plt.show()
+
+
+def likelihood_spectrum_total():
+    num_variants = {
+        "PGS000073": 10,
+        "PGS000037": 15,
+        "PGS000639": 20,
+        "PGS002302": 28,
+        "PGS000154": 30,
+        "PGS000851": 37,
+        "PGS003760": 49,
+    }
+    directory = "results/sorting/"
+    pgs_ids = ["PGS000073", "PGS000037", "PGS000639", "PGS002302", "PGS000154", "PGS000851", "PGS003760"]
+    loci, reference_median, reference_mean = [], [], []
+    likelihoods_median, spectra_median, likelihoods_spectra_median = [], [], []
+    likelihoods_mean, spectra_mean, likelihoods_spectra_mean = [], [], []
+    for pgs_id in pgs_ids:
+        filepath = os.path.join(directory, pgs_id+".json")
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        individuals, ancestry, scores, true_lkl, true_spec, ref_acc = [], [], [], [], [], []
+        lkl_acc, spec_acc, lkl_spec_acc = [], [], []
+        for result in data:
+            individuals.append(result["Individual"])
+            ancestry.append(result["Ancestry"])
+            scores.append(float(result["Score"]))
+            true_lkl.append(float(result["TrueLikelihood"]))
+            true_spec.append(float(result["TrueSpectrum"]))
+            ref_acc.append(float(result["ReferenceAccuracy"]))
+            lkl_acc.append(list(map(lambda x: float(x), result["LikelihoodAccuracies"])))
+            spec_acc.append(list(map(lambda x: float(x), result["SpectrumAccuracies"])))
+            lkl_spec_acc.append(list(map(lambda x: float(x), result["LikelihoodSpectrumAccuracies"])))
+        #
+        loci.append(num_variants[pgs_id])
+        reference_median.append(np.median(ref_acc))
+        likelihoods_median.append(np.median([l[0] for l in lkl_acc if len(l) > 0]))
+        spectra_median.append(np.median([l[0] for l in spec_acc if len(l) > 0]))
+        likelihoods_spectra_median.append(np.median([l[0] for l in lkl_spec_acc if len(l) > 0]))
+        reference_mean.append(np.mean(ref_acc))
+        likelihoods_mean.append(np.mean([l[0] for l in lkl_acc if len(l) > 0]))
+        spectra_mean.append(np.mean([l[0] for l in spec_acc if len(l) > 0]))
+        likelihoods_spectra_mean.append(np.mean([l[0] for l in lkl_spec_acc if len(l) > 0]))
+        if pgs_id == "PGS003760":
+            print(f"PGS003760: {len(individuals)} samples, "
+                  f"{len([l[0] for l in lkl_acc if len(l) > 0])} likelihoods, "
+                  f"{len([l[0] for l in spec_acc if len(l) > 0])} spectra, "
+                  f"{len([l[0] for l in lkl_spec_acc if len(l) > 0])} likelihood+spectra")
+
+    colors = ['firebrick', 'sandybrown', 'forestgreen', 'mediumorchid', 'dodgerblue', 'limegreen', 'tomato']
+    markers = ['.', '*', 'v', "^", "+"]
+
+    # Create a figure and axis
+    fig1, ax1 = plt.subplots(figsize=(6, 4))
+    ax1.plot(loci, likelihoods_median, color=colors[0], marker=".", markersize=8, label="Likelihood")
+    ax1.plot(loci, spectra_median, color=colors[1], marker=".", markersize=8,label="Spectrum")
+    ax1.plot(loci, likelihoods_spectra_median, color=colors[2], marker=".", markersize=8, label="Likelihood+Spectrum")
+    ax1.plot(loci, reference_median, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5, label="Reference")
+
+    for i, tup in enumerate(zip(likelihoods_median, spectra_median, likelihoods_spectra_median)):
+        print(f"{likelihoods_median[i]:.3f}/{likelihoods_mean[i]:.3f}\t{spectra_median[i]:.3f}/{spectra_mean[i]:.3f}\t"
+              f"{likelihoods_spectra_median[i]:.3f}/{likelihoods_spectra_mean[i]:.3f}\t{reference_median[i]:.3f}/{reference_mean[i]:.3f}")
+
+    # Set axis labels and title
+    ax1.set_xlabel("Number of variants")
+    ax1.set_ylabel("Accuracy")
+    ax1.set_title("Median Accuracy")
+    # ax1.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax1.legend()
+
+    # Plot for mean
+    fig2, ax2 = plt.subplots(figsize=(6, 4))
+    ax2.plot(loci, likelihoods_mean, color=colors[0], marker=".", markersize=8, label="Likelihood")
+    ax2.plot(loci, spectra_mean, color=colors[1], marker=".", markersize=8, label="Spectrum")
+    ax2.plot(loci, likelihoods_spectra_mean, color=colors[2], marker=".", markersize=8, label="Likelihood+Spectrum")
+    ax2.plot(loci, reference_mean, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5, label="Reference")
+
+    # Set axis labels and title for mean plot
+    ax2.set_xlabel("Number of variants")
+    ax2.set_ylabel("Accuracy")
+    ax2.set_title("Mean Accuracy")
+
+    # Adjust the legend for mean plot
+    # ax2.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax2.legend()
+
+    plt.tight_layout()
+    fig1.savefig('median.png', dpi=300, bbox_inches='tight')
+    fig2.savefig('mean.png', dpi=300, bbox_inches='tight')
+    # Show the plot
+    # plt.show()
+
+
+def loci_coverage():
+    with open('loci_pgp_coverage.json', 'r') as file:
+        data = json.load(file)
+    locus_counts = {}
+
+    for location, studies in data.items():
+        locus_counts[location] = len(studies)
+
+    sorted_loci = sorted(locus_counts.keys(), key=lambda x: int(x.split(':')[0]))
+    loci = []
+    counts = []
+    for locus in sorted_loci:
+        loci.append(locus)
+        counts.append(locus_counts[locus])
+
+    # Create a figure and axis
+    fig, ax = plt.subplots(figsize=(15, 5))
+
+    # Plot the bar graph
+    bar_width = 1
+    ax.bar(range(len(counts)), counts, bar_width, align='center')
+
+    current_chr = 1
+    positions = []
+    for locus in loci:
+        chr_num = int(locus.split(':')[0])
+        if chr_num != current_chr:
+            ax.axvline(x=loci.index(locus), color='red', linestyle="dotted", linewidth=0.5)
+            current_chr = chr_num
+            positions.append(loci.index(locus))
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels([l for l in range(2, 23)])
+
+    ax.set_ylabel('Frequency')
+    ax.set_xlabel('Chromosome')
+    ax.set_title('Distribution of Loci per Chromosome')
+
+    plt.tight_layout()
+    fig.savefig('coverage.png', dpi=300, bbox_inches='tight')
+    # plt.show()
+
+
+def accuracy(pgs_ids):
+    num_variants = {
+            "PGS003181": 15,
+            "PGS000778": 20,
+            "PGS004249": 25,
+            "PGS001868": 30,
+            "PGS002270": 33,
+            "PGS001835": 38,
+        }
+    world = "All"
+    pops = ["AFR", "AMR", "EAS", "EUR", "SAS"]
+    directory = "results/accuracy/"
+    data = {}
+    for pgs_id in pgs_ids+[world]:
+        data[pgs_id] = {
+                               'Ancestry': [],
+                               'Accuracy': [],
+                               'Score': []
+                           }
+    for pgs_id in pgs_ids:
+        filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+                         fnmatch.fnmatch(filename, f"*{pgs_id}-*")]
+        for filepath in filepaths:
+            with open(filepath, 'r') as f:
+                content = json.load(f)
+            for result in content:
+                if len(result["LikelihoodAccuracies"]) > 0:
+                    data[pgs_id]['Ancestry'].append(result["Ancestry"])
+                    data[pgs_id]['Accuracy'].append(float(result["LikelihoodAccuracies"][0]))
+                    data[pgs_id]['Score'].append(float(result["Score"]))
+                    data[world]['Ancestry'].append(result["Ancestry"])
+                    data[world]['Accuracy'].append(float(result["LikelihoodAccuracies"][0]))
+                    data[world]['Score'].append(float(result["Score"]))
+
+    for pgs_id in pgs_ids + [world]:
+        print(f"PGS: {pgs_id}, Mean accuracy: {np.mean(data[pgs_id]['Accuracy'])}, "
+              f"Median accuracy: {np.median(data[pgs_id]['Accuracy'])}")
+        df = pd.DataFrame(data[pgs_id])
+        fig, ax = plt.subplots(figsize=(4, 3))
+        sns.violinplot(x='Ancestry', y='Accuracy', data=df, ax=ax, palette='Pastel1', hue='Ancestry')
+        if pgs_id != world:
+            ax.set_title(f'Accuracy by Ancestry {pgs_id} ({num_variants[pgs_id]} variants)')
+        else:
+            ax.set_title(f'Accuracy by Ancestry {pgs_id}')
+        fig.savefig(f'{pgs_id}-ancestry.png', dpi=300, bbox_inches='tight')
+#         plt.tight_layout()
+#         plt.show()
+
+        decile_labels = ['10%', '20%', '30%', '40%', '50%',
+                         '60%', '70%', '80%', '90%', '100%']
+
+        df['Decile'] = pd.qcut(df['Score'], q=10, labels=decile_labels)
+        fig, ax = plt.subplots(figsize=(4, 3))
+#         sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2, medianprops=dict(color='white'))
+        sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2)
+        if pgs_id != world:
+            ax.set_title(f'Accuracy by Score {pgs_id} ({num_variants[pgs_id]} variants)')
+        else:
+            ax.set_title(f'Accuracy by Score {pgs_id}')
+        plt.xticks(rotation=45)
+        fig.savefig(f'{pgs_id}-score.png', dpi=300, bbox_inches='tight')
+#         plt.tight_layout()
+#         plt.show()
+
 
 
 if __name__ == "__main__":
@@ -461,4 +687,10 @@ if __name__ == "__main__":
     # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
     # score_deviation()
     # weight_to_af()
-    likelihood_spectrum_accuracy("PGS000154")
+    # likelihood_spectrum_select("PGS000154")
+    # likelihood_spectrum_select("PGS002302")
+    # likelihood_spectrum_select("PGS000851")
+    # likelihood_spectrum_total()
+#     loci_coverage()
+#     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
+    accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])

@@ -2,13 +2,17 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/montanaflynn/stats"
 	"github.com/nikirill/prs/pgs"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,6 +69,175 @@ func numVariantsStats(fileNames []string) {
 		log.Println("Mean error:", err)
 	}
 	fmt.Printf("Median and mean number of SNPs per PGS: %d, %d\n", int(median), int(mean))
+}
+
+func getPGSWithFewerVariants(limit int) {
+	file, err := os.Open("catalog/pgs_all_metadata_scores.csv")
+	if err != nil {
+		log.Println("Error opening catalog metadata file:", err)
+		return
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return
+	}
+	numVariantColumn, pgsIdColumn := -1, -1
+	for i, field := range header {
+		if field == "Number of Variants" {
+			numVariantColumn = i
+		}
+		if field == "Polygenic Score (PGS) ID" {
+			pgsIdColumn = i
+		}
+	}
+	ids := make([]string, 0)
+	total := 0
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			break
+		}
+		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && numVariants < limit {
+			ids = append(ids, record[pgsIdColumn])
+		}
+		total++
+	}
+	catalogFolder := "catalog"
+	hasXYchromosomes := make([]string, 0)
+	invalidLoci := make([]string, 0)
+	tooFewVariants := make([]string, 0)
+	impreciseWeights := make([]string, 0)
+	filteredIds := make([]string, 0)
+	idsToNumVariants := make(map[string]int)
+	traits := make(map[string]struct{})
+	publications := make(map[string]struct{})
+	uniqueLoci := make(map[string]struct{})
+	lociTotal := 0
+	lociToPgp := make(map[string][]string)
+	lociToPgs := make(map[string]map[string]bool)
+	pgsToPgp := make(map[string]string)
+idLoop:
+	for _, id := range ids {
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh38.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			return
+		}
+		if p.NumVariants < 2 {
+			tooFewVariants = append(tooFewVariants, id)
+			continue idLoop
+		}
+		for _, locus := range p.Loci {
+			if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") {
+				hasXYchromosomes = append(hasXYchromosomes, id)
+				continue idLoop
+			}
+			if !isNumber(strings.Split(locus, ":")[1]) || !isNumberInRange(strings.Split(locus, ":")[0], 1, 22) {
+				invalidLoci = append(invalidLoci, id)
+				continue idLoop
+			}
+		}
+		if p.WeightPrecision < uint32(math.Floor(math.Log2(float64(p.NumVariants)))) {
+			impreciseWeights = append(impreciseWeights, id)
+			continue idLoop
+		}
+		filteredIds = append(filteredIds, id)
+		idsToNumVariants[id] = p.NumVariants
+		pgsToPgp[id] = p.PgpID
+		traits[p.TraitEFO] = struct{}{}
+		publications[p.PgpID] = struct{}{}
+		lociTotal += len(p.Loci)
+		for _, locus := range p.Loci {
+			uniqueLoci[locus] = struct{}{}
+			if _, ok := lociToPgp[locus]; !ok {
+				lociToPgp[locus] = make([]string, 0)
+			}
+			lociToPgp[locus] = append(lociToPgp[locus], p.PgpID)
+			if _, ok := lociToPgs[locus]; !ok {
+				lociToPgs[locus] = make(map[string]bool)
+			}
+			lociToPgs[locus][id] = true
+		}
+	}
+	//fmt.Println(len(ids), "PGS with less than", limit, "variants")
+	fmt.Println("Total PGS:", total)
+	fmt.Println("PGS with less than", limit, "variants:", len(ids))
+	fmt.Println("PGS with X or Y chromosomes:", len(hasXYchromosomes), hasXYchromosomes)
+	fmt.Println("PGS with less than 2 variants:", len(tooFewVariants), tooFewVariants)
+	fmt.Println("PGS with imprecise weights:", len(impreciseWeights), impreciseWeights)
+	fmt.Println("PGS with invalid loci:", len(invalidLoci), invalidLoci)
+	fmt.Println("Filtered PGS:", len(filteredIds))
+	fmt.Println("Unique traits:", len(traits))
+	fmt.Println("Unique publications:", len(publications))
+	fmt.Printf("Total loci: %d, unique %d\n", lociTotal, len(uniqueLoci))
+
+	lociPgpFile, err := os.OpenFile("results/loci_pgp_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening loci file:", err)
+		return
+	}
+	defer lociPgpFile.Close()
+	encoder := json.NewEncoder(lociPgpFile)
+	err = encoder.Encode(lociToPgp)
+	if err != nil {
+		log.Println("Error encoding pgp loci:", err)
+	}
+
+	lociPgsFile, err := os.OpenFile("results/loci_pgs_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening loci file:", err)
+		return
+	}
+	defer lociPgsFile.Close()
+	encoder = json.NewEncoder(lociPgsFile)
+	err = encoder.Encode(lociToPgs)
+	if err != nil {
+		log.Println("Error encoding pgs loci:", err)
+	}
+
+	idsFile, err := os.OpenFile("results/filtered_pgs.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening ids file:", err)
+		return
+	}
+	defer idsFile.Close()
+	encoder = json.NewEncoder(idsFile)
+	err = encoder.Encode(idsToNumVariants)
+	if err != nil {
+		log.Println("Error encoding filtered ids:", err)
+	}
+
+	pgsToPgpFile, err := os.OpenFile("results/pgs_pgp.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening ids file:", err)
+		return
+	}
+	defer idsFile.Close()
+	encoder = json.NewEncoder(pgsToPgpFile)
+	err = encoder.Encode(pgsToPgp)
+	if err != nil {
+		log.Println("Error encoding pgs to pgp:", err)
+	}
+}
+
+// isNumber checks if a string represents a valid number using a regular expression
+func isNumber(str string) bool {
+	numberRegex := regexp.MustCompile(`^[\-+]?(\d+(\.\d+)?|\.\d+)$`)
+	return numberRegex.MatchString(str)
+}
+
+// isNumberInRange checks if a string represents a valid number and falls within the specified range
+func isNumberInRange(str string, min, max int) bool {
+	num, err := strconv.Atoi(str)
+	if err != nil {
+		return false
+	}
+	return num >= min && num <= max
 }
 
 func lociOverlapStats(fileNames []string) {
@@ -228,5 +401,7 @@ func main() {
 		numVariantsStats(filenames)
 	case "overlap":
 		lociOverlapStats(filenames)
+	case "limit":
+		getPGSWithFewerVariants(50)
 	}
 }
