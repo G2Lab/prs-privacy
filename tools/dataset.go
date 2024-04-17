@@ -18,7 +18,7 @@ func IndividualSnpsQuery(c, p string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
-		"[%POS-%SAMPLE=%GT\t]",
+		"%CHROM:%POS-[%SAMPLE=%GT\t]\n",
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, p, p),
 		GetChromosomeFilepath(c),

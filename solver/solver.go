@@ -260,11 +260,11 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 		switch sorting {
 		case UseLikelihood:
 			fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles)
-		case UseSpectrum:
-			fitness[i] = CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
-		case UseLikelihoodAndSpectrum:
-			fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles) +
-				CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
+			//case UseSpectrum:
+			//	fitness[i] = CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
+			//case UseLikelihoodAndSpectrum:
+			//	fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles) +
+			//		CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
 		}
 		i++
 	}
@@ -302,9 +302,9 @@ func ChiSquaredValue(observed, expected []float32) float32 {
 	return chi
 }
 
-func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics, effectAlleles []uint8) float32 {
-	return ChiSquaredValue(CalculateSequenceEASpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
-}
+//func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics, effectAlleles []uint8) float32 {
+//	return ChiSquaredValue(CalculateSequenceEASpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
+//}
 
 func CalculateTwoSpectrumDistance(spectrum1, spectrum2 []float32) float32 {
 	return ChiSquaredValue(spectrum1, spectrum2)

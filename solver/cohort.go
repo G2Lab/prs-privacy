@@ -40,7 +40,11 @@ func (c Cohort) Populate(p *pgs.PGS) {
 	filename := fmt.Sprintf("%s/%s.json", params.DataFolder, p.PgsID)
 	// If the file doesn't exist, calculate the PRS and save it
 	if _, err = os.Stat(filename); os.IsNotExist(err) {
-		c.RetrieveGenotypesAndCalculatePRS(p)
+		err = c.RetrieveGenotypes(p)
+		if err != nil {
+			log.Fatalf("Error retrieving genotypes and calculating PRS: %v", err)
+		}
+		c.CalculatePRS(p)
 		c.SaveToDisk(filename)
 		if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
 			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID))
@@ -52,86 +56,97 @@ func (c Cohort) Populate(p *pgs.PGS) {
 	c.LoadFromDisk(filename)
 }
 
-func (c Cohort) RetrieveGenotypesAndCalculatePRS(p *pgs.PGS) {
-	ctx := p.Context
+func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 	var err error
-	var k int
 	var output []byte
 	var allele []uint8
-	var fields []string
-	var countPerLocus int
-	for i, locus := range p.Loci {
+	var positionSamples, sampleAlleles []string
+	var found, locusAdded bool
+	for _, locus := range p.Loci {
+		found, locusAdded = false, false
 		chr, position := tools.SplitLocus(locus)
 		query, args := tools.IndividualSnpsQuery(chr, position)
 		cmd := exec.Command(query, args...)
 		output, err = cmd.Output()
 		if err != nil {
 			fmt.Println("Error executing bcftools command:", err)
-			continue
+			return err
 		}
-		if len(output) == 0 {
-			fmt.Printf("Locus %s -- no data\n", locus)
-			// If there is no data, treat as zeros for all individuals
-			for indv := range c {
-				c[indv].Genotype = append(c[indv].Genotype, 0, 0)
-			}
-			continue
-		}
-		samples := strings.Split(string(output), "\t")
-		samples = samples[:len(samples)-1]
-		countPerLocus = 0
-		for _, sample := range samples {
-			fields = strings.Split(sample, "-")
-			if len(fields) != 2 {
-				fmt.Printf("Locus %s -- error splitting sample: %s\n", locus, sample)
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines[:len(lines)-1] {
+			positionSamples = strings.Split(line, "-")
+			if positionSamples[0] != locus {
+				//fmt.Printf("Locus %s does not match %s\n", locus, positionSamples[0])
 				continue
 			}
-			if fields[0] != position {
-				//fmt.Printf("Incorrect locus %s != %s\n", sample, position)
-				continue
-			}
-			fields = strings.Split(fields[1], "=")
-			if len(fields) != 2 {
-				fmt.Printf("Locus %s -- error splitting sample: %s\n", locus, sample)
-				continue
-			}
-			indv := fields[0]
-			snp := fields[1]
-			snp, err = tools.NormalizeSnp(snp)
-			if err != nil {
-				fmt.Printf("Error normalizing %s: %v", snp, err)
-				continue
-			}
-			allele, err = tools.SnpToPair(snp)
-			if err != nil {
-				fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
-				continue
-			}
-			if _, ok := c[indv]; !ok {
-				c[indv] = NewIndividual()
-			}
-			c[indv].Genotype = append(c[indv].Genotype, allele...)
-			for k = range allele {
-				if allele[k] != p.EffectAlleles[i] {
+			found = true
+			samples := strings.Split(positionSamples[1], "\t")
+			samples = samples[:len(samples)-1]
+			for _, sample := range samples {
+				sampleAlleles = strings.Split(sample, "=")
+				if len(sampleAlleles) != 2 {
+					fmt.Printf("Locus %s -- error splitting sample: %s\n", locus, sample)
+					return err
+				}
+				idv := sampleAlleles[0]
+				snp := sampleAlleles[1]
+				snp, err = tools.NormalizeSnp(snp)
+				if err != nil {
+					fmt.Printf("Error normalizing %s: %v", snp, err)
 					continue
 				}
-				_, err = ctx.Add(c[indv].Score, c[indv].Score, p.Weights[i])
+				allele, err = tools.SnpToPair(snp)
 				if err != nil {
-					log.Printf("Error adding to score at locus %s for sample %s: %v\n", locus, sample, err)
-					return
+					fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
+					continue
+				}
+				if _, ok := c[idv]; !ok {
+					c[idv] = NewIndividual()
+				}
+				if locusAdded {
+					// If the same locus is repeated several times with different ref/alt alleles
+					sum := c[idv].Genotype[len(c[idv].Genotype)-1] + c[idv].Genotype[len(c[idv].Genotype)-2] + allele[0] + allele[1]
+					switch {
+					case sum == 1:
+						c[idv].Genotype[len(c[idv].Genotype)-2] = 1
+						c[idv].Genotype[len(c[idv].Genotype)-1] = 0
+					case sum >= 2:
+						c[idv].Genotype[len(c[idv].Genotype)-2] = 1
+						c[idv].Genotype[len(c[idv].Genotype)-1] = 1
+					default:
+					}
+				} else {
+					c[idv].Genotype = append(c[idv].Genotype, allele...)
 				}
 			}
-			if countPerLocus++; countPerLocus > len(c) && i != 0 {
-				fmt.Printf("More samples than individuls at %s: %d vs %d\n", locus, len(samples), len(c))
-				break
+			locusAdded = true
+		}
+		if !found {
+			// If there is no data, treat as zeros for all individuals
+			if len(c) == 0 {
+				allSamples := All1000GenomeSamples()
+				for _, indv := range allSamples {
+					c[indv] = NewIndividual()
+				}
+			}
+			for indv := range c {
+				c[indv].Genotype = append(c[indv].Genotype, ReferenceAllele, ReferenceAllele)
 			}
 		}
+	}
+	return nil
+}
+
+func (c Cohort) CalculatePRS(p *pgs.PGS) {
+	for idv := range c {
+		c[idv].Score = CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
+		//fmt.Printf("Individual %s: %v\n", idv, c[idv].Genotype)
 	}
 	// TODO: Storing the linear sum for now to avoid precision issues with division
 	//// Normalize the score for each individual by the number of loci
 	//divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
-	//for indv := range c {
-	//	_, err = ctx.Quo(c[indv].Score, c[indv].Score, divisor)
+	//for idv := range c {
+	//	_, err = ctx.Quo(c[idv].Score, c[idv].Score, divisor)
 	//	if err != nil {
 	//		log.Println("Error dividing score by the number of loci:", err)
 	//		return

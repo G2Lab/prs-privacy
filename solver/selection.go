@@ -1,4 +1,4 @@
-package main
+package solver
 
 import (
 	"crypto/sha256"
@@ -19,14 +19,14 @@ func selectSamples(num, total int, seedPhrase string) []string {
 	fmt.Println(seed)
 	rnd := rand.New(rand.NewSource(seed))
 	selection := make([]string, num)
-	all := allSamples()
+	all := All1000GenomeSamples()
 	for i := 0; i < num; i++ {
 		selection[i] = all[rnd.Intn(total)]
 	}
 	return selection
 }
 
-func allSamples() []string {
+func All1000GenomeSamples() []string {
 	f, err := os.Open(SamplesFile)
 	if err != nil {
 		log.Fatalf("Error opening the samples file: %v", err)

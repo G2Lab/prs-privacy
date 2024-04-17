@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/montanaflynn/stats"
 	"github.com/nikirill/prs/pgs"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -225,6 +226,162 @@ idLoop:
 	}
 }
 
+func copyFilteredPGSFiles() {
+	file, err := os.Open("results/filtered_pgs.json")
+	if err != nil {
+		log.Println("Error opening filtered ids file:", err)
+		return
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding filtered ids:", err)
+		return
+	}
+	for id := range idsToNumVariants {
+		src := filepath.Join("catalog", id+"_hmPOS_GRCh38.txt")
+		dst := filepath.Join("filtered", id+"_hmPOS_GRCh38.txt")
+		err = copyFile(src, dst)
+		if err != nil {
+			log.Println("Error copying file:", err)
+		}
+	}
+
+}
+
+func validateBases() {
+	file, err := os.Open("results/filtered_pgs.json")
+	if err != nil {
+		log.Println("Error opening filtered ids file:", err)
+		return
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding filtered ids:", err)
+		return
+	}
+	discarded := make([]string, 0)
+	validated := make(map[string]int)
+	for id, num := range idsToNumVariants {
+		fmt.Printf("==== %s ====\n", id)
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(filepath.Join("filtered", id+"_hmPOS_GRCh38.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			return
+		}
+		err = p.LoadStats()
+		if err != nil {
+			discarded = append(discarded, p.PgsID)
+			continue
+		}
+		err = copyFile(filepath.Join("filtered", id+"_hmPOS_GRCh38.txt"),
+			filepath.Join("inputs", id+"_hmPOS_GRCh38.txt"))
+		if err != nil {
+			log.Println("Error copying file:", err)
+		}
+		validated[p.PgsID] = num
+	}
+	fmt.Printf("Discarded %d: %v\n", len(discarded), discarded)
+	fmt.Printf("Validated %d\n", len(validated))
+
+	validatedFile, err := os.OpenFile("results/validated_pgs.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening validated file:", err)
+		return
+	}
+	defer validatedFile.Close()
+	encoder := json.NewEncoder(validatedFile)
+	err = encoder.Encode(validated)
+	if err != nil {
+		log.Println("Error encoding validated ids:", err)
+	}
+}
+
+func makeLociIndex() {
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	loci := make(map[string][]string)
+	for id := range idsToNumVariants {
+		fmt.Printf("==== %s ====\n", id)
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(filepath.Join("inputs", id+"_hmPOS_GRCh38.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			return
+		}
+		for _, locus := range p.Loci {
+			if _, ok := loci[locus]; !ok {
+				loci[locus] = make([]string, 0)
+			}
+			loci[locus] = append(loci[locus], p.PgsID)
+		}
+	}
+
+	// Sort each entry in the map by the number of variants
+	for locus := range loci {
+		sort.Slice(loci[locus], func(i, j int) bool {
+			return idsToNumVariants[loci[locus][i]] < idsToNumVariants[loci[locus][j]]
+		})
+	}
+
+	validatedLoci, err := os.OpenFile("results/validated_loci.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	if err != nil {
+		log.Println("Error opening validated file:", err)
+		return
+	}
+	defer validatedLoci.Close()
+	encoder := json.NewEncoder(validatedLoci)
+	err = encoder.Encode(loci)
+	if err != nil {
+		log.Println("Error encoding validated loci:", err)
+	}
+
+}
+
+func copyFile(sourceFile, destFile string) error {
+	// Open the source file for reading
+	source, err := os.Open(sourceFile)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	// Create the destination file for writing
+	destination, err := os.Create(destFile)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	// Copy the contents from the source file to the destination file
+	_, err = io.Copy(destination, source)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // isNumber checks if a string represents a valid number using a regular expression
 func isNumber(str string) bool {
 	numberRegex := regexp.MustCompile(`^[\-+]?(\d+(\.\d+)?|\.\d+)$`)
@@ -388,6 +545,33 @@ filesLoop:
 	}
 }
 
+func removeFiles() {
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	for id := range idsToNumVariants {
+		err = copyFile(filepath.Join("inputs", id+"_hmPOS_GRCh38_stats.txt"), filepath.Join("inputs", id+"_hmPOS_GRCh38.txt"))
+		if err != nil {
+			log.Println("Error copying file:", err)
+		}
+		err = os.Remove(filepath.Join("inputs", id+"_hmPOS_GRCh38_stats.txt"))
+		if err != nil {
+			log.Println("Error removing file:", err)
+		}
+	}
+}
+
 func main() {
 	expr := flag.String("expr", "", "Experiment type")
 	flag.Parse()
@@ -403,5 +587,11 @@ func main() {
 		lociOverlapStats(filenames)
 	case "limit":
 		getPGSWithFewerVariants(50)
+	case "copy":
+		copyFilteredPGSFiles()
+	case "validate":
+		validateBases()
+	case "loci":
+		makeLociIndex()
 	}
 }
