@@ -97,7 +97,7 @@ func NewReference(id string, score *apd.Decimal, likelihood float64) *Reference 
 }
 
 func sequentialSolving() {
-	guessThreshold := 500
+	guessThreshold := 1000
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
 		log.Println("Error opening validated ids file:", err)
