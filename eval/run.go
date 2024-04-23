@@ -23,7 +23,7 @@ import (
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write cpu profile to file")
 
-const DeterminismLimit = 35
+const DeterminismLimit = 32
 
 func main() {
 	flag.Parse()
@@ -97,7 +97,9 @@ func NewReference(id string, score *apd.Decimal, likelihood float64) *Reference 
 }
 
 func sequentialSolving() {
-	guessThreshold := 1000
+	//thresholds := []int{500, 1000, 1500, 2000, 2500}
+	thresholds := []int{500, 1000, 1500, 2000}
+	fmt.Printf("Sequential solving for %d\n", thresholds)
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
 		log.Println("Error opening validated ids file:", err)
@@ -125,78 +127,184 @@ func sequentialSolving() {
 		return
 	}
 
-	INDIVIDUAL := "HG00119"
-
-	allPgs := make([]string, 0, len(idsToNumVariants))
-	for id, _ := range idsToNumVariants {
-		allPgs = append(allPgs, id)
-	}
-	sort.Slice(allPgs, func(i, j int) bool {
-		return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
-	})
-
-	populations := tools.LoadAncestry()
-	indPop := populations[INDIVIDUAL]
-	if strings.Contains(indPop, ",") {
-		indPop = strings.Split(indPop, ",")[0]
-	}
-	var pgsID string
-	var solmap map[string][]uint8
-	var solutions [][]uint8
-	guessedSnps := make(map[string]uint8)
-	trueSnps := make(map[string]uint8)
-	k := 0
-	for {
-		pgsID = allPgs[k]
-		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh38.txt"))
-		if err != nil {
-			log.Printf("Error loading catalog file: %v\n", err)
-			return
-		}
-		fmt.Printf("======== %s ========\n", p.PgsID)
-		err = p.LoadStats()
-		if err != nil {
-			log.Printf("Error loading stats: %v\n", err)
-			return
-		}
-		cohort := solver.NewCohort(p)
-		slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop)
-		if len(p.Loci) < DeterminismLimit {
-			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
-		} else {
-			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
-		}
-		solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
-		for i, locus := range p.Loci {
-			if _, ok := trueSnps[locus]; ok {
-				continue
+	pgsToLoci := make(map[string]map[string]struct{})
+	for locus, pgsIDs := range lociToPgs {
+		for _, pgsID := range pgsIDs {
+			if _, ok := pgsToLoci[pgsID]; !ok {
+				pgsToLoci[pgsID] = make(map[string]struct{})
 			}
-			trueSnps[locus] = cohort[INDIVIDUAL].Genotype[pgs.Ploidy*i] + cohort[INDIVIDUAL].Genotype[pgs.Ploidy*i+1]
+			pgsToLoci[pgsID][locus] = struct{}{}
 		}
-		if len(solutions) > 0 {
-			fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[INDIVIDUAL].Genotype))
-			for i, locus := range p.Loci {
-				if _, ok := guessedSnps[locus]; ok {
-					continue
-				}
-				guessedSnps[locus] = solutions[0][pgs.Ploidy*i] + solutions[0][pgs.Ploidy*i+1]
-			}
-		} else {
-			fmt.Println("^^^ No solutions found")
-		}
-		if len(guessedSnps) > guessThreshold {
+	}
+
+	//INDIVIDUAL := "HG00119"
+	individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
+		"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
+		"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
+		"NA20289", "NA20792", "NA20868", "NA20895"}
+
+	chunkNum, chunkSize := getChunkInfo(len(individuals))
+	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
+
+	type Result struct {
+		Individual string
+		Accuracies map[int]float32
+	}
+	results := make([]*Result, 0)
+	var individual string
+	for c := chunkNum * chunkSize; c < (chunkNum+1)*chunkSize; c++ {
+		if c >= len(individuals) {
 			break
 		}
-		k++
-	}
-	var accuracy float32 = 0.0
-	for locus, snp := range trueSnps {
-		if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
-			accuracy += 1
+		individual = individuals[c]
+		fmt.Printf("--------- %s --------\n", individual)
+
+		allPgs := make([]string, 0, len(idsToNumVariants))
+		for id, _ := range idsToNumVariants {
+			allPgs = append(allPgs, id)
 		}
+		sort.Slice(allPgs, func(i, j int) bool {
+			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+		})
+
+		populations := tools.LoadAncestry()
+		indPop := populations[individual]
+		if strings.Contains(indPop, ",") {
+			indPop = strings.Split(indPop, ",")[0]
+		}
+		var pgsID string
+		var solmap map[string][]uint8
+		var solutions [][]uint8
+		var accuracyWithMissed, accuracyWithoutMissed float32
+		guessedSnps := make(map[string]uint8)
+		trueSnpsWithMissed := make(map[string]uint8)    // count all the snps
+		trueSnpsWithoutMissed := make(map[string]uint8) // count only the snps that were "guessed", i.e., no solutions does not count
+		accuraciesWithMissed := make(map[int]float32)
+		accuraciesWithoutMissed := make(map[int]float32)
+		thresholdPos := 0
+		for {
+			pgsID = allPgs[0]
+			p := pgs.NewPGS()
+			err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh38.txt"))
+			if err != nil {
+				log.Printf("Error loading catalog file: %v\n", err)
+				return
+			}
+			fmt.Printf("======== %s ========\n", p.PgsID)
+			err = p.LoadStats()
+			if err != nil {
+				log.Printf("Error loading stats: %v\n", err)
+				return
+			}
+			recoveredSnps := make(map[int]uint8)
+			for l, locus := range p.Loci {
+				if guess, ok := guessedSnps[locus]; ok {
+					recoveredSnps[l] = guess
+				}
+			}
+			fmt.Printf("Total SNPs %d, unknown %d\n", len(p.Loci), len(p.Loci)-len(recoveredSnps))
+			fmt.Printf("Recovered snps: %v\n", recoveredSnps)
+			cohort := solver.NewCohort(p)
+			slv := solver.NewDP(cohort[individual].Score, p, indPop, recoveredSnps)
+			if len(p.Loci)-len(recoveredSnps) < DeterminismLimit {
+				solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+			} else {
+				solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+			}
+			solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+			if len(solutions) == 0 && len(recoveredSnps) > 0 {
+				fmt.Println("^^^ No solutions with extra loci, calculating from scratch ^^^")
+				slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
+				if len(p.Loci) < DeterminismLimit {
+					solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+				} else {
+					solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+				}
+				solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+			}
+			if len(solutions) > 0 {
+				fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[individual].Genotype))
+				for i, locus := range p.Loci {
+					if _, ok := guessedSnps[locus]; ok {
+						continue
+					}
+					guessedSnps[locus] = solutions[0][pgs.Ploidy*i] + solutions[0][pgs.Ploidy*i+1]
+				}
+			} else {
+				fmt.Println("!!!!!!! Still could not find a solution !!!!!!!")
+			}
+			for i, locus := range p.Loci {
+				if _, ok := trueSnpsWithMissed[locus]; ok {
+					continue
+				}
+				trueSnpsWithMissed[locus] = cohort[individual].Genotype[pgs.Ploidy*i] + cohort[individual].Genotype[pgs.Ploidy*i+1]
+				if len(solutions) > 0 {
+					trueSnpsWithoutMissed[locus] = trueSnpsWithMissed[locus]
+				}
+			}
+			if len(guessedSnps) >= thresholds[thresholdPos] {
+				accuracyWithMissed, accuracyWithoutMissed = 0, 0
+				for locus, snp := range trueSnpsWithMissed {
+					if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
+						accuracyWithMissed += 1
+					}
+				}
+				accuraciesWithMissed[thresholds[thresholdPos]] = accuracyWithMissed / float32(len(trueSnpsWithMissed))
+				//
+				for locus, snp := range trueSnpsWithoutMissed {
+					if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
+						accuracyWithoutMissed += 1
+					}
+				}
+				accuraciesWithoutMissed[thresholds[thresholdPos]] = accuracyWithoutMissed / float32(len(trueSnpsWithoutMissed))
+				fmt.Printf("### Accuracy %d: w/ missed %.3f, w/o missed %.3f\n", thresholds[thresholdPos],
+					accuracyWithMissed/float32(len(trueSnpsWithMissed)), accuracyWithoutMissed/float32(len(trueSnpsWithoutMissed)))
+				thresholdPos++
+				if thresholdPos == len(thresholds) {
+					break
+				}
+			}
+			fmt.Printf("Guessed %d\n", len(guessedSnps))
+			if len(guessedSnps) > thresholds[len(thresholds)-1] {
+				break
+			}
+			allPgs = allPgs[1:]
+			for _, locus := range p.Loci {
+				for _, id := range lociToPgs[locus] {
+					if id == pgsID {
+						continue
+					}
+					if _, ok := pgsToLoci[id][locus]; ok {
+						delete(pgsToLoci[id], locus)
+					}
+				}
+			}
+			sort.Slice(allPgs, func(i, j int) bool {
+				return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+			})
+		}
+		results = append(results, &Result{Individual: individual, Accuracies: accuraciesWithMissed})
 	}
-	fmt.Printf("Accuracy: %.3f\n", accuracy/float32(len(trueSnps)))
+
+	resultFolder := "results/sequential"
+	filepath := path.Join(resultFolder, fmt.Sprintf("chunk%d.json", chunkNum))
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+
+	}
+	//var accuracyWithMissed float32 = 0.0
+	//for locus, snp := range trueSnpsWithMissed {
+	//	if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
+	//		accuracyWithMissed += 1
+	//	}
+	//}
+	//fmt.Printf("Accuracy: %.3f\n", accuracyWithMissed/float32(len(trueSnpsWithMissed)))
 }
 
 type accuracyOutput struct {
@@ -264,7 +372,7 @@ func accuracyParallel() {
 			solver.CalculateFullSequenceLikelihood(cohort[individual].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles),
 			solver.Accuracy(majorReference, cohort[individual].Genotype))
 
-		slv := solver.NewDP(cohort[individual].Score, p, indPop)
+		slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
 		//
 		if len(p.Loci) < DeterminismLimit {
 			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
@@ -323,7 +431,8 @@ func findAllSolutions() {
 	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS004246_hmPOS_GRCh38.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002234_hmPOS_GRCh38.txt"
+	catalogFile := "PGS001828_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -342,7 +451,9 @@ func findAllSolutions() {
 	if strings.Contains(indPop, ",") {
 		indPop = strings.Split(indPop, ",")[0]
 	}
-	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop)
+	//recovered := map[int]uint8{0: 0, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 1, 8: 2, 10: 1, 11: 0}
+	recovered := make(map[int]uint8)
+	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop, recovered)
 
 	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
 	fmt.Printf("Accuracy with reference: %f\n",
@@ -662,7 +773,7 @@ func buildDPTables() {
 					continue
 				}
 				fmt.Printf("Creating DP table for %s using %s\n", ppl, samples[i])
-				slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
+				slv := solver.NewDP(cohort[samples[i]].Score, p, indPop, make(map[int]uint8))
 				state := slv.BuildProbabilisticState(2, solver.UseLikelihood)
 				solver.SaveProbabilisticState(state, filepath)
 				state = nil
@@ -805,7 +916,7 @@ func accuracyLikelihood() {
 		if strings.Contains(indPop, ",") {
 			indPop = strings.Split(indPop, ",")[0]
 		}
-		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
+		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop, make(map[int]uint8))
 		solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
 		solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
 		result := NewResult(samples[i], cohort[samples[i]].Score)
@@ -858,7 +969,7 @@ func scoreToLikelihood() {
 		fmt.Printf("%d ", i)
 		output := []string{samples[i], fmt.Sprintf("%.3f", cohort[samples[i]].Score)}
 		indPop := populations[samples[i]]
-		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop)
+		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop, make(map[int]uint8))
 		solmap := slv.SolveFromSavedProbabilistic(solver.UseLikelihood)
 		solutions := solver.SortByAccuracy(solmap, cohort[samples[i]].Genotype)
 		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[samples[i]].Genotype) != 1.0 {
@@ -1068,7 +1179,7 @@ func distribution() {
 	//fmt.Printf("Full major %s: score %f, likelihood %f\n", solver.ArrayToString(majorReference), solver.CalculateDecimalScore(p.Context, majorReference, p.Weights), p.CalculateFullSequenceLikelihood(majorReference))
 	for i := 0; i < len(sorted); i += step {
 		indPop := populations[sorted[i]]
-		slv := solver.NewDP(cohort[sorted[i]].Score, p, indPop)
+		slv := solver.NewDP(cohort[sorted[i]].Score, p, indPop, make(map[int]uint8))
 		solmap := slv.SolveFromSavedProbabilistic(solver.UseLikelihood)
 		solutions := solver.SortByLikelihood(solmap, p.PopulationStats[indPop].AF, p.EffectAlleles)
 		//fmt.Printf("\n\n%s, %s\n", p.PgsID, sorted[i])

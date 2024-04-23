@@ -23,27 +23,53 @@ func newRounder() *Rounder {
 	}
 }
 
-func getTargetAndWeightsAsInts(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([]int64, int64, int64) {
+func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 	var err error
+	target := new(apd.Decimal)
+	target.Set(dp.target)
+	for i := range dp.p.Loci {
+		if _, ok := dp.known[i]; !ok {
+			continue
+		}
+		if (dp.known[i] == 0 && dp.p.EffectAlleles[i] == 0) || (dp.known[i] == 2 && dp.p.EffectAlleles[i] == 1) {
+			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+		}
+		if dp.known[i] == 1 {
+			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+		}
+		if err != nil {
+			log.Fatalf("Failed to subtract known locus from target: %s", dp.p.Weights[i].String())
+		}
+	}
+
 	var roundingError int64 = 0
-	multiplier := apd.New(1, int32(p.WeightPrecision))
-	if p.WeightPrecision > params.PrecisionsLimit {
+	multiplier := apd.New(1, int32(dp.p.WeightPrecision))
+	if dp.p.WeightPrecision > params.PrecisionsLimit {
 		//roundingError = int64(p.NumVariants) * 5 / 4
-		roundingError = int64(p.NumVariants)
-		rdr.RoundedMode = true
-		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)
-		rdr.ScaledTarget = DecimalToBigInt(p.Context, target, multiplier)
+		roundingError = int64(dp.p.NumVariants - len(dp.known))
+		dp.rounder.RoundedMode = true
+		dp.rounder.ScaledWeights = scaleWeights(dp.p.Context, dp.p.Weights, multiplier)
+		//for i := range dp.rounder.ScaledWeights {
+		//	fmt.Printf("%s ", dp.rounder.ScaledWeights[i].String())
+		//}
+		dp.rounder.ScaledTarget = DecimalToBigInt(dp.p.Context, target, multiplier)
 		multiplier.SetFinite(1, params.PrecisionsLimit)
 		//fmt.Printf("Scaled ogTarget: %s\n", rdr.ScaledTarget.String())
 		//fmt.Printf("Scaled weights: %v\n", rdr.ScaledWeights)
 	}
-	weights := DecimalsToInts(p.Context, p.Weights, multiplier)
+	//for i := range dp.p.Weights {
+	//	fmt.Printf("%s ", dp.p.Weights[i].String())
+	//}
+	//fmt.Printf("\n")
+	weights := DecimalsToInts(dp.p.Context, dp.p.Weights, multiplier)
+	//fmt.Println(weights)
 	tmp := new(apd.Decimal)
-	_, err = p.Context.Mul(tmp, target, multiplier)
+	_, err = dp.p.Context.Mul(tmp, target, multiplier)
 	if err != nil {
 		log.Fatalf("Failed to multiply ogTarget and multiplier: %s", target.String())
 	}
-	_, err = p.Context.RoundToIntegralValue(tmp, tmp)
+	_, err = dp.p.Context.RoundToIntegralValue(tmp, tmp)
 	if err != nil {
 		log.Fatalf("Failed to round ogTarget: %s", tmp.String())
 	}
@@ -112,13 +138,27 @@ func DecimalsToFloats(decimals []*apd.Decimal, scale float64) []float64 {
 }
 
 func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) *apd.BigInt {
+	var err error
 	tmp := new(apd.Decimal)
-	ctx.Mul(tmp, d, multiplier)
-	b := new(apd.BigInt)
-	b.Set(&tmp.Coeff)
-	b.Mul(b, apd.NewBigInt(int64(math.Pow(10, float64(tmp.Exponent)))))
-	if tmp.Negative {
-		b.Neg(b)
+	_, err = ctx.Mul(tmp, d, multiplier)
+	if err != nil {
+		log.Fatalf("Failed to multiply decimal by multiplier: %s", d.String())
+	}
+	decStr := tmp.Text('f')
+	b := apd.NewBigInt(0)
+	_, success := b.SetString(decStr, 10)
+	if !success {
+		log.Fatalf("Failed to convert decimal string %s to big.Int %s", decStr, b.String())
 	}
 	return b
+
+	//tmp := new(apd.Decimal)
+	//ctx.Mul(tmp, d, multiplier)
+	//b := apd.NewBigInt(0)
+	//b.Set(&tmp.Coeff)
+	//b.Mul(b, apd.NewBigInt(int64(math.Pow(10, float64(tmp.Exponent)))))
+	//if tmp.Negative {
+	//	b.Neg(b)
+	//}
+	//return b
 }

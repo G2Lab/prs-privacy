@@ -402,8 +402,12 @@ func (p *PGS) extractPopulationAlleles() error {
 				continue
 			}
 			missing = false
+			//fmt.Printf("Locus %s: %s\n", locus, fields[1])
 			ref = strings.Split(fields[1], "\t")[0]
 			alt = strings.Split(fields[1], "\t")[1]
+			if alleleSet {
+				continue
+			}
 			switch {
 			case strings.Contains(alt, p.ScoreAlleles[k]):
 				p.EffectAlleles[k] = 1
@@ -450,6 +454,7 @@ func (p *PGS) extractEAF() {
 	var freq float32
 	var parsed float64
 	var missing, locusAdded bool
+lociLoop:
 	for k, locus := range p.Loci {
 		missing, locusAdded = true, false
 		chr, pos := tools.SplitLocus(locus)
@@ -470,6 +475,7 @@ func (p *PGS) extractEAF() {
 				continue
 			}
 			missing = false
+			//fmt.Printf("AF Locus %s: %s\n", locus, fields[1])
 			afPerPopulation := strings.Split(fields[1], "\t")
 			for i, population := range POPULATIONS {
 				altAfs := strings.Split(afPerPopulation[i], ",")
@@ -494,6 +500,9 @@ func (p *PGS) extractEAF() {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
 				if locusAdded {
+					if p.PopulationStats[population].AF[k][1]+freq > 1 {
+						continue lociLoop
+					}
 					p.PopulationStats[population].AF[k][1] += freq
 				} else {
 					p.PopulationStats[population].AF[k] = []float32{0, freq}

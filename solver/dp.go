@@ -20,6 +20,7 @@ type DP struct {
 	stats   *pgs.Statistics
 	ppl     string
 	rounder *Rounder
+	known   map[int]uint8
 }
 
 type Node struct {
@@ -89,7 +90,7 @@ func newUpdate(sum int64, likelihood float32, fptr, bptr uint8) Update {
 	}
 }
 
-func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string) *DP {
+func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, known map[int]uint8) *DP {
 	s := &DP{
 		//target:  ScoreToTarget(score, p),
 		target:  score,
@@ -97,13 +98,14 @@ func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string) *DP {
 		stats:   p.PopulationStats[ppl],
 		ppl:     ppl,
 		rounder: newRounder(),
+		known:   known,
 	}
 	return s
 }
 
 func (dp *DP) SolveFromSavedProbabilistic(sorting uint8) map[string][]uint8 {
 	numSegments := 2
-	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+	_, target, roundingError := dp.getTargetAndWeightsAsInts()
 
 	state := loadProbabilisticState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
 	targets := []int64{target}
@@ -118,7 +120,7 @@ func (dp *DP) SolveFromSavedProbabilistic(sorting uint8) map[string][]uint8 {
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
+		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)
 		solutions[ArrayToString(subset)] = subset
 	}
 	return solutions
@@ -127,7 +129,7 @@ func (dp *DP) SolveFromSavedProbabilistic(sorting uint8) map[string][]uint8 {
 func (dp *DP) SolveFromScratchProbabilistic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving probabilistically")
 	numSegments := 2
-	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+	_, target, roundingError := dp.getTargetAndWeightsAsInts()
 
 	state := dp.BuildProbabilisticState(numSegments, sorting)
 	//state := loadProbabilisticState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
@@ -143,63 +145,71 @@ func (dp *DP) SolveFromScratchProbabilistic(sorting uint8) map[string][]uint8 {
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
+		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)
 		solutions[ArrayToString(subset)] = subset
 	}
 	return solutions
 }
 
-func (dp *DP) SolveFromSavedDeterministic(sorting uint8) map[string][]uint8 {
-	numSegments := 2
-	fmt.Printf("Loci: %v\n", dp.p.Loci)
-	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-	state := loadDeterministicState(fmt.Sprintf("%s.dp", dp.p.PgsID), numSegments)
-	targets := make([]int64, 0)
-	for w := target; w > target-roundingError-1; w-- {
-		targets = append(targets, w)
-	}
-
-	solutionHeap := newGenHeap()
-	dp.deterministicMitM(numSegments, state.Indices, state.Tables, state.Betas, targets, solutionHeap, sorting)
-
-	solutions := make(map[string][]uint8)
-	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
-		solutions[ArrayToString(subset)] = subset
-	}
-	return solutions
-}
+//func (dp *DP) SolveFromSavedDeterministic(sorting uint8) map[string][]uint8 {
+//	numSegments := 2
+//	fmt.Printf("Loci: %v\n", dp.p.Loci)
+//	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+//	state := loadDeterministicState(fmt.Sprintf("%s.dp", dp.p.PgsID), numSegments)
+//	targets := make([]int64, 0)
+//	for w := target; w > target-roundingError-1; w-- {
+//		targets = append(targets, w)
+//	}
+//
+//	solutionHeap := newGenHeap()
+//	dp.deterministicMitM(numSegments, state.Indices, state.Tables, state.Betas, targets, solutionHeap, sorting)
+//
+//	solutions := make(map[string][]uint8)
+//	for _, sol := range *solutionHeap {
+//		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
+//		solutions[ArrayToString(subset)] = subset
+//	}
+//	return solutions
+//}
 
 func (dp *DP) SolveFromScratchDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
 	//fmt.Printf("Loci: %v\n", dp.p.Loci)
-	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
 
-	state := dp.BuildDeterministicState(numSegments)
-	//state := loadProbabilisticState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
+	indices := splitIndices(dp.p.Loci, dp.known, numSegments)
+	betas := make([]map[uint8]int64, numSegments)
+	for i := 0; i < numSegments; i++ {
+		betas[i] = makeBetaMap(weights, indices[i])
+	}
+
+	maxTotalPositive, maxTotalNegative := GetMaxTotal(betas)
+	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
+	tables := make([]map[int64][]uint8, numSegments)
+	for i := 0; i < numSegments; i++ {
+		tables[i] = calculateSubsetSumTable(betas[i], indices[i], upper, lower)
+	}
+
 	targets := make([]int64, 0)
 	for w := target; w > target-roundingError-1; w-- {
 		targets = append(targets, w)
 	}
 
 	solutionHeap := newGenHeap()
-	dp.deterministicMitM(numSegments, state.Indices, state.Tables, state.Betas, targets, solutionHeap, sorting)
+	dp.deterministicMitM(numSegments, indices, tables, betas, targets, solutionHeap, sorting)
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
+		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)
 		solutions[ArrayToString(subset)] = subset
 	}
 	return solutions
 }
 
 func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uint8]int64) {
-	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
 	//freqSortedIndices := sortByEffectAlleleFreq(dp.stats.AF, dp.p.EffectAlleles)
-
-	var splitIdxs []int
-	splitIdxs = []int{0, len(weights) / 2, len(weights)}
 	//// Make sure that the frequency bins are not split
 	//preSplitIdx := splitIdxs[1] - 1
 	//postSplitIdx := splitIdxs[1]
@@ -219,14 +229,7 @@ func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uin
 	//		break
 	//	}
 	//}
-	indices := make([][]int, numSeg)
-	for i := 0; i < numSeg; i++ {
-		indices[i] = make([]int, 0)
-		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
-			indices[i] = append(indices[i], j)
-			//indices[i] = append(indices[i], freqSortedIndices[j])
-		}
-	}
+	indices := splitIndices(dp.p.Loci, dp.known, numSeg)
 	betas := make([]map[uint8]int64, numSeg)
 	for i := 0; i < numSeg; i++ {
 		betas[i] = makeBetaMap(weights, indices[i])
@@ -234,63 +237,63 @@ func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uin
 	return weights, target, roundingError, indices, betas
 }
 
-func (dp *DP) BuildDeterministicState(numSegments int) *DeterministicState {
-	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-	splitIdxs := []int{0, len(weights) / 2, len(weights)}
-	indices := make([][]int, numSegments)
-	for i := 0; i < numSegments; i++ {
-		indices[i] = make([]int, 0)
-		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
-			indices[i] = append(indices[i], j)
-		}
-	}
-	betas := make([]map[uint8]int64, numSegments)
-	for i := 0; i < numSegments; i++ {
-		betas[i] = makeBetaMap(weights, indices[i])
-	}
+//func (dp *DP) BuildDeterministicState(numSegments int) *DeterministicState {
+//	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
+//	splitIdxs := []int{0, len(weights) / 2, len(weights)}
+//	indices := make([][]int, numSegments)
+//	for i := 0; i < numSegments; i++ {
+//		indices[i] = make([]int, 0)
+//		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
+//			indices[i] = append(indices[i], j)
+//		}
+//	}
+//	betas := make([]map[uint8]int64, numSegments)
+//	for i := 0; i < numSegments; i++ {
+//		betas[i] = makeBetaMap(weights, indices[i])
+//	}
+//
+//	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
+//	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
+//	tables := make([]map[int64][]uint8, numSegments)
+//	for i := 0; i < numSegments; i++ {
+//		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
+//	}
+//	return newDeterministicState(indices, tables, betas)
+//}
 
-	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
-	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
-	tables := make([]map[int64][]uint8, numSegments)
-	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
-	}
-	return newDeterministicState(indices, tables, betas)
-}
+//func SaveDeterministicState(state *DeterministicState, filepath string) {
+//	tf, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+//	if err != nil {
+//		log.Fatalf("Error opening tables file: %v", err)
+//	}
+//	defer tf.Close()
+//	encoder := json.NewEncoder(tf)
+//	if err = encoder.Encode(state); err != nil {
+//		log.Fatalf("Error encoding tables: %v", err)
+//	}
+//}
 
-func SaveDeterministicState(state *DeterministicState, filepath string) {
-	tf, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Error opening tables file: %v", err)
-	}
-	defer tf.Close()
-	encoder := json.NewEncoder(tf)
-	if err = encoder.Encode(state); err != nil {
-		log.Fatalf("Error encoding tables: %v", err)
-	}
-}
-
-func loadDeterministicState(filename string, numSegments int) *DeterministicState {
-	filepath := path.Join(params.DataFolder, filename)
-	tf, err := os.Open(filepath)
-	if err != nil {
-		log.Fatalf("Error opening tables file: %v", err)
-	}
-	defer tf.Close()
-	decoder := json.NewDecoder(tf)
-	tables := make([]map[int64][]uint8, numSegments)
-	betas := make([]map[uint8]int64, numSegments)
-	indices := make([][]int, numSegments)
-	state := &DeterministicState{Indices: indices, Tables: tables, Betas: betas}
-	if err = decoder.Decode(state); err != nil {
-		log.Fatalf("Error decoding tables: %v", err)
-	}
-	return state
-}
+//func loadDeterministicState(filename string, numSegments int) *DeterministicState {
+//	filepath := path.Join(params.DataFolder, filename)
+//	tf, err := os.Open(filepath)
+//	if err != nil {
+//		log.Fatalf("Error opening tables file: %v", err)
+//	}
+//	defer tf.Close()
+//	decoder := json.NewDecoder(tf)
+//	tables := make([]map[int64][]uint8, numSegments)
+//	betas := make([]map[uint8]int64, numSegments)
+//	indices := make([][]int, numSegments)
+//	state := &DeterministicState{Indices: indices, Tables: tables, Betas: betas}
+//	if err = decoder.Decode(state); err != nil {
+//		log.Fatalf("Error decoding tables: %v", err)
+//	}
+//	return state
+//}
 
 func (dp *DP) BuildProbabilisticState(numSegments int, sorting uint8) *ProbabilisticState {
-	weights, target, roundingError, indices, betas := dp.PrepareData(numSegments)
-	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
+	_, target, roundingError, indices, betas := dp.PrepareData(numSegments)
+	maxTotalPositive, maxTotalNegative := GetMaxTotal(betas)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
 	nodes := make([]map[int64]*Node, numSegments)
 	for i := 0; i < numSegments; i++ {
@@ -485,8 +488,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 	var nextLikelihood float32
 	//var nextChi float32
 	var prevSum, nextSum, weight int64
-	for i, pos := range indices {
-		fmt.Printf("Position %d/%d\n", i, len(betas))
+	for _, pos := range indices {
+		//fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[uint8(pos)] > 0 {
 			lowerBound += pgs.Ploidy * betas[uint8(pos)]
 		} else {
@@ -559,18 +562,11 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 }
 
 // We assume that the weights are sorted in ascending order
-func calculateSubsetSumTable(betas map[uint8]int64, upperBound, lowerBound int64) map[int64][]uint8 {
+func calculateSubsetSumTable(betas map[uint8]int64, indices []int, upperBound, lowerBound int64) map[int64][]uint8 {
 	// Fill out the table using dynamic programming
 	table := make(map[int64][]uint8)
 	// add the zero weight
 	table[0] = make([]uint8, 0)
-	indices := make([]uint8, 0, len(betas))
-	for i := range betas {
-		indices = append(indices, i)
-	}
-	sort.Slice(indices, func(i, j int) bool {
-		return indices[i] < indices[j]
-	})
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
 	var k uint8
@@ -578,15 +574,15 @@ func calculateSubsetSumTable(betas map[uint8]int64, upperBound, lowerBound int64
 	for _, pos := range indices {
 		//i++
 		//fmt.Printf("Position %d/%d\n", i, len(indices))
-		if betas[pos] > 0 {
-			lowerBound += pgs.Ploidy * betas[pos]
+		if betas[uint8(pos)] > 0 {
+			lowerBound += pgs.Ploidy * betas[uint8(pos)]
 		} else {
-			upperBound += pgs.Ploidy * betas[pos]
+			upperBound += pgs.Ploidy * betas[uint8(pos)]
 		}
 		newSums := make([]int64, 0)
 		for _, prevSum = range existingSums {
 			for k = 1; k <= pgs.Ploidy; k++ {
-				weight = betas[pos] * int64(k)
+				weight = betas[uint8(pos)] * int64(k)
 				nextSum = prevSum + weight
 				if nextSum < lowerBound || nextSum > upperBound {
 					continue
@@ -595,7 +591,7 @@ func calculateSubsetSumTable(betas map[uint8]int64, upperBound, lowerBound int64
 					table[nextSum] = make([]uint8, 0)
 					newSums = append(newSums, nextSum)
 				}
-				table[nextSum] = append(table[nextSum], pgs.Ploidy*pos+k-1)
+				table[nextSum] = append(table[nextSum], pgs.Ploidy*uint8(pos)+k-1)
 			}
 		}
 		existingSums = append(existingSums, newSums...)
@@ -679,6 +675,27 @@ func backtrack(path []uint8, result *[][]uint8, sum int64, table map[int64][]uin
 	}
 }
 
+func splitIndices(loci []string, known map[int]uint8, numSegments int) [][]int {
+	numUnknownLoci := len(loci) - len(known)
+	indices := make([][]int, numSegments)
+	for i := 0; i < numSegments; i++ {
+		indices[i] = make([]int, 0)
+	}
+	count := 0
+	for i := range loci {
+		if _, ok := known[i]; ok {
+			continue
+		}
+		count++
+		if count <= numUnknownLoci/numSegments {
+			indices[0] = append(indices[0], i)
+		} else {
+			indices[1] = append(indices[1], i)
+		}
+	}
+	return indices
+}
+
 func makeBetaMap(betas []int64, indices []int) map[uint8]int64 {
 	bmap := make(map[uint8]int64)
 	for _, idx := range indices {
@@ -688,36 +705,22 @@ func makeBetaMap(betas []int64, indices []int) map[uint8]int64 {
 }
 
 func scaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Decimal) []*apd.BigInt {
-	//var err error
-	//var ok bool
 	scaled := make([]*apd.BigInt, len(weights))
 	for i := range weights {
 		scaled[i] = DecimalToBigInt(ctx, weights[i], multiplier)
-		//tmp := new(apd.Decimal)
-		//_, err = ctx.Mul(tmp, weights[i], multiplier)
-		//if err != nil {
-		//	log.Fatalf("Error scaling weights: %v", err)
-		//}
-		//_, err = ctx.RoundToIntegralValue(tmp, tmp)
-		//if err != nil {
-		//	log.Fatalf("Error rounding weights: %v", err)
-		//}
-		//scaled[i] = new(apd.BigInt)
-		//_, ok = scaled[i].SetString(tmp.String(), 10)
-		//if !ok {
-		//	log.Fatalf("Error converting scaled weight to apd.BigInt: %s", tmp.String())
-		//}
 	}
 	return scaled
 }
 
-func GetMaxTotal(values []int64) (int64, int64) {
+func GetMaxTotal(values []map[uint8]int64) (int64, int64) {
 	var positive, negative int64 = 0, 0
-	for _, v := range values {
-		if v > 0 {
-			positive += 2 * v
-		} else {
-			negative += 2 * v
+	for _, row := range values {
+		for _, v := range row {
+			if v > 0 {
+				positive += 2 * v
+			} else {
+				negative += 2 * v
+			}
 		}
 	}
 	return positive, negative
@@ -734,12 +737,25 @@ func lociToScore(loci []uint8, weights []*apd.BigInt) *apd.BigInt {
 	return score
 }
 
-func lociToGenotype(loci []uint8, total int, efal []uint8) []uint8 {
+func lociToGenotype(loci []uint8, total int, efal []uint8, knownAlleles map[int]uint8) []uint8 {
 	sol := make([]uint8, total)
 	for i := range efal {
 		if efal[i] == ReferenceAllele {
 			sol[pgs.Ploidy*i] = 1
 			sol[pgs.Ploidy*i+1] = 1
+		}
+		if knwn, ok := knownAlleles[i]; ok {
+			switch knwn {
+			case 0:
+				sol[pgs.Ploidy*i] = 0
+				sol[pgs.Ploidy*i+1] = 0
+			case 1:
+				sol[pgs.Ploidy*i] = 1
+				sol[pgs.Ploidy*i+1] = 0
+			case 2:
+				sol[pgs.Ploidy*i] = 1
+				sol[pgs.Ploidy*i+1] = 1
+			}
 		}
 	}
 	//
