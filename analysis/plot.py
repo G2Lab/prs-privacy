@@ -661,6 +661,33 @@ def accuracy(pgs_ids):
 #         plt.show()
 
 
+def sequential():
+    directory = "results/sequential/"
+    files = os.listdir(directory)
+    data = []
+    for file_name in files:
+        filepath = os.path.join(directory, file_name)
+        with open(filepath, 'r') as f:
+            content = json.load(f)
+        for result in content:
+            individual = result['Individual']
+            accuracies = result['Accuracies']
+            for label, value in accuracies.items():
+                data.append({'Individual': individual, 'Label': int(label), 'Value': value})
+
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.boxplot(x='Label', y='Value', data=df)
+    plt.title('Accuracy distribution by SNP count')
+    plt.xlabel('#SNPs targeted')
+    plt.ylabel('Accuracy')
+    plt.tight_layout()
+#     plt.show()
+    fig.savefig('sequential.png', dpi=300, bbox_inches='tight')
+
+
+
+
 
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
@@ -693,4 +720,5 @@ if __name__ == "__main__":
     # likelihood_spectrum_total()
 #     loci_coverage()
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-    accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
+#     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
+    sequential()

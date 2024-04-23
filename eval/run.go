@@ -127,16 +127,6 @@ func sequentialSolving() {
 		return
 	}
 
-	pgsToLoci := make(map[string]map[string]struct{})
-	for locus, pgsIDs := range lociToPgs {
-		for _, pgsID := range pgsIDs {
-			if _, ok := pgsToLoci[pgsID]; !ok {
-				pgsToLoci[pgsID] = make(map[string]struct{})
-			}
-			pgsToLoci[pgsID][locus] = struct{}{}
-		}
-	}
-
 	//INDIVIDUAL := "HG00119"
 	individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
 		"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
@@ -162,6 +152,15 @@ func sequentialSolving() {
 		allPgs := make([]string, 0, len(idsToNumVariants))
 		for id, _ := range idsToNumVariants {
 			allPgs = append(allPgs, id)
+		}
+		pgsToLoci := make(map[string]map[string]struct{})
+		for locus, pgsIDs := range lociToPgs {
+			for _, pgsID := range pgsIDs {
+				if _, ok := pgsToLoci[pgsID]; !ok {
+					pgsToLoci[pgsID] = make(map[string]struct{})
+				}
+				pgsToLoci[pgsID][locus] = struct{}{}
+			}
 		}
 		sort.Slice(allPgs, func(i, j int) bool {
 			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])

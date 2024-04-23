@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+//	func GetChromosomeFilepath(chr, dataset string) string {
+//		var path string
+//		switch dataset {
+//		case "1000genomes":
+//			path = "/gpfs/commons/datasets/1000genomes/hg38/"
+//			return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v3plus_nounphased.rsID.genotypes.GRCh38_dbSNP_no_SVs.vcf.gz"
+//		case "relatives":
+//			path = "/gpfs/commons/datasets/1000genomes/release-20130502-supporting/related_samples_vcf/"
+//			return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5_related_samples.20130502.genotypes.vcf.gz"
+//		}
+//	}
 func GetChromosomeFilepath(chr string) string {
 	path := "/gpfs/commons/datasets/1000genomes/hg38/"
 	return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v3plus_nounphased.rsID.genotypes.GRCh38_dbSNP_no_SVs.vcf.gz"
