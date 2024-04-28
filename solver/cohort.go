@@ -58,79 +58,89 @@ func (c Cohort) Populate(p *pgs.PGS) {
 
 func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 	var err error
+	var ok bool
 	var output []byte
 	var allele []uint8
+	var allSamples []string
 	var positionSamples, sampleAlleles []string
 	var found, locusAdded bool
+	datasets := []string{tools.GG, tools.RL}
 	for _, locus := range p.Loci {
-		found, locusAdded = false, false
-		chr, position := tools.SplitLocus(locus)
-		query, args := tools.IndividualSnpsQuery(chr, position)
-		cmd := exec.Command(query, args...)
-		output, err = cmd.Output()
-		if err != nil {
-			fmt.Println("Error executing bcftools command:", err)
-			return err
-		}
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines[:len(lines)-1] {
-			positionSamples = strings.Split(line, "-")
-			if positionSamples[0] != locus {
-				//fmt.Printf("Locus %s does not match %s\n", locus, positionSamples[0])
-				continue
+		for _, dataset := range datasets {
+			found, locusAdded = false, false
+			chr, position := tools.SplitLocus(locus)
+			query, args := tools.IndividualSnpsQuery(chr, position, dataset)
+			cmd := exec.Command(query, args...)
+			output, err = cmd.Output()
+			if err != nil {
+				fmt.Println("Error executing bcftools command:", err)
+				return err
 			}
-			found = true
-			samples := strings.Split(positionSamples[1], "\t")
-			samples = samples[:len(samples)-1]
-			for _, sample := range samples {
-				sampleAlleles = strings.Split(sample, "=")
-				if len(sampleAlleles) != 2 {
-					fmt.Printf("Locus %s -- error splitting sample: %s\n", locus, sample)
-					return err
-				}
-				idv := sampleAlleles[0]
-				snp := sampleAlleles[1]
-				snp, err = tools.NormalizeSnp(snp)
-				if err != nil {
-					fmt.Printf("Error normalizing %s: %v", snp, err)
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines[:len(lines)-1] {
+				positionSamples = strings.Split(line, "-")
+				if positionSamples[0] != locus {
+					//fmt.Printf("Locus %s does not match %s\n", locus, positionSamples[0])
 					continue
 				}
-				allele, err = tools.SnpToPair(snp)
-				if err != nil {
-					fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
-					continue
-				}
-				if _, ok := c[idv]; !ok {
-					c[idv] = NewIndividual()
-				}
-				if locusAdded {
-					// If the same locus is repeated several times with different ref/alt alleles
-					sum := c[idv].Genotype[len(c[idv].Genotype)-1] + c[idv].Genotype[len(c[idv].Genotype)-2] + allele[0] + allele[1]
-					switch {
-					case sum == 1:
-						c[idv].Genotype[len(c[idv].Genotype)-2] = 1
-						c[idv].Genotype[len(c[idv].Genotype)-1] = 0
-					case sum >= 2:
-						c[idv].Genotype[len(c[idv].Genotype)-2] = 1
-						c[idv].Genotype[len(c[idv].Genotype)-1] = 1
-					default:
+				found = true
+				samples := strings.Split(positionSamples[1], "\t")
+				samples = samples[:len(samples)-1]
+				for _, sample := range samples {
+					sampleAlleles = strings.Split(sample, "=")
+					if len(sampleAlleles) != 2 {
+						fmt.Printf("Locus %s -- error splitting sample: %s\n", locus, sample)
+						return err
 					}
-				} else {
-					c[idv].Genotype = append(c[idv].Genotype, allele...)
+					idv := sampleAlleles[0]
+					snp := sampleAlleles[1]
+					snp, err = tools.NormalizeSnp(snp)
+					if err != nil {
+						fmt.Printf("Error normalizing %s: %v", snp, err)
+						continue
+					}
+					allele, err = tools.SnpToPair(snp)
+					if err != nil {
+						fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
+						continue
+					}
+					if _, ok := c[idv]; !ok {
+						c[idv] = NewIndividual()
+					}
+					if locusAdded {
+						// If the same locus is repeated several times with different ref/alt alleles
+						sum := c[idv].Genotype[len(c[idv].Genotype)-1] + c[idv].Genotype[len(c[idv].Genotype)-2] + allele[0] + allele[1]
+						switch {
+						case sum == 1:
+							c[idv].Genotype[len(c[idv].Genotype)-2] = 1
+							c[idv].Genotype[len(c[idv].Genotype)-1] = 0
+						case sum >= 2:
+							c[idv].Genotype[len(c[idv].Genotype)-2] = 1
+							c[idv].Genotype[len(c[idv].Genotype)-1] = 1
+						default:
+						}
+					} else {
+						c[idv].Genotype = append(c[idv].Genotype, allele...)
+					}
 				}
+				locusAdded = true
 			}
-			locusAdded = true
-		}
-		if !found {
-			// If there is no data, treat as zeros for all individuals
-			if len(c) == 0 {
-				allSamples := All1000GenomeSamples()
+			if !found {
+				// If there is no data, treat as zeros for all individuals
+				switch dataset {
+				case tools.GG:
+					allSamples = All1000GenomesSamples()
+				case tools.RL:
+					allSamples = AllRelativeSamples()
+				default:
+					log.Fatalln("Unknown dataset:", dataset)
+				}
 				for _, indv := range allSamples {
-					c[indv] = NewIndividual()
+					if _, ok = c[indv]; !ok {
+						c[indv] = NewIndividual()
+					}
+					c[indv].Genotype = append(c[indv].Genotype, ReferenceAllele, ReferenceAllele)
 				}
-			}
-			for indv := range c {
-				c[indv].Genotype = append(c[indv].Genotype, ReferenceAllele, ReferenceAllele)
 			}
 		}
 	}

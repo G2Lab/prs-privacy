@@ -4,87 +4,91 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
-	"os/exec"
-	"strings"
 )
 
-//	func GetChromosomeFilepath(chr, dataset string) string {
-//		var path string
-//		switch dataset {
-//		case "1000genomes":
-//			path = "/gpfs/commons/datasets/1000genomes/hg38/"
-//			return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v3plus_nounphased.rsID.genotypes.GRCh38_dbSNP_no_SVs.vcf.gz"
-//		case "relatives":
-//			path = "/gpfs/commons/datasets/1000genomes/release-20130502-supporting/related_samples_vcf/"
-//			return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5_related_samples.20130502.genotypes.vcf.gz"
-//		}
-//	}
-func GetChromosomeFilepath(chr string) string {
-	path := "/gpfs/commons/datasets/1000genomes/hg38/"
-	return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v3plus_nounphased.rsID.genotypes.GRCh38_dbSNP_no_SVs.vcf.gz"
+const (
+	GG = "1000Genomes"
+	RL = "Relatives"
+	//UKBB = "UKBB"
+)
+
+func GetChromosomeFilepath(chr, dataset string) string {
+	switch dataset {
+	case GG:
+		path := "/gpfs/commons/datasets/1000genomes/GRCh37/"
+		return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
+	case RL:
+		path := "/gpfs/commons/datasets/1000genomes/release-20130502-supporting/related_samples_vcf/"
+		return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5_related_samples.20130502.genotypes.vcf.gz"
+	default:
+		log.Fatalln("Unknown dataset:", dataset)
+		return ""
+	}
 }
 
-func IndividualSnpsQuery(c, p string) (string, []string) {
+func IndividualSnpsQuery(c, p, dataset string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
 		"%CHROM:%POS-[%SAMPLE=%GT\t]\n",
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, p, p),
-		GetChromosomeFilepath(c),
+		GetChromosomeFilepath(c, dataset),
 	}
 }
 
-func RangeQuery(searchPattern, c, posBegin, posEnd string) (string, []string) {
+func RangeQuery(searchPattern, c, posBegin, posEnd, dataset string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
 		searchPattern,
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, posBegin, posEnd),
-		GetChromosomeFilepath(c),
+		GetChromosomeFilepath(c, dataset),
 	}
 }
 
-func RangeSnpValuesQuery(c, posBegin, posEnd string) (string, []string) {
-	return RangeQuery("[%GT\t]\n", c, posBegin, posEnd)
-}
-func RangeGenotypesQuery(c, posBegin, posEnd string) (string, []string) {
-	return RangeQuery("%CHROM:%POS-[%SAMPLE=%GT\t]\n", c, posBegin, posEnd)
+func RangeSnpValuesQuery(c, posBegin, posEnd, dataset string) (string, []string) {
+	return RangeQuery("[%GT\t]\n", c, posBegin, posEnd, dataset)
 }
 
-func RangeNumSamplesQuery(c, posBegin, posEnd string) (string, []string) {
-	return RangeQuery("%NS\n", c, posBegin, posEnd)
-}
+//func RangeGenotypesQuery(c, posBegin, posEnd string) (string, []string) {
+//	return RangeQuery("%CHROM:%POS-[%SAMPLE=%GT\t]\n", c, posBegin, posEnd)
+//}
+//
+//func RangeNumSamplesQuery(c, posBegin, posEnd string) (string, []string) {
+//	return RangeQuery("%NS\n", c, posBegin, posEnd)
+//}
+//
+//func RangeTotalAllelesQuery(c, posBegin, posEnd string) (string, []string) {
+//	return RangeQuery("%AN\n", c, posBegin, posEnd)
+//}
+//
+//func RangePopulationAFQuery(population, c, posBegin, posEnd string) (string, []string) {
+//	return RangeQuery(fmt.Sprintf("%%%s_AF\n", population), c, posBegin, posEnd)
+//}
 
-func RangeTotalAllelesQuery(c, posBegin, posEnd string) (string, []string) {
-	return RangeQuery("%AN\n", c, posBegin, posEnd)
-}
-
-func RangePopulationAFQuery(population, c, posBegin, posEnd string) (string, []string) {
-	return RangeQuery(fmt.Sprintf("%%%s_AF\n", population), c, posBegin, posEnd)
-}
-
-func AllChrPositionsQuery(c string) (string, []string) {
+func AllChrPositionsQuery(c, dataset string) (string, []string) {
 	return "bcftools", []string{
 		"query",
 		"-f",
 		"%POS\t",
-		GetChromosomeFilepath(c),
+		GetChromosomeFilepath(c, dataset),
 	}
 }
 
-func GetSnpsAtPosition(c string, p string) ([]string, error) {
-	query, args := RangeSnpValuesQuery(c, p, p)
-	cmd := exec.Command(query, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	samples := strings.Split(string(output), "\t")
-	return samples[:len(samples)-1], nil
-}
+//func GetSnpsAtPosition(c string, p string) ([]string, error) {
+//	query, args := RangeSnpValuesQuery(c, p, p)
+//	cmd := exec.Command(query, args...)
+//	output, err := cmd.Output()
+//	if err != nil {
+//		return nil, err
+//	}
+//	samples := strings.Split(string(output), "\t")
+//	return samples[:len(samples)-1], nil
+//}
 
 func NormalizeAllele(allele string) (string, error) {
 	switch allele {

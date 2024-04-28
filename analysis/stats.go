@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -11,6 +13,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -73,39 +76,10 @@ func numVariantsStats(fileNames []string) {
 }
 
 func getPGSWithFewerVariants(limit int) {
-	file, err := os.Open("catalog/pgs_all_metadata_scores.csv")
+	ids, err := fewerVariantsPGS(limit)
 	if err != nil {
-		log.Println("Error opening catalog metadata file:", err)
+		log.Println("Error:", err)
 		return
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	header, err := reader.Read()
-	if err != nil {
-		fmt.Println("Error reading header:", err)
-		return
-	}
-	numVariantColumn, pgsIdColumn := -1, -1
-	for i, field := range header {
-		if field == "Number of Variants" {
-			numVariantColumn = i
-		}
-		if field == "Polygenic Score (PGS) ID" {
-			pgsIdColumn = i
-		}
-	}
-	ids := make([]string, 0)
-	total := 0
-	for {
-		record, err := reader.Read()
-		if err != nil {
-			break
-		}
-		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && numVariants < limit {
-			ids = append(ids, record[pgsIdColumn])
-		}
-		total++
 	}
 	catalogFolder := "catalog"
 	hasXYchromosomes := make([]string, 0)
@@ -123,11 +97,12 @@ func getPGSWithFewerVariants(limit int) {
 	pgsToPgp := make(map[string]string)
 idLoop:
 	for _, id := range ids {
+		fmt.Printf("==== %s ====\n", id)
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh38.txt"))
+		err = p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Println("Error:", err)
-			return
+			continue idLoop
 		}
 		if p.NumVariants < 2 {
 			tooFewVariants = append(tooFewVariants, id)
@@ -165,8 +140,6 @@ idLoop:
 			lociToPgs[locus][id] = true
 		}
 	}
-	//fmt.Println(len(ids), "PGS with less than", limit, "variants")
-	fmt.Println("Total PGS:", total)
 	fmt.Println("PGS with less than", limit, "variants:", len(ids))
 	fmt.Println("PGS with X or Y chromosomes:", len(hasXYchromosomes), hasXYchromosomes)
 	fmt.Println("PGS with less than 2 variants:", len(tooFewVariants), tooFewVariants)
@@ -272,18 +245,19 @@ func validateBases() {
 	for id, num := range idsToNumVariants {
 		fmt.Printf("==== %s ====\n", id)
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(filepath.Join("filtered", id+"_hmPOS_GRCh38.txt"))
+		err = p.LoadCatalogFile(filepath.Join("catalog", id+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Println("Error:", err)
 			return
 		}
 		err = p.LoadStats()
 		if err != nil {
+			fmt.Printf("Discarding %s: %v\n", id, err)
 			discarded = append(discarded, p.PgsID)
 			continue
 		}
-		err = copyFile(filepath.Join("filtered", id+"_hmPOS_GRCh38.txt"),
-			filepath.Join("inputs", id+"_hmPOS_GRCh38.txt"))
+		err = copyFile(filepath.Join("catalog", id+"_hmPOS_GRCh37.txt"),
+			filepath.Join("inputs", id+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Println("Error copying file:", err)
 		}
@@ -324,7 +298,7 @@ func makeLociIndex() {
 	for id := range idsToNumVariants {
 		fmt.Printf("==== %s ====\n", id)
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(filepath.Join("inputs", id+"_hmPOS_GRCh38.txt"))
+		err = p.LoadCatalogFile(filepath.Join("inputs", id+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Println("Error:", err)
 			return
@@ -545,6 +519,114 @@ filesLoop:
 	}
 }
 
+func downloadScoreFiles(limit int) {
+	ids, err := fewerVariantsPGS(limit)
+	if err != nil {
+		log.Println("Error:", err)
+		return
+	}
+	localFolder := "catalog"
+	ftpServer := "https://ftp.ebi.ac.uk"
+	ftpFolder := "/pub/databases/spot/pgs/scores/"
+	var out *os.File
+	var url string
+	for _, id := range ids {
+		fmt.Printf("==== %s ====\n", id)
+		// Create the output file
+		filename := filepath.Join(localFolder, id+"_hmPOS_GRCh37.txt")
+		out, err = os.Create(filename)
+		if err != nil {
+			log.Println("Error creating output file:", err)
+			return
+		}
+		defer out.Close()
+
+		// Send GET request to download the file
+		url = fmt.Sprintf("%s%s%s/ScoringFiles/Harmonized/%s_hmPOS_GRCh37.txt.gz", ftpServer, ftpFolder, id, id)
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Println("Error sending GET request:", err)
+		}
+		defer resp.Body.Close()
+
+		// Check if response status code is OK
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("%s: Unexpected HTTP status code %d\n", id, resp.StatusCode)
+			continue
+		}
+
+		// Decompress the HTTP response body
+		decompressedData, err := decompressHTTPResponse(resp.Body)
+		if err != nil {
+			fmt.Printf("%s: Error decompressing file %v\n", id, err)
+			continue
+		}
+		// Write the decompressed data to a file
+		_, err = out.Write(decompressedData)
+		if err != nil {
+			fmt.Printf("%s: Error writing decompressed data to file %v\n", id, err)
+			continue
+		}
+	}
+}
+
+func decompressHTTPResponse(body io.Reader) ([]byte, error) {
+	// Create a gzip reader for the HTTP response body
+	gzReader, err := gzip.NewReader(body)
+	if err != nil {
+		return nil, err
+	}
+	defer gzReader.Close()
+
+	// Read and decompress the data from the gzip reader
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, gzReader)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func fewerVariantsPGS(limit int) ([]string, error) {
+	file, err := os.Open("catalog/pgs_all_metadata_scores.csv")
+	if err != nil {
+		log.Println("Error opening catalog metadata file:", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return nil, err
+	}
+	numVariantColumn, pgsIdColumn := -1, -1
+	for i, field := range header {
+		if field == "Number of Variants" {
+			numVariantColumn = i
+		}
+		if field == "Polygenic Score (PGS) ID" {
+			pgsIdColumn = i
+		}
+	}
+	ids := make([]string, 0)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && numVariants < limit {
+			ids = append(ids, record[pgsIdColumn])
+		}
+	}
+	return ids, nil
+}
+
 func removeFiles() {
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
@@ -581,6 +663,8 @@ func main() {
 		return
 	}
 	switch *expr {
+	case "download":
+		downloadScoreFiles(500)
 	case "num":
 		numVariantsStats(filenames)
 	case "overlap":

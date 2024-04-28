@@ -199,6 +199,12 @@ scannerLoop:
 		fields := make(map[string]interface{})
 		values := strings.Split(line, "\t")
 		for i, value := range values {
+			if p.Fieldnames[i] == "hm_pos" || p.Fieldnames[i] == "hm_chr" {
+				if len(value) == 0 || value == "Unknown" {
+					fmt.Printf("%s: No mapping for variant %s\n", p.PgsID, values[0])
+					return errors.New("no mapping for one of the variants")
+				}
+			}
 			if p.Fieldnames[i] == "hm_chr" {
 				if strings.Contains(value, "_") {
 					value = strings.Split(value, "_")[0]
@@ -210,12 +216,6 @@ scannerLoop:
 							}
 						}
 					}
-				}
-				// If there is no mapping, we skip the variant
-				if len(value) == 0 {
-					fmt.Printf("%s: No mapping for variant %s\n", p.PgsID, values[0])
-					value = "-1"
-					//continue scannerLoop
 				}
 			}
 			fields[p.Fieldnames[i]] = value
@@ -387,7 +387,7 @@ func (p *PGS) extractPopulationAlleles() error {
 	for k, locus := range p.Loci {
 		missing, alleleSet = true, false
 		chr, pos := tools.SplitLocus(locus)
-		query, args := tools.RangeQuery(refAltQ, chr, pos, pos)
+		query, args := tools.RangeQuery(refAltQ, chr, pos, pos, tools.GG)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {
@@ -421,7 +421,7 @@ func (p *PGS) extractPopulationAlleles() error {
 				if !alleleSet {
 					p.EffectAlleles[k] = 1
 				}
-				if j == len(lines)-1 {
+				if j == len(lines)-2 {
 					return errors.New("effect allele mismatch")
 				}
 			}
@@ -458,7 +458,7 @@ lociLoop:
 	for k, locus := range p.Loci {
 		missing, locusAdded = true, false
 		chr, pos := tools.SplitLocus(locus)
-		query, args := tools.RangeQuery(populationQ, chr, pos, pos)
+		query, args := tools.RangeQuery(populationQ, chr, pos, pos, tools.GG)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"os"
 	"path"
 	"runtime/pprof"
@@ -59,7 +61,9 @@ func main() {
 	//sortingChoiceParallel()
 	//accuracyParallel()
 	//findAllSolutions()
-	sequentialSolving()
+	//sequentialSolving()
+	//kinshipExperiment()
+	kingTest()
 }
 
 type Result struct {
@@ -96,9 +100,302 @@ func NewReference(id string, score *apd.Decimal, likelihood float64) *Reference 
 	}
 }
 
+func kingTest() {
+	fmt.Println("King test")
+	related := readRelatedIndividuals()
+	individuals := solver.All1000GenomesAndRelativeSamples()
+	db := make(map[string]map[string]uint8)
+	alfreq := make(map[string]map[string][]float32)
+	for _, idv := range individuals {
+		db[idv] = make(map[string]uint8)
+		alfreq[idv] = make(map[string][]float32)
+	}
+
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	file, err = os.Open("results/validated_loci.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder = json.NewDecoder(file)
+	var lociToPgs map[string][]string
+	err = decoder.Decode(&lociToPgs)
+	if err != nil {
+		log.Println("Error decoding validated loci:", err)
+		return
+	}
+
+	allPgs := make([]string, 0, len(idsToNumVariants))
+	for id, _ := range idsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	pgsToLoci := make(map[string]map[string]struct{})
+	for locus, pgsIDs := range lociToPgs {
+		for _, pgsID := range pgsIDs {
+			if _, ok := pgsToLoci[pgsID]; !ok {
+				pgsToLoci[pgsID] = make(map[string]struct{})
+			}
+			pgsToLoci[pgsID][locus] = struct{}{}
+		}
+	}
+	sort.Slice(allPgs, func(i, j int) bool {
+		return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+	})
+
+	var pgsID, popl string
+	firstIdv := individuals[0]
+	guessThreshold := 3000
+	populations := tools.LoadAncestry()
+	for {
+		pgsID = allPgs[0]
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		fmt.Printf("======== %s ========\n", p.PgsID)
+		err = p.LoadStats()
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return
+		}
+		cohort := solver.NewCohort(p)
+		for i, locus := range p.Loci {
+			for idv := range db {
+				if _, ok := db[idv][locus]; ok {
+					continue
+				}
+				db[idv][locus] = cohort[idv].Genotype[0] + cohort[idv].Genotype[1]
+				popl = populations[idv]
+				if strings.Contains(popl, ",") {
+					popl = strings.Split(popl, ",")[0]
+				}
+				alfreq[idv][locus] = p.PopulationStats[popl].AF[i]
+			}
+		}
+		if len(db[firstIdv]) > guessThreshold {
+			break
+		}
+		allPgs = allPgs[1:]
+		for _, locus := range p.Loci {
+			for _, id := range lociToPgs[locus] {
+				if id == pgsID {
+					continue
+				}
+				if _, ok := pgsToLoci[id][locus]; ok {
+					delete(pgsToLoci[id], locus)
+				}
+			}
+		}
+		sort.Slice(allPgs, func(i, j int) bool {
+			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+		})
+	}
+	for idv, relatives := range related {
+		for _, relative := range relatives {
+			fmt.Printf("### %s->%s: %.3f, %.3f, %.3f\n", idv, relative, kingHomo(db[idv], db[relative], alfreq[idv]),
+				kingRobust(db[idv], db[relative]), kingRobustBetween(db[idv], db[relative]))
+		}
+	}
+
+}
+
+func kinshipExperiment() {
+	fmt.Printf("Kinship experiment\n")
+	related := readRelatedIndividuals()
+	individuals := make([]string, 0)
+	for ind, _ := range related {
+		individuals = append(individuals, ind)
+	}
+	sort.Strings(individuals)
+	fmt.Println(individuals)
+	//individual := individuals[0]
+	individual := "NA19313"
+
+	dbSamples := solver.All1000GenomesSamples()
+	db := make(map[string]map[string]uint8)
+	for _, sample := range dbSamples {
+		db[sample] = make(map[string]uint8)
+	}
+
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	file, err = os.Open("results/validated_loci.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder = json.NewDecoder(file)
+	var lociToPgs map[string][]string
+	err = decoder.Decode(&lociToPgs)
+	if err != nil {
+		log.Println("Error decoding validated loci:", err)
+		return
+	}
+
+	allPgs := make([]string, 0, len(idsToNumVariants))
+	for id, _ := range idsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	pgsToLoci := make(map[string]map[string]struct{})
+	for locus, pgsIDs := range lociToPgs {
+		for _, pgsID := range pgsIDs {
+			if _, ok := pgsToLoci[pgsID]; !ok {
+				pgsToLoci[pgsID] = make(map[string]struct{})
+			}
+			pgsToLoci[pgsID][locus] = struct{}{}
+		}
+	}
+	sort.Slice(allPgs, func(i, j int) bool {
+		return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+	})
+
+	populations := tools.LoadAncestry()
+	indPop := populations[individual]
+	if strings.Contains(indPop, ",") {
+		indPop = strings.Split(indPop, ",")[0]
+	}
+	var pgsID string
+	var solmap map[string][]uint8
+	var solutions [][]uint8
+	alfreq := make(map[string][]float32)
+	guessedSnps := make(map[string]uint8)
+	trueSnps := make(map[string]uint8)
+	guessThreshold := 2000
+	for {
+		pgsID = allPgs[0]
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		fmt.Printf("======== %s ========\n", p.PgsID)
+		err = p.LoadStats()
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return
+		}
+		recoveredSnps := make(map[int]uint8)
+		for l, locus := range p.Loci {
+			if guess, ok := guessedSnps[locus]; ok {
+				recoveredSnps[l] = guess
+			}
+		}
+		fmt.Printf("Total SNPs %d, unknown %d\n", len(p.Loci), len(p.Loci)-len(recoveredSnps))
+		fmt.Printf("Recovered snps: %v\n", recoveredSnps)
+		cohort := solver.NewCohort(p)
+		for _, locus := range p.Loci {
+			for idv := range db {
+				if _, ok := db[idv][locus]; ok {
+					continue
+				}
+				db[idv][locus] = cohort[idv].Genotype[0] + cohort[idv].Genotype[1]
+			}
+		}
+		slv := solver.NewDP(cohort[individual].Score, p, indPop, recoveredSnps)
+		if len(p.Loci)-len(recoveredSnps) < DeterminismLimit {
+			solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+		} else {
+			solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+		}
+		solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+		if len(solutions) == 0 && len(recoveredSnps) > 0 {
+			fmt.Println("^^^ No solutions with extra loci, calculating from scratch ^^^")
+			slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
+			if len(p.Loci) < DeterminismLimit {
+				solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+			} else {
+				solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+			}
+			solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+		}
+		if len(solutions) > 0 {
+			fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[individual].Genotype))
+			for i, locus := range p.Loci {
+				if _, ok := guessedSnps[locus]; ok {
+					continue
+				}
+				guessedSnps[locus] = solutions[0][pgs.Ploidy*i] + solutions[0][pgs.Ploidy*i+1]
+			}
+		} else {
+			fmt.Println("!!!!!!! Still could not find a solution !!!!!!!")
+		}
+		for i, locus := range p.Loci {
+			if _, ok := trueSnps[locus]; ok {
+				continue
+			}
+			trueSnps[locus] = cohort[individual].Genotype[pgs.Ploidy*i] + cohort[individual].Genotype[pgs.Ploidy*i+1]
+			alfreq[locus] = p.PopulationStats[indPop].AF[i]
+		}
+		fmt.Printf("Guessed %d\n", len(guessedSnps))
+		if len(guessedSnps) > guessThreshold {
+			var accuracy float32 = 0.0
+			for locus, snp := range trueSnps {
+				if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
+					accuracy += 1
+				}
+			}
+			fmt.Printf("### Accuracy: %.3f\n", accuracy/float32(len(trueSnps)))
+			break
+		}
+		allPgs = allPgs[1:]
+		for _, locus := range p.Loci {
+			for _, id := range lociToPgs[locus] {
+				if id == pgsID {
+					continue
+				}
+				if _, ok := pgsToLoci[id][locus]; ok {
+					delete(pgsToLoci[id], locus)
+				}
+			}
+		}
+		sort.Slice(allPgs, func(i, j int) bool {
+			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+		})
+	}
+
+	var criteria float32 = 1.0 / float32(math.Pow(2, 9/2))
+	var phi float32
+	for idv, gen := range db {
+		phi = kingHomo(guessedSnps, gen, alfreq)
+		fmt.Printf("### %s->%s: %.3f\n", idv, individual, phi)
+		if phi > criteria {
+			fmt.Printf("########### %s->%s: %.3f\n", idv, individual, phi)
+		}
+	}
+}
+
 func sequentialSolving() {
 	//thresholds := []int{500, 1000, 1500, 2000, 2500}
-	thresholds := []int{500, 1000, 1500, 2000}
+	//thresholds := []int{500, 1000, 1500, 2000}
+	thresholds := []int{500, 1000, 1500}
 	fmt.Printf("Sequential solving for %d\n", thresholds)
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
@@ -127,11 +424,11 @@ func sequentialSolving() {
 		return
 	}
 
-	//INDIVIDUAL := "HG00119"
-	individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
-		"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
-		"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
-		"NA20289", "NA20792", "NA20868", "NA20895"}
+	individuals := []string{"NA19313"}
+	//individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
+	//	"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
+	//	"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
+	//	"NA20289", "NA20792", "NA20868", "NA20895"}
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
 	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
@@ -184,7 +481,7 @@ func sequentialSolving() {
 		for {
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
-			err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh38.txt"))
+			err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file: %v\n", err)
 				return
@@ -297,13 +594,47 @@ func sequentialSolving() {
 		log.Fatal("Cannot encode json", err)
 
 	}
-	//var accuracyWithMissed float32 = 0.0
-	//for locus, snp := range trueSnpsWithMissed {
-	//	if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
-	//		accuracyWithMissed += 1
-	//	}
-	//}
-	//fmt.Printf("Accuracy: %.3f\n", accuracyWithMissed/float32(len(trueSnpsWithMissed)))
+}
+
+func readRelatedIndividuals() map[string][]string {
+	file, err := os.Open("inputs/related_individuals.txt")
+	if err != nil {
+		log.Fatalf("Error opening related individuals file: %v", err)
+		return nil
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+	reader.Comma = '\t'
+
+	header, err := reader.Read()
+	if err != nil {
+		log.Fatalf("Error reading header: %v\n", err)
+		return nil
+	}
+	sampleColumn, relativesColumn := -1, -1
+	for i, field := range header {
+		if field == "Sample" {
+			sampleColumn = i
+		}
+		if field == "Reason for exclusion" {
+			relativesColumn = i
+		}
+	}
+
+	related := make(map[string][]string)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Error reading record: %v\n", err)
+			continue
+		}
+		split := strings.Split(record[relativesColumn], ":")
+		related[record[sampleColumn]] = strings.Split(split[len(split)-1], ",")
+	}
+	return related
 }
 
 type accuracyOutput struct {
@@ -332,7 +663,7 @@ func newAccuracyOutput(ind string, pop string, score *apd.Decimal, trueLikelihoo
 func accuracyParallel() {
 	resultFolder := "results/accuracy"
 	output := make([]*accuracyOutput, 0)
-	catalogFile := "PGS001835_hmPOS_GRCh38.txt"
+	catalogFile := "PGS001835_hmPOS_GRCh37.txt"
 	p := pgs.NewPGS()
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -343,7 +674,7 @@ func accuracyParallel() {
 	p.LoadStats()
 	cohort := solver.NewCohort(p)
 	populations := tools.LoadAncestry()
-	individuals := solver.All1000GenomeSamples()
+	individuals := solver.All1000GenomesSamples()
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
 	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
@@ -409,29 +740,29 @@ func findAllSolutions() {
 	INDIVIDUAL := "HG00119"
 
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000753_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000307_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002264_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS004246_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS004249_hmPOS_GRCh38.txt"
-	catalogFile := "PGS001828_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000154_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000753_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000043_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000307_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000845_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000534_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000011_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS003436_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002264_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS004246_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
+	catalogFile := "PGS001828_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -521,14 +852,14 @@ func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood
 //	DeterminismLimit := 35
 //	resultFolder := "results/sorting"
 //	output := make([]*sortingOutput, 0)
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000753_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS003760_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000851_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000753_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000154_hmPOS_GRCh37.txt"
+//	catalogFile := "PGS003760_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000851_hmPOS_GRCh37.txt"
 //	samplesPerPopulation := 10
 //	p := pgs.NewPGS()
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
@@ -636,15 +967,15 @@ func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood
 //	DeterminismLimit := 35
 //	resultFolder := "results/sorting"
 //	output := make([]*sortingOutput, 0)
-//	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000753_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000154_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS000851_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000753_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000154_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
+//	catalogFile := "PGS000851_hmPOS_GRCh37.txt"
 //	samplesPerPopulation := 10
 //	p := pgs.NewPGS()
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
@@ -745,12 +1076,12 @@ func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood
 
 func buildDPTables() {
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -795,15 +1126,15 @@ func buildDPTables() {
 //	//INDIVIDUAL := "NA20872"
 //
 //	p := pgs.NewPGS()
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 //	if err != nil {
 //		log.Printf("Error loading catalog file: %v\n", err)
@@ -838,11 +1169,11 @@ func buildDPTables() {
 //func evaluateReferences() {
 //	resFolder := "results"
 //	catalogFiles := []string{
-//		"PGS002302_hmPOS_GRCh38.txt",
-//		"PGS000639_hmPOS_GRCh38.txt",
-//		"PGS000037_hmPOS_GRCh38.txt",
-//		"PGS000073_hmPOS_GRCh38.txt",
-//		"PGS001827_hmPOS_GRCh38.txt"}
+//		"PGS002302_hmPOS_GRCh37.txt",
+//		"PGS000639_hmPOS_GRCh37.txt",
+//		"PGS000037_hmPOS_GRCh37.txt",
+//		"PGS000073_hmPOS_GRCh37.txt",
+//		"PGS001827_hmPOS_GRCh37.txt"}
 //	// Create a result file
 //	filepath := path.Join(resFolder, "references.json")
 //	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
@@ -851,7 +1182,7 @@ func buildDPTables() {
 //	}
 //	defer resFile.Close()
 //	encoder := json.NewEncoder(resFile)
-//	samples := All1000GenomeSamples()
+//	samples := All1000GenomesSamples()
 //	references := make([]*Reference, 0, len(catalogFiles))
 //	for _, catalogFile := range catalogFiles {
 //		p := pgs.NewPGS()
@@ -878,12 +1209,12 @@ func buildDPTables() {
 func accuracyLikelihood() {
 	resFolder := "results/accuracyLikelihood"
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -894,7 +1225,7 @@ func accuracyLikelihood() {
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
 	//samples := cohort.SortByScore()[len(cohort)-100:]
-	samples := solver.All1000GenomeSamples()
+	samples := solver.All1000GenomesSamples()
 	// Create a result file
 	chunkNum, chunkSize := getChunkInfo(len(samples))
 	//chunkNum := 2
@@ -937,11 +1268,11 @@ func accuracyLikelihood() {
 func scoreToLikelihood() {
 	resFolder := "results/scoreLikelihood"
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -951,7 +1282,7 @@ func scoreToLikelihood() {
 	populations := tools.LoadAncestry()
 	fmt.Printf("%s\n", p.PgsID)
 	cohort := solver.NewCohort(p)
-	samples := solver.All1000GenomeSamples()
+	samples := solver.All1000GenomesSamples()
 	// Create csv result file
 	chunkNum, chunkSize := getChunkInfo(len(samples))
 	filepath := path.Join(resFolder, fmt.Sprintf("%s-%d.csv", p.PgsID, chunkNum))
@@ -988,10 +1319,10 @@ func scoreToLikelihood() {
 //func scoreToLikelihoodDistribution() {
 //	resFolder := "results/scoreLikelihood"
 //	p := pgs.NewPGS()
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 //	if err != nil {
 //		log.Printf("Error loading catalog file: %v\n", err)
@@ -1059,10 +1390,10 @@ func scoreToLikelihood() {
 //func likelihoodEffect() {
 //	resFolder := "results"
 //	p := pgs.NewPGS()
-//	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 //	if err != nil {
 //		log.Printf("Error loading catalog file: %v\n", err)
@@ -1071,7 +1402,7 @@ func scoreToLikelihood() {
 //	p.LoadStats()
 //	fmt.Printf("%s\n", p.PgsID)
 //	cohort := solver.NewCohort(p)
-//	samples := All1000GenomeSamples()
+//	samples := All1000GenomesSamples()
 //	chunkNum, chunkSize := getChunkInfo(len(samples))
 //	// Create csv result file
 //	filepath := path.Join(resFolder, fmt.Sprintf("%s-%d.csv", p.PgsID, chunkNum))
@@ -1160,9 +1491,9 @@ func getChunkInfo(totalLen int) (int, int) {
 
 func distribution() {
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -1204,23 +1535,23 @@ func distribution() {
 
 func likelihoodWeight() {
 	p := pgs.NewPGS()
-	//catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000043_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000307_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000845_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000534_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS000011_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS003436_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS002264_hmPOS_GRCh38.txt"
-	//catalogFile := "PGS003760_hmPOS_GRCh38.txt"
+	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000043_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000307_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000845_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000534_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000011_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS003436_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002264_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -1263,15 +1594,15 @@ func likelihoodWeight() {
 
 //func scoreDistribution() {
 //	p := pgs.NewPGS()
-//	catalogFile := "PGS000073_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000040_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000648_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000891_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS001827_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh38.txt"
-//	//catalogFile := "PGS000066_hmPOS_GRCh38.txt"
+//	catalogFile := "PGS000073_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+//	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
 //	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 //	if err != nil {
 //		log.Printf("Error loading catalog file: %v\n", err)
@@ -1279,7 +1610,7 @@ func likelihoodWeight() {
 //	}
 //	p.LoadStats()
 //	cohort := solver.NewCohort(p)
-//	samples := All1000GenomeSamples()
+//	samples := All1000GenomesSamples()
 //	indices := []int{0, len(p.Weights) / 2, len(p.Weights)}
 //
 //	resFolder := "results"

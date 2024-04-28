@@ -29,7 +29,7 @@ const (
 
 func getAllChromosomePositions(chr int) ([]string, error) {
 	// Get all the SNP positions for this chromosome
-	query, args := tools.AllChrPositionsQuery(strconv.Itoa(chr))
+	query, args := tools.AllChrPositionsQuery(strconv.Itoa(chr), tools.GG)
 	cmd := exec.Command(query, args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -72,7 +72,7 @@ func calculateMAF() {
 				if end >= len(positions) {
 					end = len(positions) - 1
 				}
-				query, args := tools.RangeSnpValuesQuery(strconv.Itoa(chr), positions[i], positions[end])
+				query, args := tools.RangeSnpValuesQuery(strconv.Itoa(chr), positions[i], positions[end], tools.GG)
 				cmd := exec.Command(query, args...)
 				batch, err := cmd.Output()
 				if err != nil {
