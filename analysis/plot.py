@@ -686,7 +686,65 @@ def sequential():
     fig.savefig('sequential.png', dpi=300, bbox_inches='tight')
 
 
+def king_test():
+	directory = "results/kinship/"
+	filepath = os.path.join(directory, "truth.json")
+	data = []
+	with open(filepath, 'r') as f:
+		content = json.load(f)
+	for num_snps, results in content.items():
+		print(np.median([int(x['Position']) for x in results]))
+		for result in results:
+			data.append({'SNPs': int(num_snps), 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
+			 'Position': int(result['Position'])})
 
+	df = pd.DataFrame(data)
+	fig, ax = plt.subplots(figsize=(4, 3))
+# 	sns.violinplot(x='SNPs', y='Position', ax=ax, data=df)
+# 	plt.gca().invert_yaxis()
+	sns.boxplot(x='SNPs', y='TruePhi', data=df)
+	plt.axhline(y=0.25, linestyle='--', color='r')
+	plt.axhline(y=0.125, linestyle='--', color='r')
+	plt.xlabel('#SNPs')
+	plt.title('Phi of a relative in the KING test')
+	plt.ylabel('Phi')
+# 	plt.title('Position of a relative by KING test')
+# 	plt.ylabel('Position')
+	plt.tight_layout()
+# 	fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
+	fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
+# 	plt.show()
+
+
+def kinship_experiment():
+	directory = "results/kinship/"
+# 	num_snps = [2000, 2500]
+	num_snps = [2000]
+	for snps in num_snps:
+		filepath = os.path.join(directory, f"{snps}.json")
+		data = []
+		with open(filepath, 'r') as f:
+			content = json.load(f)
+		print(f"{snps}: {np.median([int(x['Position']) for x in content])}")
+		for result in content:
+			data.append({'SNPs': snps, 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
+			 'Position': int(result['Position']), 'Accuracy': float(result['Accuracy'])})
+
+	df = pd.DataFrame(data)
+	fig, ax = plt.subplots(figsize=(4, 3))
+# 	plt.gca().invert_yaxis()
+# 	sns.boxplot(x='SNPs', y='Position', data=df)
+	sns.boxplot(x='SNPs', y='TruePhi', data=df)
+	plt.axhline(y=0.25, linestyle='--', color='r')
+	plt.axhline(y=0.125, linestyle='--', color='r')
+	plt.title('Position of a relative by KING test')
+	plt.xlabel('#SNPs')
+	plt.ylabel('Phi')
+# 	plt.ylabel('Position')
+	plt.tight_layout()
+# 	fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
+# 	fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
+	plt.show()
 
 
 if __name__ == "__main__":
@@ -721,4 +779,6 @@ if __name__ == "__main__":
 #     loci_coverage()
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-    sequential()
+#     sequential()
+#     king_test()
+    kinship_experiment()
