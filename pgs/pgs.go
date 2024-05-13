@@ -35,9 +35,9 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	Ploidy     = 2
-	MissingEAF = 0
-	//MissingEAF = 0.0002
+	Ploidy = 2
+	//MissingEAF = 0
+	MissingEAF = 0.0002
 )
 
 var (
@@ -453,10 +453,9 @@ func (p *PGS) extractEAF() {
 	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
 	var freq float32
 	var parsed float64
-	var missing, locusAdded bool
-lociLoop:
+	var missing bool
 	for k, locus := range p.Loci {
-		missing, locusAdded = true, false
+		missing = true
 		chr, pos := tools.SplitLocus(locus)
 		query, args := tools.RangeQuery(populationQ, chr, pos, pos, tools.GG)
 		cmd := exec.Command(query, args...)
@@ -499,19 +498,18 @@ lociLoop:
 				if freq > 1 || freq < 0 {
 					log.Printf("Allele frequency is wrong %f for %s at %s", freq, afPerPopulation[i], locus)
 				}
-				if locusAdded {
+				if _, ok := p.PopulationStats[population].AF[k]; !ok {
+					p.PopulationStats[population].AF[k] = []float32{0, freq}
+				} else {
 					if p.PopulationStats[population].AF[k][1]+freq > 1 {
-						continue lociLoop
+						continue
 					}
 					p.PopulationStats[population].AF[k][1] += freq
-				} else {
-					p.PopulationStats[population].AF[k] = []float32{0, freq}
 				}
 				if p.PopulationStats[population].AF[k][1] > 1 {
 					log.Printf("++++++ Allele frequency is wrong %v for %s at %s", p.PopulationStats[population].AF[k], lines[:len(lines)-1], locus)
 				}
 			}
-			locusAdded = true
 		}
 		//log.Printf("No entry for locus %s, hence all the samples have reference", locus)
 		for i := range POPULATIONS {

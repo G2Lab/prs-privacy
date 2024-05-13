@@ -718,11 +718,11 @@ def king_test():
 
 def kinship_experiment():
 	directory = "results/kinship/"
-# 	num_snps = [2000, 2500]
-	num_snps = [2000]
+	num_snps = [2000, 2500]
+# 	num_snps = [2000]
+	data = []
 	for snps in num_snps:
 		filepath = os.path.join(directory, f"{snps}.json")
-		data = []
 		with open(filepath, 'r') as f:
 			content = json.load(f)
 		print(f"{snps}: {np.median([int(x['Position']) for x in content])}")
@@ -732,18 +732,20 @@ def kinship_experiment():
 
 	df = pd.DataFrame(data)
 	fig, ax = plt.subplots(figsize=(4, 3))
+	sns.boxplot(x='SNPs', y='Accuracy', data=df)
 # 	plt.gca().invert_yaxis()
 # 	sns.boxplot(x='SNPs', y='Position', data=df)
-	sns.boxplot(x='SNPs', y='TruePhi', data=df)
-	plt.axhline(y=0.25, linestyle='--', color='r')
-	plt.axhline(y=0.125, linestyle='--', color='r')
+# 	sns.boxplot(x='SNPs', y='TruePhi', data=df)
+# 	plt.axhline(y=0.25, linestyle='--', color='r')
+# 	plt.axhline(y=0.125, linestyle='--', color='r')
+# 	plt.title('Phi of a relative by KING test')
 	plt.title('Position of a relative by KING test')
 	plt.xlabel('#SNPs')
-	plt.ylabel('Phi')
-# 	plt.ylabel('Position')
+# 	plt.ylabel('Phi')
+	plt.ylabel('Position')
 	plt.tight_layout()
-# 	fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
-# 	fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
+# 	fig.savefig('kinship-position.png', dpi=300, bbox_inches='tight')
+# 	fig.savefig('kinship-phi.png', dpi=300, bbox_inches='tight')
 	plt.show()
 
 

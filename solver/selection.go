@@ -49,6 +49,15 @@ func AllRelativeSamples() []string {
 	}
 }
 
+func AllRelativeAndExtraSamples() []string {
+	return []string{
+		"HG00124", "HG00501", "HG00635", "HG00733", "HG01983", "HG02024", "HG02046", "HG00702",
+		"HG02363", "HG02372", "HG02377", "HG02381", "HG02387", "HG02388", "HG03715", "HG03948",
+		"NA19240", "NA19311", "NA19313", "NA19660", "NA19675", "NA19685", "NA19985", "NA20322",
+		"NA20336", "NA20341", "NA20344", "NA20526", "NA20871", "NA20893", "NA20898",
+	}
+}
+
 func All1000GenomesAndRelativeSamples() []string {
 	return append(All1000GenomesSamples(), AllRelativeSamples()...)
 }

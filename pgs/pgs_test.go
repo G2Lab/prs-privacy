@@ -27,7 +27,7 @@ func TestPGSLoad(t *testing.T) {
 	fmt.Println("Variants:")
 	for _, variant := range p.Variants {
 		fmt.Println("ID:", variant.GetLocus())
-		fmt.Println("Weight:", variant.GetWeight())
+		//fmt.Println("Weight:", variant.GetWeight(&apd.BaseContext))
 		fmt.Println("Hm Chr:", variant.GetHmChr())
 		fmt.Println("Hm Pos:", variant.GetHmPos())
 		fmt.Println("----")
