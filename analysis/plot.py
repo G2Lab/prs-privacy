@@ -666,6 +666,9 @@ def sequential():
     files = os.listdir(directory)
     data = []
     for file_name in files:
+        if "with_repair" not in file_name:
+#         if "without_repair" not in file_name:
+            continue
         filepath = os.path.join(directory, file_name)
         with open(filepath, 'r') as f:
             content = json.load(f)
@@ -677,13 +680,15 @@ def sequential():
 
     df = pd.DataFrame(data)
     fig, ax = plt.subplots(figsize=(4, 3))
-    sns.boxplot(x='Label', y='Value', data=df)
+    sns.boxplot(x='Label', y='Value', data=df, color='darkorange')
     plt.title('Accuracy distribution by SNP count')
     plt.xlabel('#SNPs targeted')
     plt.ylabel('Accuracy')
     plt.tight_layout()
-#     plt.show()
-    fig.savefig('sequential.png', dpi=300, bbox_inches='tight')
+    plt.ylim(0.87, 1.01)
+    plt.show()
+#     fig.savefig('sequential-unrepaired.png', dpi=300, bbox_inches='tight')
+    fig.savefig('sequential-repaired.png', dpi=300, bbox_inches='tight')
 
 
 def king_test():
@@ -749,6 +754,41 @@ def kinship_experiment():
 	plt.show()
 
 
+def score_uniqueness():
+	directory = "results/uniqueness/"
+	filepath = os.path.join(directory, "scores.json")
+	data = []
+	with open(filepath, 'r') as f:
+		content = json.load(f)
+	for result in content:
+		data.append({'Number of Variants': int(result['NumVariants']),
+		'Mean Anonymity Set Size': np.mean([float(x) for x in result['AnonymitySets']])})
+
+	df = pd.DataFrame(data)
+	fig, ax = plt.subplots(figsize=(4, 3))
+	sns.lineplot(x='Number of Variants', y='Mean Anonymity Set Size', data=df)
+	plt.title('Score uniqueness in 1000 genomes')
+	plt.xlabel('Number of Variants in PRS')
+	plt.tight_layout()
+	fig.savefig('uniqueness.png', dpi=300, bbox_inches='tight')
+# 	plt.show()
+
+
+def random_hist():
+    data = np.random.beta(0.5, 0.5, 100)
+
+    # Create a histogram using seaborn
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.histplot(data, bins=20, kde=False, color='darkorange')
+#     plt.hist(data, bins=30, color='darkorange', linewidth=2)
+    plt.xlabel('Allele Frequency')
+    plt.ylabel('Count')
+
+    # Show the plot
+    fig.savefig('hist.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -781,6 +821,8 @@ if __name__ == "__main__":
 #     loci_coverage()
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-#     sequential()
+# 	sequential()
 #     king_test()
-    kinship_experiment()
+#     kinship_experiment()
+# 	score_uniqueness()
+    random_hist()

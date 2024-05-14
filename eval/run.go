@@ -64,8 +64,8 @@ func main() {
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
-	//seqSolving()
-	uniquenessExperiment()
+	seqSolving()
+	//uniquenessExperiment()
 }
 
 type Result struct {
@@ -734,6 +734,7 @@ func uniquenessExperiment() {
 		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
 	})
 
+	//allPgs = []string{"PGS004164"}
 	populations := tools.LoadAncestry()
 	type Result struct {
 		PgsID           string
@@ -842,11 +843,17 @@ func seqSolving() {
 		return
 	}
 
-	individuals := []string{"NA19678"}
+	//individuals := []string{"NA19678"}
 	//individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
 	//	"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
 	//	"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
 	//	"NA20289", "NA20792", "NA20868", "NA20895"}
+	related := readRelatedIndividuals()
+	individuals := make([]string, 0)
+	for idv := range related {
+		individuals = append(individuals, idv)
+	}
+	sort.Strings(individuals)
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
 	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
@@ -856,6 +863,11 @@ func seqSolving() {
 		Accuracies map[int]float32
 	}
 	results := make([]*Result, 0)
+	type Guess struct {
+		Individual string
+		SNPs       map[string]uint8
+	}
+	guesses := make([]*Guess, 0)
 
 	type contester struct {
 		id         string
@@ -888,6 +900,12 @@ func seqSolving() {
 			}
 		}
 
+		sort.Slice(allPgs, func(i, j int) bool {
+			if len(pgsToLoci[allPgs[i]]) == len(pgsToLoci[allPgs[j]]) {
+				return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
+			}
+			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+		})
 		indPop := populations[individual]
 		if strings.Contains(indPop, ",") {
 			indPop = strings.Split(indPop, ",")[0]
@@ -909,12 +927,12 @@ func seqSolving() {
 			if len(allPgs) == 0 {
 				break
 			}
-			sort.Slice(allPgs, func(i, j int) bool {
-				if len(pgsToLoci[allPgs[i]]) == len(pgsToLoci[allPgs[j]]) {
-					return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
-				}
-				return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
-			})
+			//sort.Slice(allPgs, func(i, j int) bool {
+			//	if len(pgsToLoci[allPgs[i]]) == len(pgsToLoci[allPgs[j]]) {
+			//		return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
+			//	}
+			//	return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+			//})
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
 			err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
@@ -960,12 +978,6 @@ func seqSolving() {
 					}
 					ids = append(ids, ref)
 				}
-				//sort.Slice(ids, func(i, j int) bool {
-				//	if guessConfidence[ids[i]] == guessConfidence[ids[j]] {
-				//		return idsToNumVariants[ids[i]] > idsToNumVariants[ids[j]]
-				//	}
-				//	return guessConfidence[ids[i]] < guessConfidence[ids[j]]
-				//})
 				contenders = make([]contester, 0)
 				for _, id := range ids {
 					recoveredSnps = make(map[int]uint8)
@@ -1041,17 +1053,17 @@ func seqSolving() {
 						break
 					}
 				}
-			}
-			if len(solutions) == 0 {
-				// Solve from scratch
-				fmt.Println("No solutions with any subset, calculating from scratch")
-				slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
-				if len(p.Loci) < DeterminismLimit {
-					solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
-				} else {
-					solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+				if len(solutions) == 0 {
+					// Solve from scratch
+					fmt.Println("No solutions with any subset, calculating from scratch")
+					slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
+					if len(p.Loci) < DeterminismLimit {
+						solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+					} else {
+						solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+					}
+					solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
 				}
-				solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
 			}
 			if len(solutions) > 0 {
 				fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[individual].Genotype))
@@ -1126,19 +1138,31 @@ func seqSolving() {
 			}
 		}
 		results = append(results, &Result{Individual: individual, Accuracies: accuraciesWithMissed})
+		guesses = append(guesses, &Guess{Individual: individual, SNPs: guessedSnps})
 	}
 
-	//resultFolder := "results/sequential"
-	//filepath := path.Join(resultFolder, fmt.Sprintf("chunk%d.json", chunkNum))
-	//resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	//if err != nil {
-	//	log.Fatalf("Error opening result file: %v", err)
-	//}
-	//defer resFile.Close()
-	//encoder := json.NewEncoder(resFile)
-	//if err = encoder.Encode(results); err != nil {
-	//	log.Fatal("Cannot encode json", err)
-	//}
+	resultFolder := "results/sequential"
+	filepath := path.Join(resultFolder, fmt.Sprintf("chunk%d.json", chunkNum))
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+
+	filepath = path.Join(resultFolder, fmt.Sprintf("guesses%d.json", chunkNum))
+	guessFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer guessFile.Close()
+	encoder = json.NewEncoder(guessFile)
+	if err = encoder.Encode(guesses); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
 }
 
 func sequentialSolving() {

@@ -35,9 +35,9 @@ var ALL_FIELDS = []string{
 }
 
 const (
-	Ploidy = 2
-	//MissingEAF = 0
+	Ploidy     = 2
 	MissingEAF = 0.0002
+	//MissingEAF = 0
 )
 
 var (
@@ -466,7 +466,6 @@ func (p *PGS) extractEAF() {
 		}
 		lines := strings.Split(string(output), "\n")
 		//fmt.Printf("Locus %s: %d lines\n", locus, len(lines))
-		//fmt.Println(lines[:len(lines)-1])
 		for _, line := range lines[:len(lines)-1] {
 			fields := strings.Split(line, "-")
 			if fields[0] != locus {
@@ -516,6 +515,14 @@ func (p *PGS) extractEAF() {
 			if missing { // either read a wrong locus or len(lines[:len(lines)-1]) == 0
 				p.PopulationStats[POPULATIONS[i]].AF[k] = []float32{1 - MissingEAF, MissingEAF}
 				continue
+			}
+			// Smoothen the extreme cases
+			switch p.PopulationStats[POPULATIONS[i]].AF[k][1] {
+			case 0:
+				p.PopulationStats[POPULATIONS[i]].AF[k][1] = MissingEAF
+			case 1:
+				p.PopulationStats[POPULATIONS[i]].AF[k][1] = 1 - MissingEAF
+			default:
 			}
 			p.PopulationStats[POPULATIONS[i]].AF[k][0] = 1 - p.PopulationStats[POPULATIONS[i]].AF[k][1]
 		}
