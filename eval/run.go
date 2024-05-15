@@ -64,8 +64,10 @@ func main() {
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
-	seqSolving()
 	//uniquenessExperiment()
+	//seqSolving()
+	//prepareVCF()
+	imputedAccuracy()
 }
 
 type Result struct {

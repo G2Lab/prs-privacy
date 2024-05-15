@@ -144,16 +144,16 @@ func SnpToPair(snp string) ([]uint8, error) {
 	}
 }
 
-func SnpToSum(snp string) (float64, error) {
+func SnpToSum(snp string) (uint8, error) {
 	switch snp {
-	case "0|0":
+	case "0|0", "0,0":
 		return 0, nil
-	case "0|1", "1|0":
+	case "0|1", "1|0", "0,1", "1,0":
 		return 1, nil
-	case "1|1":
+	case "1|1", "1,1":
 		return 2, nil
 	default:
-		return -1, fmt.Errorf("invalid snp value: %s", snp)
+		return 255, fmt.Errorf("invalid snp value: %s", snp)
 	}
 }
 
