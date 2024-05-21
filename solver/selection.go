@@ -5,12 +5,14 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 )
 
-const SamplesFile = "1000genome-samples.csv"
+const SamplesFile = "data/1000genome-samples.csv"
 
 func selectSamples(num, total int, seedPhrase string) []string {
 	//	given the seed, generate N cryptographically secure pseudo-random numbers modulo M
@@ -60,4 +62,49 @@ func AllRelativeAndExtraSamples() []string {
 
 func All1000GenomesAndRelativeSamples() []string {
 	return append(All1000GenomesSamples(), AllRelativeSamples()...)
+}
+
+//func Samples1000GenomesRelatedExcluded() []string {
+//	allSamples := All1000GenomesSamples()
+//}
+
+func ReadRelatedIndividuals() map[string][]string {
+	file, err := os.Open("data/related_individuals.txt")
+	if err != nil {
+		log.Fatalf("Error opening related individuals file: %v", err)
+		return nil
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+	reader.Comma = '\t'
+
+	header, err := reader.Read()
+	if err != nil {
+		log.Fatalf("Error reading header: %v\n", err)
+		return nil
+	}
+	sampleColumn, relativesColumn := -1, -1
+	for i, field := range header {
+		if field == "Sample" {
+			sampleColumn = i
+		}
+		if field == "Reason for exclusion" {
+			relativesColumn = i
+		}
+	}
+
+	related := make(map[string][]string)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Error reading record: %v\n", err)
+			continue
+		}
+		split := strings.Split(record[relativesColumn], ":")
+		related[record[sampleColumn]] = strings.Split(split[len(split)-1], ",")
+	}
+	return related
 }

@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=solve                   # Job name
+#SBATCH --job-name=impute                   # Job name
 #SBATCH --mem=20G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log           # Standard output and error log
-#SBATCH --cpus-per-task=2                  # Number of CPUs per task
+#SBATCH --cpus-per-task=4                  # Number of CPUs per task
 #SBATCH --time=2-0:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
 #SBATCH --priority=TOP                     # Job priority
@@ -10,6 +10,8 @@
 
 module load bcftools/1.17
 module load htslib/1.17
+module load minimac4/4.1.2
+module load tabix/1.1
 module load go/1.20.2
 go build -o solve ./eval/
 ./solve $1 $2

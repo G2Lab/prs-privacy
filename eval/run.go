@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path"
@@ -66,8 +65,9 @@ func main() {
 	//consensusSolving()
 	//uniquenessExperiment()
 	//seqSolving()
-	//prepareVCF()
-	imputedAccuracy()
+	//fillPreImputeVCF()
+	imputedAccuracy(6, "EUR")
+	//imputeWorkflow()
 }
 
 type Result struct {
@@ -106,7 +106,7 @@ func NewReference(id string, score *apd.Decimal, likelihood float64) *Reference 
 
 func kingTest() {
 	fmt.Println("King test")
-	related := readRelatedIndividuals()
+	related := solver.ReadRelatedIndividuals()
 	individuals := solver.All1000GenomesAndRelativeSamples()
 	db := make(map[string]map[string]uint8)
 	for _, idv := range individuals {
@@ -286,7 +286,7 @@ func kingTest() {
 
 func kinshipExperiment() {
 	fmt.Printf("Kinship experiment\n")
-	related := readRelatedIndividuals()
+	related := solver.ReadRelatedIndividuals()
 	relatives := make([]string, 0)
 	for ind, _ := range related {
 		relatives = append(relatives, ind)
@@ -850,7 +850,7 @@ func seqSolving() {
 	//	"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
 	//	"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
 	//	"NA20289", "NA20792", "NA20868", "NA20895"}
-	related := readRelatedIndividuals()
+	related := solver.ReadRelatedIndividuals()
 	individuals := make([]string, 0)
 	for idv := range related {
 		individuals = append(individuals, idv)
@@ -1427,47 +1427,6 @@ func sequentialSolving() {
 	//if err = encoder.Encode(results); err != nil {
 	//	log.Fatal("Cannot encode json", err)
 	//}
-}
-
-func readRelatedIndividuals() map[string][]string {
-	file, err := os.Open("inputs/related_individuals.txt")
-	if err != nil {
-		log.Fatalf("Error opening related individuals file: %v", err)
-		return nil
-	}
-	defer file.Close()
-	reader := csv.NewReader(file)
-	reader.Comma = '\t'
-
-	header, err := reader.Read()
-	if err != nil {
-		log.Fatalf("Error reading header: %v\n", err)
-		return nil
-	}
-	sampleColumn, relativesColumn := -1, -1
-	for i, field := range header {
-		if field == "Sample" {
-			sampleColumn = i
-		}
-		if field == "Reason for exclusion" {
-			relativesColumn = i
-		}
-	}
-
-	related := make(map[string][]string)
-	for {
-		record, err := reader.Read()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("Error reading record: %v\n", err)
-			continue
-		}
-		split := strings.Split(record[relativesColumn], ":")
-		related[record[sampleColumn]] = strings.Split(split[len(split)-1], ",")
-	}
-	return related
 }
 
 type accuracyOutput struct {

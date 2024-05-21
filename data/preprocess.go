@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/nikirill/prs/solver"
 	"log"
 	"os"
 	"os/exec"
@@ -223,9 +224,59 @@ func indexOf(slice []string, value string) int {
 	return -1
 }
 
+func saveSamplesWithoutRelatives() {
+	relations := solver.ReadRelatedIndividuals()
+	haveExternalRelatives := make(map[string]struct{})
+	for _, relatives := range relations {
+		for _, relative := range relatives {
+			haveExternalRelatives[relative] = struct{}{}
+		}
+	}
+	allSamples := solver.All1000GenomesSamples()
+	ancestry := tools.LoadAncestry()
+	withoutRelatives := make(map[string][]string)
+	var exists bool
+	var ppl string
+	for _, sample := range allSamples {
+		if _, exists = haveExternalRelatives[sample]; exists {
+			fmt.Printf("Sample %s is excluded due to external relatives\n", sample)
+			continue
+		}
+		ppl = ancestry[sample]
+		if strings.Contains(ppl, ",") {
+			fmt.Printf("Sample %s is excluded due to multi-ancestry %s\n", sample, ppl)
+			continue
+		}
+		if _, exists = withoutRelatives[ppl]; !exists {
+			withoutRelatives[ppl] = make([]string, 0)
+		}
+		withoutRelatives[ppl] = append(withoutRelatives[ppl], sample)
+	}
+	for population := range withoutRelatives {
+		file, err := os.OpenFile(fmt.Sprintf("data/1000g_%s_no_relatives.txt", population), os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalf("Cannot create file: %v", err)
+		}
+		defer file.Close()
+		for i, sample := range withoutRelatives[population] {
+			if i != 0 {
+				_, err = file.WriteString("\n")
+				if err != nil {
+					log.Fatalf("Cannot write to file: %v", err)
+				}
+			}
+			_, err = file.WriteString(sample)
+			if err != nil {
+				log.Fatalf("Cannot write to file: %v", err)
+			}
+		}
+	}
+}
+
 func main() {
 	maf := flag.Bool("maf", false, "calculate MAF")
 	readSP := flag.Bool("populations", false, "read sample populations")
+	relatives := flag.Bool("relatives", false, "save samples without relatives")
 	flag.Parse()
 
 	if *maf {
@@ -233,5 +284,8 @@ func main() {
 	}
 	if *readSP {
 		readSamplePopulations()
+	}
+	if *relatives {
+		saveSamplesWithoutRelatives()
 	}
 }
