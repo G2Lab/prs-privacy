@@ -66,8 +66,13 @@ func main() {
 	//uniquenessExperiment()
 	//seqSolving()
 	//fillPreImputeVCF()
-	imputedAccuracy(6, "EUR")
-	//imputeWorkflow()
+	//for _, ppl := range pgs.POPULATIONS {
+	//	imputationAccuracy(6, ppl)
+	//}
+	//imputationAccuracy(6, "AFR")
+	imputeWorkflow()
+	//imputationAccuracyAll(22)
+	//linkingWithGuessed()
 }
 
 type Result struct {

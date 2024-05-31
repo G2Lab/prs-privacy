@@ -240,7 +240,7 @@ package solver
 //			newIdx = tools.ValueToBinIdx(g.stats.AF[i/pgs.Ploidy][v], g.stats.FreqBinBounds)
 //			freqChange = g.specShiftFactor(newIdx, float32(v)-float32(original[i]), originalBins) *
 //				g.specShiftFactor(oldIdx, float32(original[i])-float32(v), originalBins)
-//			probabilities[i] = 1 / (afToLikelihood(g.stats.AF[i/pgs.Ploidy][v]) * freqChange)
+//			probabilities[i] = 1 / (AfToLikelihood(g.stats.AF[i/pgs.Ploidy][v]) * freqChange)
 //			//probabilities[i] = 1 / math.Abs(newDelta)
 //			//probabilities[i] = 1 / math.Exp(math.Abs(newDelta))
 //			//// Falling into a local minimum

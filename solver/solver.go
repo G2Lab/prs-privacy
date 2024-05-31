@@ -53,11 +53,11 @@ func calculateLociLikelihood(mutatedLoci []uint8, indices []int, af map[int][]fl
 		_, double = indexed[uint8(pgs.Ploidy*j+1)]
 		switch {
 		case single:
-			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[j][0]) + afToLikelihood(af[j][1])
+			likelihood += AfToLikelihood(pgs.Ploidy) + AfToLikelihood(af[j][0]) + AfToLikelihood(af[j][1])
 		case double:
-			likelihood += afToLikelihood(af[j][efal[j]]) * pgs.Ploidy
+			likelihood += AfToLikelihood(af[j][efal[j]]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(af[j][^efal[j]&1]) * pgs.Ploidy
+			likelihood += AfToLikelihood(af[j][^efal[j]&1]) * pgs.Ploidy
 		}
 	}
 	return likelihood
@@ -71,18 +71,18 @@ func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float32, efa
 		other = ^effect & 1
 		switch {
 		case sequence[i] == effect && sequence[i+1] == effect:
-			likelihood += afToLikelihood(af[i/pgs.Ploidy][effect]) * pgs.Ploidy
+			likelihood += AfToLikelihood(af[i/pgs.Ploidy][effect]) * pgs.Ploidy
 		case sequence[i] == other && sequence[i+1] == other:
-			likelihood += afToLikelihood(af[i/pgs.Ploidy][other]) * pgs.Ploidy
+			likelihood += AfToLikelihood(af[i/pgs.Ploidy][other]) * pgs.Ploidy
 		default:
-			likelihood += afToLikelihood(pgs.Ploidy) + afToLikelihood(af[i/pgs.Ploidy][effect]) +
-				afToLikelihood(af[i/pgs.Ploidy][other])
+			likelihood += AfToLikelihood(pgs.Ploidy) + AfToLikelihood(af[i/pgs.Ploidy][effect]) +
+				AfToLikelihood(af[i/pgs.Ploidy][other])
 		}
 	}
 	return likelihood
 }
 
-func afToLikelihood(af float32) float32 {
+func AfToLikelihood(af float32) float32 {
 	return float32(-math.Log(float64(af)))
 }
 
@@ -120,7 +120,7 @@ func SampleSegmentFromPopulation(start, end int, af [][]float32) ([]uint8, error
 func LocusLikelihood(sequence []uint8, i int, af [][]float32) float32 {
 	var likelihood float32 = 0.0
 	for j := 0; j < pgs.Ploidy; j++ {
-		likelihood += afToLikelihood(af[i][sequence[i*pgs.Ploidy+j]])
+		likelihood += AfToLikelihood(af[i][sequence[i*pgs.Ploidy+j]])
 	}
 	return likelihood
 }

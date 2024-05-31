@@ -692,86 +692,86 @@ def sequential():
 
 
 def king_test():
-	directory = "results/kinship/"
-	filepath = os.path.join(directory, "truth.json")
-	data = []
-	with open(filepath, 'r') as f:
-		content = json.load(f)
-	for num_snps, results in content.items():
-		print(np.median([int(x['Position']) for x in results]))
-		for result in results:
-			data.append({'SNPs': int(num_snps), 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
-			 'Position': int(result['Position'])})
+    directory = "results/kinship/"
+    filepath = os.path.join(directory, "truth.json")
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for num_snps, results in content.items():
+        print(np.median([int(x['Position']) for x in results]))
+        for result in results:
+            data.append({'SNPs': int(num_snps), 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
+             'Position': int(result['Position'])})
 
-	df = pd.DataFrame(data)
-	fig, ax = plt.subplots(figsize=(4, 3))
-# 	sns.violinplot(x='SNPs', y='Position', ax=ax, data=df)
-# 	plt.gca().invert_yaxis()
-	sns.boxplot(x='SNPs', y='TruePhi', data=df)
-	plt.axhline(y=0.25, linestyle='--', color='r')
-	plt.axhline(y=0.125, linestyle='--', color='r')
-	plt.xlabel('#SNPs')
-	plt.title('Phi of a relative in the KING test')
-	plt.ylabel('Phi')
-# 	plt.title('Position of a relative by KING test')
-# 	plt.ylabel('Position')
-	plt.tight_layout()
-# 	fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
-	fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
-# 	plt.show()
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(4, 3))
+#     sns.violinplot(x='SNPs', y='Position', ax=ax, data=df)
+#     plt.gca().invert_yaxis()
+    sns.boxplot(x='SNPs', y='TruePhi', data=df)
+    plt.axhline(y=0.25, linestyle='--', color='r')
+    plt.axhline(y=0.125, linestyle='--', color='r')
+    plt.xlabel('#SNPs')
+    plt.title('Phi of a relative in the KING test')
+    plt.ylabel('Phi')
+#     plt.title('Position of a relative by KING test')
+#     plt.ylabel('Position')
+    plt.tight_layout()
+#     fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
+    fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
+#     plt.show()
 
 
 def kinship_experiment():
-	directory = "results/kinship/"
-	num_snps = [2000, 2500]
-# 	num_snps = [2000]
-	data = []
-	for snps in num_snps:
-		filepath = os.path.join(directory, f"{snps}.json")
-		with open(filepath, 'r') as f:
-			content = json.load(f)
-		print(f"{snps}: {np.median([int(x['Position']) for x in content])}")
-		for result in content:
-			data.append({'SNPs': snps, 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
-			 'Position': int(result['Position']), 'Accuracy': float(result['Accuracy'])})
+    directory = "results/kinship/"
+    num_snps = [2000, 2500]
+#     num_snps = [2000]
+    data = []
+    for snps in num_snps:
+        filepath = os.path.join(directory, f"{snps}.json")
+        with open(filepath, 'r') as f:
+            content = json.load(f)
+        print(f"{snps}: {np.median([int(x['Position']) for x in content])}")
+        for result in content:
+            data.append({'SNPs': snps, 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
+             'Position': int(result['Position']), 'Accuracy': float(result['Accuracy'])})
 
-	df = pd.DataFrame(data)
-	fig, ax = plt.subplots(figsize=(4, 3))
-	sns.boxplot(x='SNPs', y='Accuracy', data=df)
-# 	plt.gca().invert_yaxis()
-# 	sns.boxplot(x='SNPs', y='Position', data=df)
-# 	sns.boxplot(x='SNPs', y='TruePhi', data=df)
-# 	plt.axhline(y=0.25, linestyle='--', color='r')
-# 	plt.axhline(y=0.125, linestyle='--', color='r')
-# 	plt.title('Phi of a relative by KING test')
-	plt.title('Position of a relative by KING test')
-	plt.xlabel('#SNPs')
-# 	plt.ylabel('Phi')
-	plt.ylabel('Position')
-	plt.tight_layout()
-# 	fig.savefig('kinship-position.png', dpi=300, bbox_inches='tight')
-# 	fig.savefig('kinship-phi.png', dpi=300, bbox_inches='tight')
-	plt.show()
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.boxplot(x='SNPs', y='Accuracy', data=df)
+#     plt.gca().invert_yaxis()
+#     sns.boxplot(x='SNPs', y='Position', data=df)
+#     sns.boxplot(x='SNPs', y='TruePhi', data=df)
+#     plt.axhline(y=0.25, linestyle='--', color='r')
+#     plt.axhline(y=0.125, linestyle='--', color='r')
+#     plt.title('Phi of a relative by KING test')
+    plt.title('Position of a relative by KING test')
+    plt.xlabel('#SNPs')
+#     plt.ylabel('Phi')
+    plt.ylabel('Position')
+    plt.tight_layout()
+#     fig.savefig('kinship-position.png', dpi=300, bbox_inches='tight')
+#     fig.savefig('kinship-phi.png', dpi=300, bbox_inches='tight')
+    plt.show()
 
 
 def score_uniqueness():
-	directory = "results/uniqueness/"
-	filepath = os.path.join(directory, "scores.json")
-	data = []
-	with open(filepath, 'r') as f:
-		content = json.load(f)
-	for result in content:
-		data.append({'Number of Variants': int(result['NumVariants']),
-		'Mean Anonymity Set Size': np.mean([float(x) for x in result['AnonymitySets']])})
+    directory = "results/uniqueness/"
+    filepath = os.path.join(directory, "scores.json")
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for result in content:
+        data.append({'Number of Variants': int(result['NumVariants']),
+        'Mean Anonymity Set Size': np.mean([float(x) for x in result['AnonymitySets']])})
 
-	df = pd.DataFrame(data)
-	fig, ax = plt.subplots(figsize=(4, 3))
-	sns.lineplot(x='Number of Variants', y='Mean Anonymity Set Size', data=df)
-	plt.title('Score uniqueness in 1000 genomes')
-	plt.xlabel('Number of Variants in PRS')
-	plt.tight_layout()
-	fig.savefig('uniqueness.png', dpi=300, bbox_inches='tight')
-# 	plt.show()
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.lineplot(x='Number of Variants', y='Mean Anonymity Set Size', data=df)
+    plt.title('Score uniqueness in 1000 genomes')
+    plt.xlabel('Number of Variants in PRS')
+    plt.tight_layout()
+    fig.savefig('uniqueness.png', dpi=300, bbox_inches='tight')
+#     plt.show()
 
 
 def random_hist():
@@ -786,6 +786,34 @@ def random_hist():
 
     # Show the plot
     fig.savefig('hist.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def guessed_mia():
+    directory = "results/impute/"
+    filepath = os.path.join(directory, "unimputed.json")
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for idv, result in content.items():
+        data.append({'SelfPos': int(result['SelfPos']), 'RelativePos': int(result['RelativePos']),
+                     'SelfAccuracy': float(result['SelfAccuracy']), 'RelativeAccuracy': float(result['RelAccuracy'])})
+
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(4, 3))
+    # melted_df = pd.melt(df, value_vars=['SelfPos', 'RelativePos'], var_name='PositionType', value_name='Value')
+    # sns.boxplot(x='PositionType', y='Value', data=melted_df)
+    # plt.title("Linking position")
+    # plt.ylabel('Match position')
+    # fig.savefig('linking-pos.png', dpi=300, bbox_inches='tight')
+    # plt.gca().invert_yaxis()
+    melted_df = pd.melt(df, value_vars=['SelfAccuracy', 'RelativeAccuracy'], var_name='Type', value_name='Value')
+    sns.boxplot(x='Type', y='Value', data=melted_df)
+    plt.title("SNP matching accuracy")
+    plt.ylabel('Match comparison accuracy')
+    fig.savefig('linking-acc.png', dpi=300, bbox_inches='tight')
+    plt.xlabel('')
+    plt.tight_layout()
     plt.show()
 
 
@@ -821,8 +849,9 @@ if __name__ == "__main__":
 #     loci_coverage()
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
 #     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-# 	sequential()
+#     sequential()
 #     king_test()
 #     kinship_experiment()
-# 	score_uniqueness()
-    random_hist()
+#     score_uniqueness()
+#     random_hist()
+    guessed_mia()

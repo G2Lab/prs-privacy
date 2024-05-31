@@ -508,8 +508,8 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 				if nextSum < lowerBound || nextSum > upperBound {
 					continue
 				}
-				nextLikelihood = table[prevSum].TopLikelihood + float32(k)*afToLikelihood(stats.AF[pos][effectAllele]) -
-					float32(k)*afToLikelihood(stats.AF[pos][referenceAllele]) + float32(pgs.Ploidy-k)*afToLikelihood(pgs.Ploidy)
+				nextLikelihood = table[prevSum].TopLikelihood + float32(k)*AfToLikelihood(stats.AF[pos][effectAllele]) -
+					float32(k)*AfToLikelihood(stats.AF[pos][referenceAllele]) + float32(pgs.Ploidy-k)*AfToLikelihood(pgs.Ploidy)
 				//nextBinCount = table[prevSum].CurrentBinCount + k
 				//if nextBinIdx != table[prevSum].CurrentBinIdx {
 				//	nextBinCount = k

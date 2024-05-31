@@ -8,8 +8,7 @@
 #SBATCH --priority=TOP                     # Job priority
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
 
-module load bcftools/1.17
-module load htslib/1.17
+module load bcftools/1.20
 module load go/1.20.2
 go build -o solve ./eval/
 ./solve $1 $2
