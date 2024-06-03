@@ -65,11 +65,11 @@ func main() {
 	//consensusSolving()
 	//uniquenessExperiment()
 	//seqSolving()
-	//imputeWorkflow()
+	imputeWorkflow()
 	//imputationAccuracy(22, "EUR")
 	//imputationAccuracyAll(22)
 	//linkingWithGuessed()
-	imputationAccuracy(22)
+	//imputationAccuracy(21)
 }
 
 type Result struct {
