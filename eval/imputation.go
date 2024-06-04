@@ -245,37 +245,29 @@ func retrievePositionAlleles(chr, pos string) (string, string) {
 	return ".", "."
 }
 
-func imputationAccuracy(chrId int) {
-	type fraction struct {
-		numerator   int
-		denominator int
-	}
-	type relation struct {
-		target string
-		count  float32
-		king   float32
-	}
-	type Result struct {
-		Self          map[string]int // count, king
-		Relative      map[string]int // count, king
-		CountAccuracy map[string]float32
-		KingScore     map[string]float32
-	}
-	newResult := func() *Result {
-		return &Result{
-			Self:          make(map[string]int),
-			Relative:      make(map[string]int),
-			CountAccuracy: make(map[string]float32),
-			KingScore:     make(map[string]float32),
+func imputationAccuracy() {
+	var chrId int
+	var err error
+	if len(os.Args) > 1 {
+		chrId, err = strconv.Atoi(os.Args[1])
+		if err != nil {
+			log.Fatalf("Cannot convert chromosome ID to integer: %v", err)
 		}
+	} else {
+		chrId = 22
 	}
-
+	fmt.Printf("Imputation accuracy for chromosome %d\n", chrId)
 	numWorkers := 15
-
+	type Relation struct {
+		Target string
+		Count  []int
+		King   []int
+	}
 	imputedSNPs := make(map[string]map[string]uint8)
 	for _, ancestry := range pgs.POPULATIONS {
 		fmt.Printf("Reading imputed SNPs: %d, %s\n", chrId, ancestry)
-		imputedChunk := getAllIndividualAlleles(fmt.Sprintf(postImputeZippedFilename, chrId, ancestry), nil, numWorkers)
+		chrPath := fmt.Sprintf(postImputeZippedFilename, chrId, ancestry)
+		imputedChunk := getAllIndividualAlleles(chrPath, nil, nil, numWorkers)
 		for idv := range imputedChunk {
 			imputedSNPs[idv] = imputedChunk[idv]
 		}
@@ -285,11 +277,33 @@ func imputationAccuracy(chrId int) {
 		individuals = append(individuals, idv)
 	}
 	db := solver.All1000GenomesSamples()
-	relations := make(map[string][]relation)
+	relations := make(map[string][]Relation)
 	for idv := range imputedSNPs {
-		relations[idv] = make([]relation, 0)
+		relations[idv] = make([]Relation, 0)
 	}
-	ancestries := tools.LoadAncestry()
+
+	//// Read all the imputed positions, sort them and divide them into regions
+	//imputedPositions := make([]int, 0)
+	//var posInt int
+	//for pos := range imputedSNPs[individuals[0]] {
+	//	posInt, err = strconv.Atoi(pos)
+	//	if err != nil {
+	//		log.Fatalf("Cannot convert position %s to integer: %v", pos, err)
+	//	}
+	//	imputedPositions = append(imputedPositions, posInt)
+	//}
+	//sort.Ints(imputedPositions)
+	//
+	//imputedRegions := make([][]string, 0)
+	//startPos := 0
+	//for i := 1; i < len(imputedPositions); i++ {
+	//	if imputedPositions[i]-imputedPositions[i-1] > 1e6 {
+	//		imputedRegions = append(imputedRegions,
+	//			[]string{strconv.Itoa(imputedPositions[startPos]), strconv.Itoa(imputedPositions[i-1])})
+	//		startPos = i
+	//	}
+	//}
+	//fmt.Printf("Imputation regions: %v\n", imputedRegions)
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -306,10 +320,8 @@ func imputationAccuracy(chrId int) {
 		go func() {
 			defer wg.Done()
 			for t := range taskChan {
-				similarity := countSimilarity(imputedSNPs[t.idv], t.snps[t.other])
-				kingValue := kingRobust(imputedSNPs[t.idv], t.snps[t.other])
-				rel := relation{t.other, similarity, kingValue}
-
+				rel := Relation{t.other, matchCount(imputedSNPs[t.idv], t.snps[t.other]),
+					kingRobustPair(imputedSNPs[t.idv], t.snps[t.other])}
 				mu.Lock()
 				relations[t.idv] = append(relations[t.idv], rel)
 				mu.Unlock()
@@ -317,12 +329,12 @@ func imputationAccuracy(chrId int) {
 		}()
 	}
 	go func() {
-		chunkSize := 250
+		chunkSize := 200
 		for i := 0; i < len(db); i += chunkSize {
 			fmt.Printf("==== Chunk %d ====\n", i/chunkSize)
-			chunk := db[i:min(i+chunkSize, len(db))]
-			chunkSnps := getAllIndividualAlleles(tools.GetChromosomeFilepath(strconv.Itoa(chrId), tools.GG), chunk, numWorkers)
-			fmt.Printf("Chunk loaded\n")
+			idvs := db[i:min(i+chunkSize, len(db))]
+			chrPath := tools.GetChromosomeFilepath(strconv.Itoa(chrId), tools.GG)
+			chunkSnps := getAllIndividualAlleles(chrPath, idvs, imputedSNPs[individuals[0]], numWorkers)
 			for idv := range imputedSNPs {
 				for other := range chunkSnps {
 					taskChan <- task{idv, other, chunkSnps}
@@ -333,58 +345,69 @@ func imputationAccuracy(chrId int) {
 	}()
 	wg.Wait()
 
-	relatives := solver.AllRelativeSamples()
-	relativeSnps := getAllIndividualAlleles(tools.GetChromosomeFilepath(strconv.Itoa(chrId), tools.RL), relatives, numWorkers)
-	for idv := range imputedSNPs {
-		for other := range relativeSnps {
-			relations[idv] = append(relations[idv], relation{other,
-				countSimilarity(imputedSNPs[idv], relativeSnps[other]), kingRobust(imputedSNPs[idv], relativeSnps[other])})
-		}
+	references := make(map[string]map[string]uint8)
+	for _, ppl := range pgs.POPULATIONS {
+		references[ppl] = allMajorAlleleSample(chrId, ppl)
 	}
 
-	related := solver.ReadRelatedIndividuals()
-	var selfFound, relativeFound bool
-	var major map[string]uint8
-	results := make(map[string]*Result)
+	ancestries := tools.LoadAncestry()
+	relatives := solver.AllRelativeSamples()
+	chrStr := strconv.Itoa(chrId)
+	relativeSnps := getAllIndividualAlleles(tools.GetChromosomeFilepath(chrStr, tools.RL), relatives,
+		imputedSNPs[individuals[0]], numWorkers)
 	for idv := range imputedSNPs {
-		fmt.Printf("==== %s ====\n", idv)
-		results[idv] = newResult()
-		for _, metric := range []string{"count", "king"} {
-			fmt.Printf("---- Metric: %s\n", metric)
-			sort.Slice(relations[idv], func(i, j int) bool {
-				if metric == "count" {
-					return relations[idv][i].count > relations[idv][j].count
-				}
-				return relations[idv][i].king > relations[idv][j].king
-			})
-			relatives = related[idv]
-			selfFound, relativeFound = false, false
-			for i, rel := range relations[idv] {
-				if rel.target == idv {
-					fmt.Printf("Self: %d pos, %.3f count score, %.3f king score\n", i, rel.count, rel.king)
-					results[idv].Self[metric] = i
-					results[idv].CountAccuracy["self"] = rel.count
-					selfFound = true
-				}
-				for _, rltv := range relatives {
-					if rel.target == rltv {
-						fmt.Printf("Relative %s: %d pos, %.3f count score, %.3f king score\n", rltv, i, rel.count, rel.king)
-						results[idv].Relative[metric] = i
-						results[idv].KingScore["relative"] = rel.king
-						relativeFound = true
-						break
-					}
-				}
-				if selfFound && relativeFound {
-					break
-				}
-			}
+		for other := range relativeSnps {
+			relations[idv] = append(relations[idv], Relation{other,
+				matchCount(imputedSNPs[idv], relativeSnps[other]), kingRobustPair(imputedSNPs[idv], relativeSnps[other])})
 		}
-		//	Calculate accuracy with an all-major-allele sample
-		major = allMajorAlleleSample(chrId, getIndividualAncestry(idv, ancestries))
-		results[idv].CountAccuracy["reference"] = countSimilarity(imputedSNPs[idv], major)
-		results[idv].KingScore["reference"] = kingRobust(imputedSNPs[idv], major)
+		relations[idv] = append(relations[idv], Relation{"reference",
+			matchCount(imputedSNPs[idv], references[getIndividualAncestry(idv, ancestries)]),
+			kingRobustPair(imputedSNPs[idv], references[getIndividualAncestry(idv, ancestries)])})
 	}
+
+	//related := solver.ReadRelatedIndividuals()
+	//var selfFound, relativeFound bool
+	//var major map[string]uint8
+	//results := make(map[string]*Result)
+	//for idv := range imputedSNPs {
+	//	fmt.Printf("==== %s ====\n", idv)
+	//	results[idv] = newResult()
+	//	for _, metric := range []string{"Count", "King"} {
+	//		fmt.Printf("---- Metric: %s\n", metric)
+	//		sort.Slice(relations[idv], func(i, j int) bool {
+	//			if metric == "Count" {
+	//				return relations[idv][i].Count > relations[idv][j].Count
+	//			}
+	//			return relations[idv][i].King > relations[idv][j].King
+	//		})
+	//		relatives = related[idv]
+	//		selfFound, relativeFound = false, false
+	//		for i, rel := range relations[idv] {
+	//			if rel.Target == idv {
+	//				fmt.Printf("Self: %d pos, %.3f Count score, %.3f King score\n", i, rel.Count, rel.King)
+	//				results[idv].Self[metric] = i
+	//				results[idv].CountAccuracy["self"] = rel.Count
+	//				selfFound = true
+	//			}
+	//			for _, rltv := range relatives {
+	//				if rel.Target == rltv {
+	//					fmt.Printf("Relative %s: %d pos, %.3f Count score, %.3f King score\n", rltv, i, rel.Count, rel.King)
+	//					results[idv].Relative[metric] = i
+	//					results[idv].KingScore["relative"] = rel.King
+	//					relativeFound = true
+	//					break
+	//				}
+	//			}
+	//			if selfFound && relativeFound {
+	//				break
+	//			}
+	//		}
+	//	}
+	//	//	Calculate accuracy with an all-major-allele sample
+	//	major = allMajorAlleleSample(chrId, getIndividualAncestry(idv, ancestries))
+	//	results[idv].CountAccuracy["reference"] = countSimilarity(imputedSNPs[idv], major)
+	//	results[idv].KingScore["reference"] = kingRobust(imputedSNPs[idv], major)
+	//}
 	resultFolder := "results/impute"
 	filepath := path.Join(resultFolder, fmt.Sprintf("imputed%d.json", chrId))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
@@ -393,7 +416,7 @@ func imputationAccuracy(chrId int) {
 	}
 	defer resFile.Close()
 	encoder := json.NewEncoder(resFile)
-	if err = encoder.Encode(results); err != nil {
+	if err = encoder.Encode(relations); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
 	fmt.Println("Completed")
@@ -501,7 +524,7 @@ func linkingAccuracy(chrId int, imputedSNPs map[string]map[string]uint8) {
 		fmt.Printf("==== Extra: %s ====\n", relative)
 		otherSnps := getIndividualAlleles(strconv.Itoa(chrId), relative, tools.RL)
 		for idv := range imputedSNPs {
-			//relations[idv] = append(relations[idv], relation{relative, similarity(imputedSNPs[idv], otherSnps, chrAF[ancestry[idv]])})
+			//relations[idv] = append(relations[idv], Relation{relative, similarity(imputedSNPs[idv], otherSnps, chrAF[ancestry[idv]])})
 			relations[idv] = append(relations[idv], relation{relative, countSimilarity(imputedSNPs[idv], otherSnps)})
 		}
 	}
@@ -702,6 +725,19 @@ func similarity(a, b map[string]uint8, af map[string][]float32) float32 {
 		}
 	}
 	return score
+}
+
+func matchCount(a, b map[string]uint8) []int {
+	var numMatches int = 0
+	for locus := range a {
+		if _, ok := b[locus]; !ok {
+			b[locus] = 0
+		}
+		if a[locus] == b[locus] {
+			numMatches++
+		}
+	}
+	return []int{numMatches, len(a)}
 }
 
 func countSimilarity(a, b map[string]uint8) float32 {
@@ -940,9 +976,8 @@ func getIndividualAlleles(chr, idv, dataset string) map[string]uint8 {
 	return alleles
 }
 
-func getAllIndividualAlleles(filepath string, individuals []string, numThreads int) map[string]map[string]uint8 {
+func getAllIndividualAlleles(filepath string, individuals []string, includedLoci map[string]uint8, numThreads int) map[string]map[string]uint8 {
 	alleles := make(map[string]map[string]uint8)
-	var err error
 	prg := "bcftools"
 	args := []string{
 		"query",
@@ -961,10 +996,9 @@ func getAllIndividualAlleles(filepath string, individuals []string, numThreads i
 	lines := strings.Split(string(output), "\n")
 	lines = lines[:len(lines)-1]
 
-	lineChan := make(chan string, numThreads)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-
+	lineChan := make(chan string, numThreads)
 	for i := 0; i < numThreads; i++ {
 		wg.Add(1)
 		go func() {
@@ -980,18 +1014,21 @@ func getAllIndividualAlleles(filepath string, individuals []string, numThreads i
 					return
 				}
 				pos = fields[0]
+				if len(includedLoci) > 0 {
+					if _, ok = includedLoci[pos]; !ok {
+						continue
+					}
+				}
 				samples = strings.Split(fields[1], "\t")
 				samples = samples[:len(samples)-1]
 				for _, sample := range samples {
 					fields = strings.Split(sample, "=")
 					idv = fields[0]
-
 					mu.Lock()
 					if _, ok = alleles[idv]; !ok {
 						alleles[idv] = make(map[string]uint8)
 					}
 					mu.Unlock()
-
 					gt = fields[1]
 					var err error
 					gt, err = tools.NormalizeSnp(gt)
@@ -1021,6 +1058,18 @@ func getAllIndividualAlleles(filepath string, individuals []string, numThreads i
 	}()
 	wg.Wait()
 	fmt.Printf("Bcftools output processed\n")
+	if len(includedLoci) > 0 {
+		var ok bool
+		for locus := range includedLoci {
+			for idv := range alleles {
+				if _, ok = alleles[idv][locus]; ok {
+					break
+				}
+				alleles[idv][locus] = 0
+			}
+		}
+	}
+	fmt.Printf("Missing loci filled\n")
 	return alleles
 }
 

@@ -1,4 +1,3 @@
-from collections import defaultdict
 import csv
 import fnmatch
 import json
@@ -846,12 +845,12 @@ if __name__ == "__main__":
     # likelihood_spectrum_select("PGS002302")
     # likelihood_spectrum_select("PGS000851")
     # likelihood_spectrum_total()
-#     loci_coverage()
-#     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-#     accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-#     sequential()
-#     king_test()
-#     kinship_experiment()
-#     score_uniqueness()
-#     random_hist()
+    # loci_coverage()
+    # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
+    # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
+    # sequential()
+    # king_test()
+    # kinship_experiment()
+    # score_uniqueness()
+    # random_hist()
     guessed_mia()

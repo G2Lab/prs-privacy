@@ -65,11 +65,10 @@ func main() {
 	//consensusSolving()
 	//uniquenessExperiment()
 	//seqSolving()
-	imputeWorkflow()
-	//imputationAccuracy(22, "EUR")
+	//imputeWorkflow()
 	//imputationAccuracyAll(22)
 	//linkingWithGuessed()
-	//imputationAccuracy(21)
+	imputationAccuracy()
 }
 
 type Result struct {
@@ -601,7 +600,7 @@ func consensusSolving() {
 		var solmap map[string][]uint8
 		recoveredSnps := make(map[int]uint8)
 		guessedSnps := make(map[string]map[uint8]map[string]struct{})
-		trueSnps := make(map[string]uint8) // count all the snps
+		trueSnps := make(map[string]uint8) // Count all the snps
 		var solutions [][]uint8
 		for {
 			if len(allPgs) == 0 {
@@ -922,8 +921,8 @@ func seqSolving() {
 		guessedRefs := make(map[string]struct{})
 		guessConfidence := make(map[string]int)
 		recoveredPgsReferences := make(map[string]string)
-		trueSnpsWithMissed := make(map[string]uint8)    // count all the snps
-		trueSnpsWithoutMissed := make(map[string]uint8) // count only the snps that were "guessed", i.e., no solutions does not count
+		trueSnpsWithMissed := make(map[string]uint8)    // Count all the snps
+		trueSnpsWithoutMissed := make(map[string]uint8) // Count only the snps that were "guessed", i.e., no solutions does not Count
 		accuraciesWithMissed := make(map[int]float32)
 		accuraciesWithoutMissed := make(map[int]float32)
 		thresholdPos := 0
@@ -1253,8 +1252,8 @@ func sequentialSolving() {
 		guessedRefs := make(map[string]struct{})
 		guessConfidence := make(map[string]int)
 		recoveredPgsReferences := make(map[string]string)
-		trueSnpsWithMissed := make(map[string]uint8)    // count all the snps
-		trueSnpsWithoutMissed := make(map[string]uint8) // count only the snps that were "guessed", i.e., no solutions does not count
+		trueSnpsWithMissed := make(map[string]uint8)    // Count all the snps
+		trueSnpsWithoutMissed := make(map[string]uint8) // Count only the snps that were "guessed", i.e., no solutions does not Count
 		accuraciesWithMissed := make(map[int]float32)
 		accuraciesWithoutMissed := make(map[int]float32)
 		thresholdPos := 0
@@ -1604,7 +1603,7 @@ func findAllSolutions() {
 	//solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop], p.EffectAlleles))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
-	//target := solver.ScoreToTarget(cohort[INDIVIDUAL].Score, p)
+	//Target := solver.ScoreToTarget(cohort[INDIVIDUAL].Score, p)
 	target := cohort[INDIVIDUAL].Score
 	for _, solution := range solutions {
 		diff := new(apd.Decimal)
@@ -1673,18 +1672,18 @@ func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood
 //	minScore, maxScore := sortedScores[0], sortedScores[len(sortedScores)-1]
 //	step := (maxScore - minScore) / float64(samplesPerPopulation)
 //	individuals := make([]string, 0, samplesPerPopulation*len(pgs.POPULATIONS))
-//	var count int
+//	var Count int
 //	for _, ppl := range pgs.POPULATIONS {
 //		score := minScore
-//		count = 0
+//		Count = 0
 //		for i := 0; i < len(sortedSamples); i++ {
 //			if sortedScores[i] < score || populations[sortedSamples[i]] != ppl || sortedScores[i] == 0 {
 //				continue
 //			}
 //			individuals = append(individuals, sortedSamples[i])
 //			score += step
-//			count += 1
-//			if count == samplesPerPopulation {
+//			Count += 1
+//			if Count == samplesPerPopulation {
 //				break
 //			}
 //		}
@@ -1789,18 +1788,18 @@ func newSortingOutput(ind string, pop string, score *apd.Decimal, trueLikelihood
 //	minScore, maxScore := sortedScores[0], sortedScores[len(sortedScores)-1]
 //	step := (maxScore - minScore) / float64(samplesPerPopulation)
 //	individuals := make([]string, 0, samplesPerPopulation*len(pgs.POPULATIONS))
-//	var count int
+//	var Count int
 //	for _, ppl := range pgs.POPULATIONS {
 //		score := minScore
-//		count = 0
+//		Count = 0
 //		for i := 0; i < len(sortedSamples); i++ {
 //			if sortedScores[i] < score || populations[sortedSamples[i]] != ppl || sortedScores[i] == 0 {
 //				continue
 //			}
 //			individuals = append(individuals, sortedSamples[i])
 //			score += step
-//			count += 1
-//			if count == samplesPerPopulation {
+//			Count += 1
+//			if Count == samplesPerPopulation {
 //				break
 //			}
 //		}
