@@ -816,6 +816,202 @@ def guessed_mia():
     plt.show()
 
 
+def full_imputed():
+    directory = "results/impute/"
+    filepath = os.path.join(directory, "full_imputed22.json")
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for idv, result in content.items():
+        data.append({'SelfPosCount': int(result['Self']['count']), 'SelfPosKing': int(result['Self']['king']),
+                     'RelativePosCount': int(result['Relative']['count']), 'RelativePosKing': int(result['Relative']['king']),
+                     'SelfAccuracy': float(result['CountAccuracy']["self"]), 'RelativeAccuracy': float(result['KingScore']["relative"])})
+
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(3, 3))
+    # melted_df = pd.melt(df, value_vars=['SelfPosCount', 'SelfPosKing'], var_name='Method', value_name='Value')
+    # melted_df = pd.melt(df, value_vars=['RelativePosCount', 'RelativePosKing'], var_name='Method', value_name='Value')
+    sns.boxplot(x=["Relative" for x in df['RelativeAccuracy']], y='RelativeAccuracy', data=df)
+    # plt.title("Self linking")
+    # plt.title("Relative linking")
+    plt.title("Accuracy")
+    plt.ylabel('KING score of the relative')
+    # plt.gca().invert_yaxis()
+    # ax.set_xticklabels(['Self match ratio', 'Relative KING score'])
+    plt.xlabel('')
+    plt.tight_layout()
+    fig.savefig('relative-accuracy.png', dpi=300, bbox_inches='tight')
+    # fig.savefig('self-linking.png', dpi=300, bbox_inches='tight')
+    # melted_df = pd.melt(df, value_vars=['SelfAccuracy', 'RelativeAccuracy'], var_name='Type', value_name='Value')
+    # sns.boxplot(x='Type', y='Value', data=melted_df)
+    # plt.title("SNP matching accuracy")
+    # plt.ylabel('Match comparison accuracy')
+    # fig.savefig('linking-acc.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def imputation_accuracy():
+    directory = "results/impute/"
+    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+                 fnmatch.fnmatch(filename, f"imputed*.json")]
+    data = {}
+    # filepaths = ["results/impute/imputed22.json"]
+    for filepath in filepaths:
+        with open(filepath, 'r') as f:
+            content = json.load(f)
+        for idv, relations in content.items():
+            if idv not in data:
+                data[idv] = {}
+            for rel in relations:
+                if rel["Target"] not in data[idv]:
+                    data[idv][rel["Target"]] = {}
+                    data[idv][rel["Target"]]["Count"] = [float(c) for c in rel["Count"]]
+                    data[idv][rel["Target"]]["King"] = [float(c) for c in rel["King"]]
+                else:
+                    for i, c in enumerate(rel["Count"]):
+                        data[idv][rel["Target"]]["Count"][i] += float(c)
+                    for i, c in enumerate(rel["King"]):
+                        data[idv][rel["Target"]]["King"][i] += float(c)
+
+    divided = {}
+    for idv in data:
+        divided[idv] = {"Count": [], "King": []}
+        for target in data[idv]:
+            divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
+            divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
+        # sort by the second element of the tuple
+        divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
+        divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
+        # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
+
+    parsed = {"SelfCountPos": [], "SelfKingPos": [], "RelativeCountPos": [], "RelativeKingPos": [],
+              "ReferenceCountPos": [], "ReferenceKingPos": [], "SelfCountAcc": [], "SelfKingAcc": [],
+              "RelativeCountAcc": [], "RelativeKingAcc": [], "ReferenceCountAcc": [], "ReferenceKingAcc": [],
+              "EveryCountRatio": [], "EveryKingRatio": []}
+    related = read_related_individuals()
+    for idv in divided:
+        relative_found = False
+        for i, tpl in enumerate(divided[idv]["Count"]):
+            if tpl[0] == idv:
+                parsed["SelfCountPos"].append(i)
+                parsed["SelfCountAcc"].append(tpl[1])
+            if tpl[0] == "reference":
+                parsed["ReferenceCountPos"].append(i)
+                parsed["ReferenceCountAcc"].append(tpl[1])
+            if not relative_found and tpl[0] in related[idv]:
+                parsed["RelativeCountPos"].append(i)
+                parsed["RelativeCountAcc"].append(tpl[1])
+                relative_found = True
+            parsed["EveryCountRatio"].append(tpl[1])
+    for idv in divided:
+        relative_found = False
+        for i, tpl in enumerate(divided[idv]["King"]):
+            if tpl[0] == idv:
+                parsed["SelfKingPos"].append(i)
+                parsed["SelfKingAcc"].append(tpl[1])
+            if tpl[0] == "reference":
+                parsed["ReferenceKingPos"].append(i)
+                parsed["ReferenceKingAcc"].append(tpl[1])
+            if not relative_found and tpl[0] in related[idv]:
+                parsed["RelativeKingPos"].append(i)
+                parsed["RelativeKingAcc"].append(tpl[1])
+                relative_found = True
+            parsed["EveryKingRatio"].append(tpl[1])
+
+    print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
+    print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
+    print(f"ReferenceCountAcc: {np.median(parsed['ReferenceCountAcc'])}, {np.mean(parsed['ReferenceCountAcc'])}")
+    print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
+    print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
+    print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
+
+    palette = {}
+    for key in parsed:
+        if key.startswith("Self"):
+            palette[key] = sns.color_palette("pastel")[0]
+        elif key.startswith("Relative"):
+            palette[key] = sns.color_palette("pastel")[1]
+        elif key.startswith("Reference"):
+            palette[key] = sns.color_palette("pastel")[2]
+        else:
+            palette[key] = sns.color_palette("pastel")[3]
+
+    keys1 = ["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"]
+    df1 = prepare_data(parsed, keys1)
+    keys2 = ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"]
+    df2 = prepare_data(parsed, keys2)
+    fig1, axes1 = plt.subplots(1, 2, figsize=(12, 6))
+    sns.boxplot(x='Category', y='Value', data=df1, hue='Category', palette=palette, ax=axes1[0])
+    axes1[0].set_title('Match Count Based')
+    axes1[0].set_ylabel('Match position')
+    axes1[0].set_xlabel('')
+    axes1[0].set_xticklabels(["Self", "Relative", "Reference"])
+    axes1[0].invert_yaxis()
+    # Second plot
+    sns.boxplot(x='Category', y='Value', data=df2, hue='Category', palette=palette, ax=axes1[1])
+    axes1[1].invert_yaxis()
+    axes1[1].set_ylabel('Match position')
+    axes1[1].set_xlabel('')
+    axes1[1].set_title('KING Based')
+    axes1[1].set_xticklabels(["Self", "Relative", "Reference"])
+    fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
+
+    keys3 = ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"]
+    df3 = prepare_data(parsed, keys3)
+    keys4 = ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"]
+    df4 = prepare_data(parsed, keys4)
+    fig2, axes2 = plt.subplots(1, 2, figsize=(15, 6))
+    sns.boxplot(x='Category', y='Value', data=df3, hue='Category', palette=palette, ax=axes2[0])
+    axes2[0].set_title('Match Count Based')
+    axes2[0].set_ylabel('Match ratio')
+    axes2[0].set_xticklabels(["Self", "Relative", "Reference", "All"])
+    # Second plot
+    sns.boxplot(x='Category', y='Value', data=df4, hue='Category', palette=palette, ax=axes2[1])
+    axes2[1].set_ylabel('KING score')
+    axes2[1].set_xlabel('')
+    axes2[1].set_title('KING Based')
+    axes2[1].set_xticklabels(["Self", "Relative", "Reference", "All"])
+    fig2.savefig('imputed-king.png', dpi=300, bbox_inches='tight')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def prepare_data(parsed, keys):
+    data = []
+    for key in keys:
+        data.extend([(key, value) for value in parsed[key]])
+    return pd.DataFrame(data, columns=['Category', 'Value'])
+
+
+def read_related_individuals():
+    file_path = "data/related_individuals.txt"
+    related = {}
+
+    try:
+        with open(file_path, 'r') as file:
+            reader = csv.reader(file, delimiter='\t')
+            header = next(reader)
+
+            sample_column = -1
+            relatives_column = -1
+
+            for i, field in enumerate(header):
+                if field == "Sample":
+                    sample_column = i
+                if field == "Reason for exclusion":
+                    relatives_column = i
+
+            for record in reader:
+                if len(record) > relatives_column:
+                    split = record[relatives_column].split(":")
+                    related[record[sample_column]] = split[-1].split(",")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    return related
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -853,4 +1049,6 @@ if __name__ == "__main__":
     # kinship_experiment()
     # score_uniqueness()
     # random_hist()
-    guessed_mia()
+    # guessed_mia()
+    # full_imputed()
+    imputation_accuracy()

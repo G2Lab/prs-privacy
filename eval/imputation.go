@@ -267,7 +267,7 @@ func imputationAccuracy() {
 	for _, ancestry := range pgs.POPULATIONS {
 		fmt.Printf("Reading imputed SNPs: %d, %s\n", chrId, ancestry)
 		chrPath := fmt.Sprintf(postImputeZippedFilename, chrId, ancestry)
-		imputedChunk := getAllIndividualAlleles(chrPath, nil, nil, numWorkers)
+		imputedChunk := getAllIndividualAlleles(chrPath, numWorkers)
 		for idv := range imputedChunk {
 			imputedSNPs[idv] = imputedChunk[idv]
 		}
@@ -282,28 +282,28 @@ func imputationAccuracy() {
 		relations[idv] = make([]Relation, 0)
 	}
 
-	//// Read all the imputed positions, sort them and divide them into regions
-	//imputedPositions := make([]int, 0)
-	//var posInt int
-	//for pos := range imputedSNPs[individuals[0]] {
-	//	posInt, err = strconv.Atoi(pos)
-	//	if err != nil {
-	//		log.Fatalf("Cannot convert position %s to integer: %v", pos, err)
-	//	}
-	//	imputedPositions = append(imputedPositions, posInt)
-	//}
-	//sort.Ints(imputedPositions)
-	//
-	//imputedRegions := make([][]string, 0)
-	//startPos := 0
-	//for i := 1; i < len(imputedPositions); i++ {
-	//	if imputedPositions[i]-imputedPositions[i-1] > 1e6 {
-	//		imputedRegions = append(imputedRegions,
-	//			[]string{strconv.Itoa(imputedPositions[startPos]), strconv.Itoa(imputedPositions[i-1])})
-	//		startPos = i
-	//	}
-	//}
-	//fmt.Printf("Imputation regions: %v\n", imputedRegions)
+	// Read all the imputed positions, sort them and divide them into regions
+	imputedPositions := make([]int, 0)
+	var posInt int
+	for pos := range imputedSNPs[individuals[0]] {
+		posInt, err = strconv.Atoi(pos)
+		if err != nil {
+			log.Fatalf("Cannot convert position %s to integer: %v", pos, err)
+		}
+		imputedPositions = append(imputedPositions, posInt)
+	}
+	sort.Ints(imputedPositions)
+
+	imputedRegions := make([][]string, 0)
+	startPos := 0
+	for i := 1; i < len(imputedPositions); i++ {
+		if imputedPositions[i]-imputedPositions[i-1] > 1e6 {
+			imputedRegions = append(imputedRegions,
+				[]string{strconv.Itoa(imputedPositions[startPos]), strconv.Itoa(imputedPositions[i-1])})
+			startPos = i
+		}
+	}
+	fmt.Printf("Imputation regions: %v\n", imputedRegions)
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -329,12 +329,13 @@ func imputationAccuracy() {
 		}()
 	}
 	go func() {
-		chunkSize := 200
+		chunkSize := 100
 		for i := 0; i < len(db); i += chunkSize {
 			fmt.Printf("==== Chunk %d ====\n", i/chunkSize)
-			idvs := db[i:min(i+chunkSize, len(db))]
+			chunk := db[i:min(i+chunkSize, len(db))]
 			chrPath := tools.GetChromosomeFilepath(strconv.Itoa(chrId), tools.GG)
-			chunkSnps := getAllIndividualAlleles(chrPath, idvs, imputedSNPs[individuals[0]], numWorkers)
+			chunkSnps := getRegionIndividualAlleles(strconv.Itoa(chrId), chrPath, chunk, imputedSNPs[individuals[0]],
+				imputedRegions, numWorkers)
 			for idv := range imputedSNPs {
 				for other := range chunkSnps {
 					taskChan <- task{idv, other, chunkSnps}
@@ -353,8 +354,8 @@ func imputationAccuracy() {
 	ancestries := tools.LoadAncestry()
 	relatives := solver.AllRelativeSamples()
 	chrStr := strconv.Itoa(chrId)
-	relativeSnps := getAllIndividualAlleles(tools.GetChromosomeFilepath(chrStr, tools.RL), relatives,
-		imputedSNPs[individuals[0]], numWorkers)
+	relativeSnps := getRegionIndividualAlleles(chrStr, tools.GetChromosomeFilepath(chrStr, tools.RL), relatives,
+		imputedSNPs[individuals[0]], imputedRegions, numWorkers)
 	for idv := range imputedSNPs {
 		for other := range relativeSnps {
 			relations[idv] = append(relations[idv], Relation{other,
@@ -976,7 +977,8 @@ func getIndividualAlleles(chr, idv, dataset string) map[string]uint8 {
 	return alleles
 }
 
-func getAllIndividualAlleles(filepath string, individuals []string, includedLoci map[string]uint8, numThreads int) map[string]map[string]uint8 {
+func getRegionIndividualAlleles(chr, filepath string, individuals []string, includedLoci map[string]uint8,
+	imputedRegions [][]string, numThreads int) map[string]map[string]uint8 {
 	alleles := make(map[string]map[string]uint8)
 	prg := "bcftools"
 	args := []string{
@@ -988,6 +990,110 @@ func getAllIndividualAlleles(filepath string, individuals []string, includedLoci
 		args = append(args, "-s")
 		args = append(args, strings.Join(individuals, ","))
 	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var regArg string
+	for _, region := range imputedRegions {
+		regArg = fmt.Sprintf("%s:%s-%s", chr, region[0], region[1])
+		args = append(args, "-r")
+		args = append(args, regArg)
+		output, err := exec.Command(prg, args...).Output()
+		if err != nil {
+			log.Fatalf("Error executing bcftools command: %v", err)
+		}
+		fmt.Printf("Bcftools output %v received\n", region)
+		lines := strings.Split(string(output), "\n")
+		lines = lines[:len(lines)-1]
+
+		lineChan := make(chan string, numThreads)
+		for i := 0; i < numThreads; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var pos, gt, idv string
+				var snp uint8
+				var ok bool
+				var samples []string
+				for line := range lineChan {
+					fields := strings.Split(line, "-")
+					if len(fields) < 2 {
+						log.Printf("not enough fields in line: %s", line)
+						return
+					}
+					pos = fields[0]
+					if len(includedLoci) > 0 {
+						if _, ok = includedLoci[pos]; !ok {
+							continue
+						}
+					}
+					samples = strings.Split(fields[1], "\t")
+					samples = samples[:len(samples)-1]
+					for _, sample := range samples {
+						fields = strings.Split(sample, "=")
+						idv = fields[0]
+
+						mu.Lock()
+						if _, ok = alleles[idv]; !ok {
+							alleles[idv] = make(map[string]uint8)
+						}
+						mu.Unlock()
+
+						gt = fields[1]
+						var err error
+						gt, err = tools.NormalizeSnp(gt)
+						if err != nil {
+							log.Printf("error normalizing SNP: %s -- %v", line, err)
+							continue
+						}
+						snp, err = tools.SnpToSum(gt)
+						if err != nil {
+							log.Printf("error converting SNP to sum: %s -- %v", line, err)
+							continue
+						}
+
+						mu.Lock()
+						alleles[idv][pos] = snp
+						mu.Unlock()
+					}
+				}
+			}()
+		}
+
+		go func() {
+			for _, line := range lines {
+				lineChan <- line
+			}
+			close(lineChan)
+		}()
+		wg.Wait()
+	}
+	fmt.Printf("Bcftools output processed\n")
+	if len(includedLoci) > 0 {
+		var ok bool
+		for locus := range includedLoci {
+			for idv := range alleles {
+				if _, ok = alleles[idv][locus]; ok {
+					break
+				}
+				alleles[idv][locus] = 0
+			}
+
+		}
+	}
+	fmt.Printf("Missing loci filled\n")
+	return alleles
+}
+
+func getAllIndividualAlleles(filepath string, numThreads int) map[string]map[string]uint8 {
+	alleles := make(map[string]map[string]uint8)
+	prg := "bcftools"
+	args := []string{
+		"query",
+		"-f", "%POS-[%SAMPLE=%GT\t]\n",
+		filepath,
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	output, err := exec.Command(prg, args...).Output()
 	if err != nil {
 		log.Fatalf("Error executing bcftools command: %v", err)
@@ -996,8 +1102,6 @@ func getAllIndividualAlleles(filepath string, individuals []string, includedLoci
 	lines := strings.Split(string(output), "\n")
 	lines = lines[:len(lines)-1]
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	lineChan := make(chan string, numThreads)
 	for i := 0; i < numThreads; i++ {
 		wg.Add(1)
@@ -1014,21 +1118,18 @@ func getAllIndividualAlleles(filepath string, individuals []string, includedLoci
 					return
 				}
 				pos = fields[0]
-				if len(includedLoci) > 0 {
-					if _, ok = includedLoci[pos]; !ok {
-						continue
-					}
-				}
 				samples = strings.Split(fields[1], "\t")
 				samples = samples[:len(samples)-1]
 				for _, sample := range samples {
 					fields = strings.Split(sample, "=")
 					idv = fields[0]
+
 					mu.Lock()
 					if _, ok = alleles[idv]; !ok {
 						alleles[idv] = make(map[string]uint8)
 					}
 					mu.Unlock()
+
 					gt = fields[1]
 					var err error
 					gt, err = tools.NormalizeSnp(gt)
@@ -1058,18 +1159,6 @@ func getAllIndividualAlleles(filepath string, individuals []string, includedLoci
 	}()
 	wg.Wait()
 	fmt.Printf("Bcftools output processed\n")
-	if len(includedLoci) > 0 {
-		var ok bool
-		for locus := range includedLoci {
-			for idv := range alleles {
-				if _, ok = alleles[idv][locus]; ok {
-					break
-				}
-				alleles[idv][locus] = 0
-			}
-		}
-	}
-	fmt.Printf("Missing loci filled\n")
 	return alleles
 }
 
