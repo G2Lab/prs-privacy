@@ -853,9 +853,8 @@ def full_imputed():
 def imputation_accuracy():
     directory = "results/impute/"
     filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                 fnmatch.fnmatch(filename, f"imputed*.json")]
+                 fnmatch.fnmatch(filename, f"unimputed*.json")]
     data = {}
-    # filepaths = ["results/impute/imputed22.json"]
     for filepath in filepaths:
         with open(filepath, 'r') as f:
             content = json.load(f)
@@ -867,27 +866,35 @@ def imputation_accuracy():
                     data[idv][rel["Target"]] = {}
                     data[idv][rel["Target"]]["Count"] = [float(c) for c in rel["Count"]]
                     data[idv][rel["Target"]]["King"] = [float(c) for c in rel["King"]]
+                    data[idv][rel["Target"]]["Information"] = [float(c) for c in rel["Information"]]
                 else:
                     for i, c in enumerate(rel["Count"]):
                         data[idv][rel["Target"]]["Count"][i] += float(c)
                     for i, c in enumerate(rel["King"]):
                         data[idv][rel["Target"]]["King"][i] += float(c)
+                    for i, c in enumerate(rel["Information"]):
+                        data[idv][rel["Target"]]["Information"][i] += float(c)
 
     divided = {}
     for idv in data:
-        divided[idv] = {"Count": [], "King": []}
+        divided[idv] = {"Count": [], "King": [], "Information": []}
         for target in data[idv]:
             divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
             divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
+            divided[idv]["Information"].append((target, data[idv][target]["Information"][0] / data[idv][target]["Information"][1]))
         # sort by the second element of the tuple
         divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
         divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
+        divided[idv]["Information"] = sorted(divided[idv]["Information"], key=lambda x: x[1], reverse=True)
         # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
 
-    parsed = {"SelfCountPos": [], "SelfKingPos": [], "RelativeCountPos": [], "RelativeKingPos": [],
-              "ReferenceCountPos": [], "ReferenceKingPos": [], "SelfCountAcc": [], "SelfKingAcc": [],
-              "RelativeCountAcc": [], "RelativeKingAcc": [], "ReferenceCountAcc": [], "ReferenceKingAcc": [],
-              "EveryCountRatio": [], "EveryKingRatio": []}
+    parsed = {"SelfCountPos": [], "SelfKingPos": [], "SelfInformationPos": [],
+              "RelativeCountPos": [], "RelativeKingPos": [], "RelativeInformationPos": [],
+              "ReferenceCountPos": [], "ReferenceKingPos": [], "ReferenceInformationPos": [],
+              "SelfCountAcc": [], "SelfKingAcc": [], "SelfInformationAcc": [],
+              "RelativeCountAcc": [], "RelativeKingAcc": [], "RelativeInformationAcc": [],
+              "ReferenceCountAcc": [], "ReferenceKingAcc": [], "ReferenceInformationAcc": [],
+              "EveryCountRatio": [], "EveryKingRatio": [], "EveryInformationRatio": []}
     related = read_related_individuals()
     for idv in divided:
         relative_found = False
@@ -917,6 +924,20 @@ def imputation_accuracy():
                 parsed["RelativeKingAcc"].append(tpl[1])
                 relative_found = True
             parsed["EveryKingRatio"].append(tpl[1])
+    for idv in divided:
+        relative_found = False
+        for i, tpl in enumerate(divided[idv]["Information"]):
+            if tpl[0] == idv:
+                parsed["SelfInformationPos"].append(i)
+                parsed["SelfInformationAcc"].append(tpl[1])
+            if tpl[0] == "reference":
+                parsed["ReferenceInformationPos"].append(i)
+                parsed["ReferenceInformationAcc"].append(tpl[1])
+            if not relative_found and tpl[0] in related[idv]:
+                parsed["RelativeInformationPos"].append(i)
+                parsed["RelativeInformationAcc"].append(tpl[1])
+                relative_found = True
+            parsed["EveryInformationRatio"].append(tpl[1])
 
     print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
     print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
@@ -924,6 +945,9 @@ def imputation_accuracy():
     print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
     print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
     print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
+    print(f"SelfInformationAcc: {np.median(parsed['SelfInformationAcc'])}, {np.mean(parsed['SelfInformationAcc'])}")
+    print(f"RelativeInformationAcc: {np.median(parsed['RelativeInformationAcc'])}, {np.mean(parsed['RelativeInformationAcc'])}")
+    print(f"ReferenceInformationAcc: {np.median(parsed['ReferenceInformationAcc'])}, {np.mean(parsed['ReferenceInformationAcc'])}")
 
     palette = {}
     for key in parsed:
@@ -936,42 +960,42 @@ def imputation_accuracy():
         else:
             palette[key] = sns.color_palette("pastel")[3]
 
-    keys1 = ["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"]
-    df1 = prepare_data(parsed, keys1)
-    keys2 = ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"]
-    df2 = prepare_data(parsed, keys2)
-    fig1, axes1 = plt.subplots(1, 2, figsize=(12, 6))
-    sns.boxplot(x='Category', y='Value', data=df1, hue='Category', palette=palette, ax=axes1[0])
+    keys = [["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"],
+            ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"],
+            ["SelfInformationPos", "RelativeInformationPos", "ReferenceInformationPos"],
+            ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"],
+            ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"],
+            ["SelfInformationAcc", "RelativeInformationAcc", "ReferenceInformationAcc", "EveryInformationRatio"]]
+    df = []
+    for key in keys:
+        df.append(prepare_data(parsed, key))
+    fig1, axes1 = plt.subplots(1, 3, figsize=(15, 6))
+    for i, ax1 in enumerate(axes1):
+        ax1.invert_yaxis()
+        ax1.set_ylabel('Rank')
+        ax1.set_xlabel('')
+        ax1.set_xticklabels(["Self", "Relative", "Reference"])
+        sns.boxplot(x='Category', y='Value', data=df[i], hue='Category', palette=palette, ax=axes1[i])
     axes1[0].set_title('Match Count Based')
-    axes1[0].set_ylabel('Match position')
-    axes1[0].set_xlabel('')
-    axes1[0].set_xticklabels(["Self", "Relative", "Reference"])
-    axes1[0].invert_yaxis()
-    # Second plot
-    sns.boxplot(x='Category', y='Value', data=df2, hue='Category', palette=palette, ax=axes1[1])
-    axes1[1].invert_yaxis()
-    axes1[1].set_ylabel('Match position')
-    axes1[1].set_xlabel('')
+    axes1[0].set_ylim(60, 0)
     axes1[1].set_title('KING Based')
-    axes1[1].set_xticklabels(["Self", "Relative", "Reference"])
-    fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
+    axes1[1].set_ylim(60, 0)
+    axes1[2].set_title('Mutual Information Based')
+    axes1[2].set_ylim(2500, 0)
+    # fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
 
-    keys3 = ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"]
-    df3 = prepare_data(parsed, keys3)
-    keys4 = ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"]
-    df4 = prepare_data(parsed, keys4)
-    fig2, axes2 = plt.subplots(1, 2, figsize=(15, 6))
-    sns.boxplot(x='Category', y='Value', data=df3, hue='Category', palette=palette, ax=axes2[0])
+    fig2, axes2 = plt.subplots(1, 3, figsize=(15, 6))
+    for i, ax2 in enumerate(axes2):
+        ax2.set_xlabel('')
+        ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
+        sns.boxplot(x='Category', y='Value', data=df[i+3], hue='Category', palette=palette, ax=axes2[i])
     axes2[0].set_title('Match Count Based')
     axes2[0].set_ylabel('Match ratio')
-    axes2[0].set_xticklabels(["Self", "Relative", "Reference", "All"])
-    # Second plot
-    sns.boxplot(x='Category', y='Value', data=df4, hue='Category', palette=palette, ax=axes2[1])
     axes2[1].set_ylabel('KING score')
-    axes2[1].set_xlabel('')
     axes2[1].set_title('KING Based')
-    axes2[1].set_xticklabels(["Self", "Relative", "Reference", "All"])
-    fig2.savefig('imputed-king.png', dpi=300, bbox_inches='tight')
+    axes2[2].set_ylabel('Mutual information')
+    axes2[2].set_title('Mutual Information Based')
+    # fig2.savefig('imputed-king.png', dpi=300, bbox_inches='tight')
 
     plt.tight_layout()
     plt.show()
