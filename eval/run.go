@@ -65,10 +65,11 @@ func main() {
 	//consensusSolving()
 	//uniquenessExperiment()
 	//seqSolving()
-	//imputeWorkflow()
 	//imputationAccuracyAll(22)
-	//linkingWithGuessed()
+	//imputeWorkflow()
 	imputationAccuracy()
+	linkingWithGuessed()
+	calculateGenotypeFrequencies()
 }
 
 type Result struct {

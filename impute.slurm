@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=impute                   # Job name
-#SBATCH --mem=100G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
+#SBATCH --mem=20G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log           # Standard output and error log
-#SBATCH --cpus-per-task=15                  # Number of CPUs per task
+#SBATCH --cpus-per-task=6                  # Number of CPUs per task
 #SBATCH --time=2-0:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
 #SBATCH --priority=TOP                     # Job priority
