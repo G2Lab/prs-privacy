@@ -853,7 +853,8 @@ def full_imputed():
 def imputation_accuracy():
     directory = "results/impute/"
     filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                 fnmatch.fnmatch(filename, f"unimputed*.json")]
+                 # fnmatch.fnmatch(filename, f"unimputed*.json")]
+                 fnmatch.fnmatch(filename, f"imputed*.json")]
     data = {}
     for filepath in filepaths:
         with open(filepath, 'r') as f:
@@ -969,33 +970,51 @@ def imputation_accuracy():
     df = []
     for key in keys:
         df.append(prepare_data(parsed, key))
-    fig1, axes1 = plt.subplots(1, 3, figsize=(15, 6))
+    fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
     for i, ax1 in enumerate(axes1):
         ax1.invert_yaxis()
         ax1.set_ylabel('Rank')
         ax1.set_xlabel('')
         ax1.set_xticklabels(["Self", "Relative", "Reference"])
-        sns.boxplot(x='Category', y='Value', data=df[i], hue='Category', palette=palette, ax=axes1[i])
+        sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
+        medians = df[i].groupby(['Versus'])['Value'].median()
+        print(f"Medians for df[{i}]:", medians)  # Debug print
+            # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
+        #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
+        #                  xy=(tick, medians[label.get_text()]),
+        #                  xytext=(0, 5),  # 5 points vertical offset
+        #                  textcoords='offset points',
+        #                  ha='center', va='center',
+        #                  color='red', fontsize=10, fontweight='bold')
     axes1[0].set_title('Match Count Based')
-    axes1[0].set_ylim(60, 0)
+    axes1[0].set_ylim(2550, -50)
     axes1[1].set_title('KING Based')
-    axes1[1].set_ylim(60, 0)
+    axes1[1].set_ylim(2550, -50)
     axes1[2].set_title('Mutual Information Based')
-    axes1[2].set_ylim(2500, 0)
-    # fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
+    axes1[2].set_ylim(2550, -50)
+    # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
 
-    fig2, axes2 = plt.subplots(1, 3, figsize=(15, 6))
+    fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
     for i, ax2 in enumerate(axes2):
         ax2.set_xlabel('')
         ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
-        sns.boxplot(x='Category', y='Value', data=df[i+3], hue='Category', palette=palette, ax=axes2[i])
+        sns.boxplot(x='Versus', y='Value', data=df[i+3], hue='Versus', palette=palette, ax=axes2[i])
+        medians = df[i+3].groupby(['Versus'])['Value'].median()
+        print(f"Medians for df[{i}]:", medians)  # Debug print
+            # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
+        #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
+        #                  xy=(tick, medians[label.get_text()]),
+        #                  xytext=(0, 5),  # 5 points vertical offset
+        #                  textcoords='offset points',
+        #                  ha='center', va='center',
+        #                  color='red', fontsize=10, fontweight='bold')
     axes2[0].set_title('Match Count Based')
     axes2[0].set_ylabel('Match ratio')
     axes2[1].set_ylabel('KING score')
     axes2[1].set_title('KING Based')
     axes2[2].set_ylabel('Mutual information')
     axes2[2].set_title('Mutual Information Based')
-    # fig2.savefig('imputed-king.png', dpi=300, bbox_inches='tight')
+    # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
 
     plt.tight_layout()
     plt.show()
@@ -1005,7 +1024,15 @@ def prepare_data(parsed, keys):
     data = []
     for key in keys:
         data.extend([(key, value) for value in parsed[key]])
-    return pd.DataFrame(data, columns=['Category', 'Value'])
+    return pd.DataFrame(data, columns=['Versus', 'Value'])
+
+
+def prepare_data_for_cdf(parsed, key):
+    data = []
+    for label in key:
+        values = parsed[label]
+        data.extend([(label, value) for value in values])
+    return data
 
 
 def read_related_individuals():
@@ -1035,6 +1062,7 @@ def read_related_individuals():
         print(f"Error: {e}")
 
     return related
+
 
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")

@@ -67,7 +67,7 @@ func main() {
 	//seqSolving()
 	//calculateGenotypeFrequencies()
 	//imputeWorkflow()
-	imputationAccuracy()
+	linkingWithImputation()
 	//linkingWithGuessed()
 }
 

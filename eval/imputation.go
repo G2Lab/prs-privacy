@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"github.com/nikirill/prs/pgs"
@@ -235,7 +234,7 @@ func newRelation(target string, imputed, compared map[string]uint8, freqs map[st
 	}
 }
 
-func imputationAccuracy() {
+func linkingWithImputation() {
 	var chrId int
 	var err error
 	if len(os.Args) > 1 {
@@ -284,6 +283,7 @@ func imputationAccuracy() {
 		snps  map[string]map[string]uint8
 	}
 	taskChan := make(chan task)
+	chunkSize := 313
 
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -299,7 +299,6 @@ func imputationAccuracy() {
 		}()
 	}
 	go func() {
-		chunkSize := 500
 		for i := 0; i < len(db); i += chunkSize {
 			fmt.Printf("==== Chunk %d ====\n", i/chunkSize)
 			chunk := db[i:min(i+chunkSize, len(db))]
@@ -324,7 +323,7 @@ func imputationAccuracy() {
 	}
 	chrStr := strconv.Itoa(chrId)
 	ancestries := tools.LoadAncestry()
-	references := positionsMajorAlleleSamples(chrStr, stringedImputedPositions, pgs.POPULATIONS)
+	references := positionsMajorAlleleSamples(chrStr, imputedRegions, pgs.POPULATIONS)
 
 	relatives := solver.AllRelativeSamples()
 	relativeSnps := getRegionIndividualSNPs(chrStr, tools.GetChromosomeFilepath(chrStr, tools.RL), relatives,
@@ -359,9 +358,11 @@ func linkingWithGuessed() {
 	var encoder *json.Encoder
 	var resFile *os.File
 	var err error
+	var j int
 	var chrStr, idv, pos, filepath string
 	var positionMap map[string]struct{}
 	var positions []string
+	var regions [][]string
 	var relations map[string][]*Relation
 	var gtpFrequencies map[string][]float32
 	var references map[string]map[string]uint8
@@ -402,7 +403,11 @@ func linkingWithGuessed() {
 		}
 		fmt.Println("Relatives' relations calculated")
 
-		references = positionsMajorAlleleSamples(chrStr, positions, pgs.POPULATIONS)
+		regions = make([][]string, len(positions))
+		for j, pos = range positions {
+			regions[j] = []string{pos, pos}
+		}
+		references = positionsMajorAlleleSamples(chrStr, regions, pgs.POPULATIONS)
 		for idv := range guessed {
 			relations[idv] = append(relations[idv], newRelation("reference", guessed[idv][chrStr],
 				references[getIndividualAncestry(idv, ancestries)], gtpFrequencies))
@@ -594,7 +599,7 @@ func matchCount(a, b map[string]uint8) []int {
 }
 
 func mutualInformation(a, b map[string]uint8, genFreq map[string][]float32) []float32 {
-	var cumul float32 = 0
+	var cumul float64 = 0
 	for locus := range a {
 		if _, ok := b[locus]; !ok {
 			b[locus] = 0
@@ -604,10 +609,13 @@ func mutualInformation(a, b map[string]uint8, genFreq map[string][]float32) []fl
 				//log.Printf("Missing frequency for locus %s", locus)
 				continue
 			}
-			cumul += -float32(math.Log2(float64(genFreq[locus][a[locus]])))
+			cumul += -math.Log2(float64(genFreq[locus][a[locus]]))
 		}
 	}
-	return []float32{cumul, float32(len(a))}
+	if math.IsInf(cumul, 1) || math.IsInf(cumul, -1) {
+		cumul = math.MaxFloat32
+	}
+	return []float32{float32(cumul), float32(len(a))}
 }
 
 func loadGenotypeFrequencies(chr int) map[string][]float32 {
@@ -644,7 +652,7 @@ func calculateKinship(chrId string, imputedSNPs map[string]map[string]uint8) {
 	var relativeSNPs map[string]uint8
 	for idv := range imputedSNPs {
 		for _, relative := range related[idv] {
-			relativeSNPs = getIndividualAlleles(chrId, relative, tools.GG)
+			relativeSNPs = getAllIndividualSNPs(chrId, relative, tools.GG)
 			fmt.Printf("Individual %s and relative %s: %.3f\n", idv, relative, kingRobust(imputedSNPs[idv], relativeSNPs))
 		}
 	}
@@ -681,7 +689,7 @@ func calculateAccuracy(chrId int, ancestry string, trueSNPs, imputedSNPs map[str
 	}
 }
 
-func getPositionsAFs(chr string, positions []string, ancestries []string) map[string]map[string]float32 {
+func getPositionsAFs(chr string, regions [][]string, ancestries []string) map[string]map[string]float32 {
 	dataset := tools.GG
 	// Define the bcftools command
 	prg := "bcftools"
@@ -698,20 +706,19 @@ func getPositionsAFs(chr string, positions []string, ancestries []string) map[st
 	}
 	var pos string
 	var afFloat float64
-	for _, position := range positions {
-		args[len(args)-1] = fmt.Sprintf("%s:%s-%s", chr, position, position)
+	fmt.Printf("Receiving bcftools output: \n")
+	for r, region := range regions {
+		args[len(args)-1] = fmt.Sprintf("%s:%s-%s", chr, region[0], region[1])
 		output, err := exec.Command(prg, args...).Output()
 		if err != nil {
 			log.Fatalf("Error executing bcftools command: %v", err)
 		}
+		fmt.Printf("%d/%d\t", r+1, len(regions))
 		lines := strings.Split(string(output), "\n")
 		lines = lines[:len(lines)-1]
 		for _, line := range lines {
 			fields := strings.Split(line, "-")
 			pos = fields[0]
-			if pos != position {
-				continue
-			}
 			afs := strings.Split(fields[1], "\t")
 			for i, ancestry := range ancestries {
 				for _, afStr := range strings.Split(afs[i], ",") {
@@ -729,7 +736,7 @@ func getPositionsAFs(chr string, positions []string, ancestries []string) map[st
 				posAlleleFreqs[ancestry][pos] = pgs.MissingEAF
 			}
 			if posAlleleFreqs[ancestry][pos] >= 1 {
-				fmt.Printf("AF for %s at position %s: %.3f\n", ancestry, pos, posAlleleFreqs[ancestry][pos])
+				//fmt.Printf("AF for %s at position %s: %.3f\n", ancestry, pos, posAlleleFreqs[ancestry][pos])
 				posAlleleFreqs[ancestry][pos] = 1 - pgs.MissingEAF
 			}
 		}
@@ -887,7 +894,7 @@ func getIndividualPositionSNPs(chr string, positions []string, individuals []str
 	return alleles
 }
 
-func getIndividualAlleles(chr, idv, dataset string) map[string]uint8 {
+func getAllIndividualSNPs(chr, idv, dataset string) map[string]uint8 {
 	prg := "bcftools"
 	args := []string{
 		"query",
@@ -941,6 +948,7 @@ func getRegionIndividualSNPs(chr, filepath string, individuals []string, include
 		args = append(args, strings.Join(individuals, ","))
 	}
 	args = append(args, "-r")
+	args = append(args, "")
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var regArg string
@@ -1201,8 +1209,8 @@ func allMajorAlleleSample(chrId int, ancestry string) map[string]uint8 {
 	return alleles
 }
 
-func positionsMajorAlleleSamples(chr string, positions []string, ancestries []string) map[string]map[string]uint8 {
-	af := getPositionsAFs(chr, positions, ancestries)
+func positionsMajorAlleleSamples(chr string, regions [][]string, ancestries []string) map[string]map[string]uint8 {
+	af := getPositionsAFs(chr, regions, ancestries)
 	alleles := make(map[string]map[string]uint8)
 	for _, ancestry := range ancestries {
 		alleles[ancestry] = make(map[string]uint8)
@@ -1246,155 +1254,4 @@ func getAllPositions(filepath string) []string {
 	lines := strings.Split(string(output), "\n")
 	lines = lines[:len(lines)-1]
 	return lines
-}
-
-func imputationAccuracyAll(chrId int) {
-	originalFile, err := os.Open(fmt.Sprintf(groundTruthFilename, chrId))
-	if err != nil {
-		log.Fatalf("Cannot open VCF file: %v", err)
-	}
-	defer originalFile.Close()
-	var fields []string
-	var snp uint8
-	var chrPos string
-	var alleles []string
-	var parsed float64
-	imputedSNPs := make(map[string]map[string]uint8)
-	for _, ancestry := range pgs.POPULATIONS {
-		imputedFile, err := os.Open(fmt.Sprintf(postImputeUnzippedFilename, chrId, ancestry))
-		if err != nil {
-			log.Fatalf("Cannot open imputed VCF file: %v", err)
-		}
-		idvImputedPos := make(map[string]int)
-		scanner := bufio.NewScanner(imputedFile)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// If it is the header
-			if strings.HasPrefix(line, "#") {
-				if strings.HasPrefix(line, "#CHROM") {
-					fields := strings.Split(line, "\t")
-					for i, field := range fields {
-						//if _, ok := idvOriginalPos[field]; ok {
-						if samplePredicate(field) {
-							idvImputedPos[field] = i
-						}
-					}
-				}
-				continue
-			}
-			fields = strings.Split(line, "\t")
-			chrPos = fields[1]
-			for idv, pos := range idvImputedPos {
-				if len(fields) < pos {
-					log.Printf("Not enough fields in line:\n%s\n", line)
-					continue
-				}
-				if _, ok := imputedSNPs[idv]; !ok {
-					imputedSNPs[idv] = make(map[string]uint8)
-				}
-				alleles = strings.Split(fields[pos], ",")
-				snp = 0
-				for _, allele := range alleles {
-					parsed, err = strconv.ParseFloat(allele, 64)
-					if err != nil {
-						log.Fatalf("Cannot parse allele %s: %v", allele, err)
-					}
-					if parsed >= 0.5 {
-						snp += 1
-					}
-				}
-				if snp > 2 {
-					snp = 2
-				}
-				imputedSNPs[idv][chrPos] = snp
-			}
-		}
-		imputedFile.Close()
-	}
-	linkingAccuracy(chrId, imputedSNPs)
-}
-
-func linkingAccuracy(chrId int, imputedSNPs map[string]map[string]uint8) {
-	fmt.Printf("Linking\n")
-	type relation struct {
-		target string
-		score  float32
-	}
-	db := solver.All1000GenomesSamples()
-	related := solver.ReadRelatedIndividuals()
-	//ancestry := tools.LoadAncestry()
-	//chrAF := getChromosomeAFs(strconv.Itoa(chrId))
-	//fmt.Printf("AF loaded\n")
-
-	relations := make(map[string][]relation)
-	for idv := range imputedSNPs {
-		relations[idv] = make([]relation, 0)
-	}
-	for _, other := range db {
-		fmt.Printf("==== Main: %s ====\n", other)
-		otherSnps := getIndividualAlleles(strconv.Itoa(chrId), other, tools.GG)
-		for idv := range imputedSNPs {
-			relations[idv] = append(relations[idv], relation{other, countSimilarity(imputedSNPs[idv], otherSnps)})
-		}
-	}
-
-	relatives := solver.AllRelativeSamples()
-	for _, relative := range relatives {
-		fmt.Printf("==== Extra: %s ====\n", relative)
-		otherSnps := getIndividualAlleles(strconv.Itoa(chrId), relative, tools.RL)
-		for idv := range imputedSNPs {
-			//relations[idv] = append(relations[idv], Relation{relative, similarity(imputedSNPs[idv], otherSnps, chrAF[ancestry[idv]])})
-			relations[idv] = append(relations[idv], relation{relative, countSimilarity(imputedSNPs[idv], otherSnps)})
-		}
-	}
-
-	type Result struct {
-		SelfPos      int
-		RelativePos  int
-		SelfAccuracy float32
-		RelAccuracy  float32
-	}
-	var selfFound, relativeFound bool
-	results := make(map[string]*Result)
-	for idv := range imputedSNPs {
-		fmt.Printf("==== %s ====\n", idv)
-		sort.Slice(relations[idv], func(i, j int) bool {
-			return relations[idv][i].score > relations[idv][j].score
-		})
-		relatives = related[idv]
-		selfFound, relativeFound = false, false
-		results[idv] = new(Result)
-		for i, rel := range relations[idv] {
-			if rel.target == idv {
-				fmt.Printf("Self: %d pos, %.0f score / %.0f top\n", i, rel.score, relations[idv][0].score)
-				results[idv].SelfPos = i
-				results[idv].SelfAccuracy = rel.score
-				selfFound = true
-			}
-			for _, rltv := range relatives {
-				if rel.target == rltv {
-					fmt.Printf("Relative %s: %d pos, %.0f score\n", rltv, i, rel.score)
-					results[idv].RelativePos = i
-					results[idv].RelAccuracy = rel.score
-					relativeFound = true
-					break
-				}
-			}
-			if selfFound && relativeFound {
-				break
-			}
-		}
-	}
-	resultFolder := "results/impute"
-	filepath := path.Join(resultFolder, "imputed.json")
-	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Error opening result file: %v", err)
-	}
-	defer resFile.Close()
-	encoder := json.NewEncoder(resFile)
-	if err = encoder.Encode(results); err != nil {
-		log.Fatal("Cannot encode json", err)
-	}
-	fmt.Println("Completed")
 }
