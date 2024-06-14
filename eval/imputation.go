@@ -23,7 +23,7 @@ var (
 	postImputeUnzippedFilename = "imputation/chr%d-%s-postimpute.vcf"
 	preImputeZippedFilename    = preImputeUnzippedFilename + ".gz"
 	postImputeZippedFilename   = postImputeUnzippedFilename + ".gz"
-	groundTruthFilename        = "imputation/chr%d-truth.vcf"
+	postImputeTestingFilename  = "imputation/testing/chr%d-%s-postimpute.vcf.gz"
 )
 
 const (
@@ -37,6 +37,7 @@ func imputeWorkflow() {
 		for _, ancestry := range pgs.POPULATIONS {
 			fmt.Printf("===== %s =====\n", ancestry)
 			fillPreImputeVCF(chrId, ancestry)
+			//fillTruthVCF(chrId, ancestry)
 			fmt.Printf("Pre-impute VCF filled\n")
 			compressVCF(chrId, ancestry)
 			fmt.Printf("VCF compressed\n")
@@ -193,6 +194,99 @@ func fillPreImputeVCF(chrId int, ancestry string) {
 	}
 }
 
+func fillTruthVCF(chrId int, ancestry string) {
+	guessed := loadGuessedGenotypes()
+	ancestries := tools.LoadAncestry()
+	chr := strconv.Itoa(chrId)
+	var pos, ref, alt string
+	var posInt int
+	individuals := make([]string, 0)
+	positionMap := make(map[string]struct{})
+	for idv := range guessed {
+		if ancestry == getIndividualAncestry(idv, ancestries) {
+			individuals = append(individuals, idv)
+			for pos = range guessed[idv][chr] {
+				positionMap[pos] = struct{}{}
+			}
+		}
+	}
+	var err error
+	chrPositions := make([]int, 0)
+	alleles := make(map[int][]string)
+	for pos = range positionMap {
+		posInt, err = strconv.Atoi(pos)
+		if err != nil {
+			log.Fatalf("Cannot convert position %s to integer: %v", pos, err)
+		}
+		chrPositions = append(chrPositions, posInt)
+		ref, alt = retrievePositionAlleles(chr, pos)
+		alleles[posInt] = []string{ref, alt}
+	}
+	sort.Ints(chrPositions)
+	fmt.Printf("Number of guessed positions in chr %d: %d\n", chrId, len(chrPositions))
+	fmt.Printf("All positions: %v\n", chrPositions)
+	stringedPositions := make([]string, len(chrPositions))
+	for i, pos := range chrPositions {
+		stringedPositions[i] = strconv.Itoa(pos)
+	}
+
+	trueGtp := getIndividualPositionSNPs(chr, stringedPositions, individuals, tools.RL)
+
+	formatHeader := "##fileformat=VCFv4.1\n" +
+		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+	for _, idv := range individuals {
+		samplesHeader += fmt.Sprintf("\t%s", idv)
+	}
+	samplesHeader += "\n"
+	preImputeFile, err := os.OpenFile(fmt.Sprintf(preImputeUnzippedFilename, chrId, ancestry), os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Cannot create impute file: %v", err)
+	}
+	defer preImputeFile.Close()
+	_, err = preImputeFile.WriteString(formatHeader)
+	if err != nil {
+		log.Fatalf("Cannot write format header to impute file: %v", err)
+	}
+	_, err = preImputeFile.WriteString(samplesHeader)
+	if err != nil {
+		log.Fatalf("Cannot write samples header to impute file: %v", err)
+	}
+	lineTemplate := "%d\t%d\t.\t%s\t%s\t100\tPASS\t.\tGT"
+
+	var snp uint8
+	var ok bool
+	var line string
+	for i, pos := range chrPositions {
+		line = fmt.Sprintf(lineTemplate, chrId, chrPositions[i], alleles[pos][0], alleles[pos][1])
+		for _, idv := range individuals {
+			if _, ok = trueGtp[idv]; !ok {
+				line += "\t./."
+				continue
+			}
+			if snp, ok = trueGtp[idv][stringedPositions[i]]; ok {
+				switch snp {
+				case 0:
+					line += "\t0/0"
+				case 1:
+					line += "\t1/0"
+				case 2:
+					line += "\t1/1"
+				default:
+					log.Fatalf("Invalid SNP value: %d", snp)
+				}
+			} else {
+				log.Printf("No SNP for individual %s at position %s\n", idv, stringedPositions[i])
+				line += "\t./."
+			}
+		}
+		_, err = preImputeFile.WriteString(line + "\n")
+		if err != nil {
+			log.Fatalf("Cannot write to impute file %s: %v", line, err)
+		}
+	}
+}
+
 func retrievePositionAlleles(chr, pos string) (string, string) {
 	prg := "bcftools"
 	args := []string{
@@ -335,7 +429,7 @@ func linkingWithImputation() {
 		relations[idv] = append(relations[idv], newRelation("reference", imputedSNPs[idv],
 			references[getIndividualAncestry(idv, ancestries)], gtpFrequencies))
 	}
-	resultFolder := "results/impute"
+	resultFolder := "results/linking"
 	filepath := path.Join(resultFolder, fmt.Sprintf("imputed%d.json", chrId))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -354,7 +448,7 @@ func linkingWithGuessed() {
 	relatives := solver.AllRelativeSamples()
 	mainSamples := solver.All1000GenomesSamples()
 	ancestries := tools.LoadAncestry()
-	resultFolder := "results/impute"
+	resultFolder := "results/linking"
 	var encoder *json.Encoder
 	var resFile *os.File
 	var err error
@@ -428,6 +522,245 @@ func linkingWithGuessed() {
 	fmt.Println("Completed")
 }
 
+func evaluateImputation() {
+	var chrId int
+	var err error
+	//if len(os.Args) > 1 {
+	//	chrId, err = strconv.Atoi(os.Args[1])
+	//	if err != nil {
+	//		log.Fatalf("Cannot convert chromosome ID to integer: %v", err)
+	//	}
+	//} else {
+	//	chrId = 22
+	//}
+	for chrId = 1; chrId <= 22; chrId++ {
+		chrStr := strconv.Itoa(chrId)
+		fmt.Printf("Imputation evaluation for chromosome %d\n", chrId)
+		numWorkers := 4
+		imputedSNPs := make(map[string]map[string]uint8)
+		for _, ancestry := range pgs.POPULATIONS {
+			fmt.Printf("Reading imputed SNPs: %d, %s\n", chrId, ancestry)
+			chrPath := fmt.Sprintf(postImputeTestingFilename, chrId, ancestry)
+			imputedChunk := getAllIndividualAlleles(chrPath, numWorkers)
+			for idv := range imputedChunk {
+				imputedSNPs[idv] = imputedChunk[idv]
+			}
+		}
+		individuals := make([]string, 0)
+		for idv := range imputedSNPs {
+			individuals = append(individuals, idv)
+		}
+
+		guessed := loadGuessedGenotypes()
+		guessedPositionsMap := make(map[int]struct{})
+		var posInt int
+		for idv := range guessed {
+			for chr := range guessed[idv] {
+				if chr != strconv.Itoa(chrId) {
+					continue
+				}
+				for pos := range guessed[idv][chr] {
+					posInt, err = strconv.Atoi(pos)
+					if err != nil {
+						fmt.Printf("Cannot convert position %s to integer: %v\n", pos, err)
+					}
+					guessedPositionsMap[posInt] = struct{}{}
+				}
+			}
+		}
+
+		// Read all the imputed positions, sort them and divide them into regions
+		imputedPositions := getAllImputedPositions(chrId)
+		imputedRegions := dividePositionsIntoRegions(imputedPositions, imputationChunkSize)
+		fmt.Printf("Number of imputed SNPs: %d\n", len(imputedPositions))
+		fmt.Printf("Imputation regions: %v\n", imputedRegions)
+
+		trueSNPs := getRegionIndividualSNPs(chrStr, tools.GetChromosomeFilepath(chrStr, tools.RL), individuals,
+			imputedPositions, imputedRegions, numWorkers)
+
+		gtpFrequencies := loadGenotypeFrequencies(chrId)
+		observations := make(map[int]float32)
+		var wg sync.WaitGroup
+		type result struct {
+			pos   int
+			value float32
+		}
+		tasks := make(chan int, numWorkers)
+		results := make(chan result, len(imputedPositions))
+		// Worker function
+		worker := func(tasks <-chan int, results chan<- result) {
+			var strPos, idv string
+			var ok bool
+			var majorGtp uint8
+			for t := range tasks {
+				strPos = strconv.Itoa(t)
+				confusionMatrix := make([][]int, 3)
+				for i := 0; i < 3; i++ {
+					confusionMatrix[i] = make([]int, 3)
+				}
+
+				for idv = range imputedSNPs {
+					if _, ok = trueSNPs[idv][strPos]; ok {
+						confusionMatrix[trueSNPs[idv][strPos]][imputedSNPs[idv][strPos]]++
+					}
+				}
+
+				// If all the true genotypes are major, skip
+				majorGtp = majorGenotype(gtpFrequencies[strPos])
+				if confusionMatrix[majorGtp][majorGtp] == len(trueSNPs) {
+					continue
+				}
+				results <- result{pos: t, value: macroAveragedF1(confusionMatrix)}
+			}
+		}
+
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				worker(tasks, results)
+			}()
+		}
+		go func() {
+			//chunkSize := len(imputedPositions) / 100
+			//for i, pos := range imputedPositions {
+			for _, pos := range imputedPositions {
+				tasks <- pos
+				//if i%chunkSize == 0 {
+				//	fmt.Printf("Progress: %d%%\n", i/chunkSize)
+				//}
+			}
+			close(tasks)
+			wg.Wait()
+			close(results)
+		}()
+
+		for res := range results {
+			observations[res.pos] = res.value
+		}
+		fmt.Println("Observations calculated")
+
+		accuracyByDistance := make(map[int][]float32)
+		var regionGuessedPositions []int
+		var regionStart, regionEnd int
+		var closestDistance int
+		for _, region := range imputedRegions {
+			regionGuessedPositions = make([]int, 0)
+			regionStart, err = strconv.Atoi(region[0])
+			if err != nil {
+				log.Fatalf("Cannot convert region start to integer: %v", err)
+			}
+			regionEnd, err = strconv.Atoi(region[1])
+			if err != nil {
+				log.Fatalf("Cannot convert region end to integer: %v", err)
+			}
+			for pos := range guessedPositionsMap {
+				if regionStart <= pos && pos <= regionEnd {
+					regionGuessedPositions = append(regionGuessedPositions, pos)
+				}
+			}
+			sort.Ints(regionGuessedPositions)
+
+			for _, pos := range imputedPositions {
+				if regionStart > pos {
+					continue
+				}
+				if pos > regionEnd {
+					break
+				}
+				closestDistance = math.MaxInt32
+				for _, guessedPos := range regionGuessedPositions {
+					if dist := abs(pos - guessedPos); dist < closestDistance {
+						closestDistance = dist
+					}
+				}
+				if _, ok := accuracyByDistance[closestDistance]; !ok {
+					accuracyByDistance[closestDistance] = make([]float32, 0)
+				}
+				accuracyByDistance[closestDistance] = append(accuracyByDistance[closestDistance], observations[pos])
+			}
+		}
+
+		// Save results
+		filepath := path.Join("results/impute", fmt.Sprintf("%d.json", chrId))
+		resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalf("Error opening result file: %v", err)
+		}
+		defer resFile.Close()
+		encoder := json.NewEncoder(resFile)
+		if err = encoder.Encode(accuracyByDistance); err != nil {
+			log.Fatal("Cannot encode json", err)
+		}
+	}
+	fmt.Println("Completed")
+}
+
+func majorGenotype(freq []float32) uint8 {
+	var major uint8 = 0
+	for i := 1; i < len(freq); i++ {
+		if freq[i] > freq[major] {
+			major = uint8(i)
+		}
+	}
+	return major
+}
+
+func abs(a int) int {
+	if a >= 0 {
+		return a
+	}
+	return -a
+}
+
+func macroAveragedF1(confusionMatrix [][]int) float32 {
+	precision := make([]float32, len(confusionMatrix))
+	recall := make([]float32, len(confusionMatrix))
+	f1Scores := make([]float32, len(confusionMatrix))
+
+	var tp, fp, fn float32
+	// Calculate precision and recall for each class
+	for i := 0; i < len(confusionMatrix); i++ {
+		tp = float32(confusionMatrix[i][i])
+		fp = 0
+		fn = 0
+		for j := 0; j < len(confusionMatrix[i]); j++ {
+			if j != i {
+				fp += float32(confusionMatrix[j][i])
+				fn += float32(confusionMatrix[i][j])
+			}
+		}
+		if tp+fp != 0 {
+			precision[i] = tp / (tp + fp)
+		} else {
+			// If there are no instances of the class and none is recognized as such, the precision is 1
+			precision[i] = 1.0
+		}
+		if tp+fn != 0 {
+			recall[i] = tp / (tp + fn)
+		} else {
+			recall[i] = 1.0
+		}
+		if precision[i]+recall[i] != 0 {
+			f1Scores[i] = 2 * (precision[i] * recall[i]) / (precision[i] + recall[i])
+		} else {
+			f1Scores[i] = 0.0
+		}
+	}
+
+	// Calculate the macro-averaged F1 score
+	var macroF1 float32
+	for _, f1 := range f1Scores {
+		macroF1 += f1
+	}
+	//for _, pr := range precision {
+	//	macroF1 += pr
+	//}
+	macroF1 /= 3
+
+	return macroF1
+}
+
 func loadGuessedGenotypes() map[string]map[string]map[string]uint8 {
 	var err error
 	var file *os.File
@@ -478,6 +811,8 @@ func min(a, b int) int {
 
 func calculateGenotypeFrequencies() {
 	numWorkers := 5
+	missingGenotypeFrequencies := []float32{(1 - pgs.MissingEAF) * (1 - pgs.MissingEAF),
+		2 * pgs.MissingEAF * (1 - pgs.MissingEAF), pgs.MissingEAF * pgs.MissingEAF}
 	folder := "data/frequencies"
 	var filepath string
 	var outFile *os.File
@@ -504,13 +839,20 @@ func calculateGenotypeFrequencies() {
 			}
 			for i := range frequencies[locus] {
 				frequencies[locus][i] /= float32(len(alleles[locus]))
+				switch frequencies[locus][i] {
+				case 0:
+					frequencies[locus][i] = 1 / float32(len(alleles[locus]))
+				case 1:
+					frequencies[locus][i] = 1 - 1/float32(len(alleles[locus]))
+				default:
+
+				}
 			}
 		}
 		for _, pos := range positions {
 			if _, ok = frequencies[strconv.Itoa(pos)]; !ok {
 				fmt.Printf("Position %d was missing\n", pos)
-				frequencies[strconv.Itoa(pos)] = []float32{(1 - pgs.MissingEAF) * (1 - pgs.MissingEAF),
-					pgs.MissingEAF * (1 - pgs.MissingEAF), pgs.MissingEAF * pgs.MissingEAF}
+				frequencies[strconv.Itoa(pos)] = missingGenotypeFrequencies
 			}
 		}
 		filepath = path.Join(folder, fmt.Sprintf("%d.json", chr))
@@ -531,7 +873,8 @@ func getAllImputedPositions(chr int) []int {
 	imputedMap := make(map[string]struct{})
 	var imputedPositionsPerAncestry []string
 	for _, ancestry := range pgs.POPULATIONS {
-		imputedPositionsPerAncestry = getAllPositions(fmt.Sprintf(postImputeZippedFilename, chr, ancestry))
+		//imputedPositionsPerAncestry = getAllPositions(fmt.Sprintf(postImputeZippedFilename, chr, ancestry))
+		imputedPositionsPerAncestry = getAllPositions(fmt.Sprintf(postImputeTestingFilename, chr, ancestry))
 		for _, pos := range imputedPositionsPerAncestry {
 			imputedMap[pos] = struct{}{}
 		}

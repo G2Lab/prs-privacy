@@ -850,8 +850,8 @@ def full_imputed():
     plt.show()
 
 
-def imputation_accuracy():
-    directory = "results/impute/"
+def linking_accuracy():
+    directory = "results/linking/"
     filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
                  # fnmatch.fnmatch(filename, f"unimputed*.json")]
                  fnmatch.fnmatch(filename, f"imputed*.json")]
@@ -867,14 +867,14 @@ def imputation_accuracy():
                     data[idv][rel["Target"]] = {}
                     data[idv][rel["Target"]]["Count"] = [float(c) for c in rel["Count"]]
                     data[idv][rel["Target"]]["King"] = [float(c) for c in rel["King"]]
-                    data[idv][rel["Target"]]["Information"] = [float(c) for c in rel["Information"]]
+                    data[idv][rel["Target"]]["Information"] = [float(c) for c in rel["Information"] if float(c) < 1e20]
                 else:
                     for i, c in enumerate(rel["Count"]):
                         data[idv][rel["Target"]]["Count"][i] += float(c)
                     for i, c in enumerate(rel["King"]):
                         data[idv][rel["Target"]]["King"][i] += float(c)
                     for i, c in enumerate(rel["Information"]):
-                        data[idv][rel["Target"]]["Information"][i] += float(c)
+                        data[idv][rel["Target"]]["Information"][i] += float(c) if float(c) < 1e20 else 0
 
     divided = {}
     for idv in data:
@@ -993,6 +993,7 @@ def imputation_accuracy():
     axes1[2].set_title('Mutual Information Based')
     axes1[2].set_ylim(2550, -50)
     # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
+    fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
 
     fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
     for i, ax2 in enumerate(axes2):
@@ -1015,6 +1016,7 @@ def imputation_accuracy():
     axes2[2].set_ylabel('Mutual information')
     axes2[2].set_title('Mutual Information Based')
     # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
+    fig2.savefig('imputed-acc.png', dpi=300, bbox_inches='tight')
 
     plt.tight_layout()
     plt.show()
@@ -1064,6 +1066,37 @@ def read_related_individuals():
     return related
 
 
+def imputation_accuracy():
+    directory = "results/impute/f1/"
+    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+                 fnmatch.fnmatch(filename, f"*.json")]
+    data = []
+    for filepath in filepaths:
+        with open(filepath, 'r') as f:
+            content = json.load(f)
+        for distance, accuracies in content.items():
+            if distance == "0":
+                continue
+            for acc in accuracies:
+                data.append((int(distance), float(acc)))
+
+    df = pd.DataFrame(data, columns=["Distance", "Accuracy"])
+    range_size = 1000
+    df['DistanceRange'] = (df['Distance'] // range_size) * range_size
+    mean_accuracy_by_range = df.groupby('DistanceRange')['Accuracy'].mean().reset_index()
+    plt.figure(figsize=(10, 6))
+    ax = sns.barplot(x='DistanceRange', y='Accuracy', data=mean_accuracy_by_range)
+    plt.xlabel('Distance')
+    plt.ylabel('F1 Accuracy score')
+    plt.title('Imputation accuracy by distance from a known SNP')
+    ax.xaxis.set_major_locator(plt.MaxNLocator(12))
+    # xticks = mean_accuracy_by_range['DistanceRange']
+    # ax.set_xticks(xticks)
+    # ax.set_xticklabels([str(tick) if i % 10000 == 0 else '' for i, tick in enumerate(xticks)])
+    # plt.show()
+    plt.savefig('imputation.png', dpi=300, bbox_inches='tight')
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -1103,4 +1136,5 @@ if __name__ == "__main__":
     # random_hist()
     # guessed_mia()
     # full_imputed()
+    # linking_accuracy()
     imputation_accuracy()

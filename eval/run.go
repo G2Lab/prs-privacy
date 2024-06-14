@@ -67,8 +67,9 @@ func main() {
 	//seqSolving()
 	//calculateGenotypeFrequencies()
 	//imputeWorkflow()
-	linkingWithImputation()
+	//linkingWithImputation()
 	//linkingWithGuessed()
+	evaluateImputation()
 }
 
 type Result struct {
