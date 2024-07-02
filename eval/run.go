@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
+	"path/filepath"
+	"regexp"
 	"runtime/pprof"
 	"sort"
 	"strconv"
@@ -58,7 +61,7 @@ func main() {
 	//sortingChoice()
 	//sortingChoiceParallel()
 	//accuracyParallel()
-	//findAllSolutions()
+	findAllSolutions()
 	//sequentialSolving()
 	//kinshipExperiment()
 	//kingTest()
@@ -69,7 +72,266 @@ func main() {
 	//imputeWorkflow()
 	//linkingWithImputation()
 	//linkingWithGuessed()
-	evaluateImputation()
+	//evaluateImputation()
+	//findUnsolvablePRSWithOverlap()
+	//predictPRS()
+}
+
+func predictPRS() {
+	type Result struct {
+		Known     int
+		Total     int
+		Predicted []float64
+		Real      []float64
+	}
+	results := make(map[string]*Result)
+	guessed := loadGuessedGenotypes()
+	//catalogFile := "PGS000055_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000031_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000515_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000148_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000077_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000788_hmPOS_GRCh37.txt"
+	catalogFiles := []string{"PGS000055_hmPOS_GRCh37.txt", "PGS000031_hmPOS_GRCh37.txt", "PGS000515_hmPOS_GRCh37.txt",
+		"PGS000148_hmPOS_GRCh37.txt", "PGS000720_hmPOS_GRCh37.txt"}
+	for _, catalogFile := range catalogFiles {
+		p := pgs.NewPGS()
+		err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		fmt.Printf("======== %s ========\n", p.PgsID)
+		p.LoadStats()
+		results[p.PgsID] = &Result{
+			Known:     0,
+			Total:     len(p.Loci),
+			Predicted: make([]float64, 0),
+			Real:      make([]float64, 0),
+		}
+		cohort := solver.NewCohort(p)
+		scores := make([]float64, 0)
+		var scf float64
+		for idv := range cohort {
+			scf, err = cohort[idv].Score.Float64()
+			if err != nil {
+				log.Printf("Error converting predictedScore to float64: %v\n", err)
+				return
+			}
+			scores = append(scores, scf)
+		}
+		sort.Slice(scores, func(i, j int) bool {
+			return scores[i] < scores[j]
+		})
+		weights := make([]float64, len(p.Weights))
+		for i, w := range p.Weights {
+			weights[i], err = w.Float64()
+			if err != nil {
+				log.Printf("Error converting weight to float64: %v\n", err)
+				return
+			}
+		}
+		minScore, maxScore := scores[0], scores[len(scores)-1]
+		populations := tools.LoadAncestry()
+		individuals := solver.AllRelativeSamples()
+		var predictedScore, trueScore float64
+		var majorFreq float32
+		var guess, majorGtp uint8
+		var ok bool
+		for k, idv := range individuals {
+			predictedScore = 0
+			trueScore, err = cohort[idv].Score.Float64()
+			if err != nil {
+				log.Printf("Error converting trueScore to float64: %v\n", err)
+				return
+			}
+			for i, locus := range p.Loci {
+				chr, pos := tools.SplitLocus(locus)
+				guess, ok = guessed[idv][chr][pos]
+				if !ok {
+					// we do not have a guess for the locus, so we assume the most common genotype
+					majorGtp = 0
+					majorFreq = p.PopulationStats[pgs.GetIndividualAncestry(idv, populations)].GF[i][0]
+					for j, freq := range p.PopulationStats[pgs.GetIndividualAncestry(idv, populations)].GF[i] {
+						if freq > majorFreq {
+							majorGtp = uint8(j)
+						}
+					}
+					guess = majorGtp
+				} else if k == 0 {
+					results[p.PgsID].Known++
+				}
+				switch {
+				case (guess == 0 && p.EffectAlleles[i] == 0) || (guess == 2 && p.EffectAlleles[i] == 1):
+					predictedScore += 2 * weights[i]
+				case guess == 1:
+					predictedScore += weights[i]
+				default:
+					if guess != 0 && guess != 1 && guess != 2 {
+						log.Printf("Unknown guess genotype at %s: %d\n", locus, guess)
+					}
+				}
+			}
+			results[p.PgsID].Predicted = append(results[p.PgsID].Predicted, percentile(predictedScore, minScore, maxScore))
+			results[p.PgsID].Real = append(results[p.PgsID].Real, percentile(trueScore, minScore, maxScore))
+			fmt.Printf("%s: %.3f%% -> %.3f%%\n", idv, percentile(trueScore, minScore, maxScore),
+				percentile(predictedScore, minScore, maxScore))
+		}
+		guessedSumPos, guessedSumNeg := 0.0, 0.0
+		restSumPos, restSumNeg := 0.0, 0.0
+		for _, idv := range individuals {
+			for i, locus := range p.Loci {
+				chr, pos := tools.SplitLocus(locus)
+				if _, ok = guessed[idv][chr][pos]; ok {
+					if weights[i] > 0 {
+						guessedSumPos += weights[i]
+					} else {
+						guessedSumNeg += weights[i]
+					}
+				} else {
+					if weights[i] > 0 {
+						restSumPos += weights[i]
+					} else {
+						restSumNeg += weights[i]
+					}
+				}
+			}
+			break
+		}
+		fmt.Printf("Guessed: %.3f, %.3f\n", guessedSumPos, guessedSumNeg)
+		fmt.Printf("Rest: %.3f, %.3f\n", restSumPos, restSumNeg)
+	}
+	//filePath := path.Join("results/predict", "prediction.json")
+	//resFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
+	//if err != nil {
+	//	log.Fatalf("Error opening result file: %v", err)
+	//}
+	//defer resFile.Close()
+	//encoder := json.NewEncoder(resFile)
+	//if err = encoder.Encode(results); err != nil {
+	//	log.Fatal("Cannot encode json", err)
+	//}
+}
+
+func percentile(num, lower, upper float64) float64 {
+	if num < lower {
+		return 0
+	}
+	if num > upper {
+		return 100
+	}
+	return (num - lower) / (upper - lower)
+}
+
+func findUnsolvablePRSWithOverlap() {
+	guessedPerIndividual := loadGuessedGenotypes()
+	guessedLoci := make(map[string]struct{})
+	for idv := range guessedPerIndividual {
+		for chr := range guessedPerIndividual[idv] {
+			for pos := range guessedPerIndividual[idv][chr] {
+				guessedLoci[fmt.Sprintf("%s:%s", chr, pos)] = struct{}{}
+			}
+		}
+	}
+	ids, err := fewerVariantsPGS(50, 100)
+	if err != nil {
+		log.Println("Error:", err)
+		return
+	}
+	catalogFolder := "catalog"
+	unknownPgs := make(map[string][]int)
+	for _, id := range ids {
+		fmt.Printf("==== %s ====\n", id)
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			continue
+		}
+		for _, locus := range p.Loci {
+			if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") {
+				continue
+			}
+			if !isNumber(strings.Split(locus, ":")[1]) || !isNumberInRange(strings.Split(locus, ":")[0], 1, 22) {
+				continue
+			}
+		}
+		unknownPgs[id] = make([]int, 2)
+		for _, locus := range p.Loci {
+			if _, ok := guessedLoci[locus]; ok {
+				unknownPgs[id][0]++
+			}
+			unknownPgs[id][1]++
+		}
+	}
+	pgs := make([]string, 0)
+	for id, counts := range unknownPgs {
+		if counts[0] > 0 {
+			pgs = append(pgs, id)
+		}
+	}
+	sort.Slice(pgs, func(i, j int) bool {
+		return float64(unknownPgs[pgs[i]][0])/float64(unknownPgs[pgs[i]][1]) >
+			float64(unknownPgs[pgs[j]][0])/float64(unknownPgs[pgs[j]][1])
+	})
+	for _, id := range pgs {
+		fmt.Printf("%s: %d/%d\n", id, unknownPgs[id][0], unknownPgs[id][1])
+	}
+}
+
+// isNumber checks if a string represents a valid number using a regular expression
+func isNumber(str string) bool {
+	numberRegex := regexp.MustCompile(`^[\-+]?(\d+(\.\d+)?|\.\d+)$`)
+	return numberRegex.MatchString(str)
+}
+
+// isNumberInRange checks if a string represents a valid number and falls within the specified range
+func isNumberInRange(str string, min, max int) bool {
+	num, err := strconv.Atoi(str)
+	if err != nil {
+		return false
+	}
+	return num >= min && num <= max
+}
+
+func fewerVariantsPGS(lowerLimit, upperLimit int) ([]string, error) {
+	file, err := os.Open("catalog/pgs_all_metadata_scores.csv")
+	if err != nil {
+		log.Println("Error opening catalog metadata file:", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return nil, err
+	}
+	numVariantColumn, pgsIdColumn := -1, -1
+	for i, field := range header {
+		if field == "Number of Variants" {
+			numVariantColumn = i
+		}
+		if field == "Polygenic Score (PGS) ID" {
+			pgsIdColumn = i
+		}
+	}
+	ids := make([]string, 0)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && lowerLimit < numVariants &&
+			numVariants < upperLimit {
+			ids = append(ids, record[pgsIdColumn])
+		}
+	}
+	return ids, nil
 }
 
 type Result struct {
@@ -816,7 +1078,7 @@ func uniquenessExperiment() {
 }
 
 func seqSolving() {
-	thresholds := []int{500, 1000, 1500, 2000, 2500}
+	thresholds := []int{500, 1000, 1500, 2000, 2500, 3000}
 	//thresholds := []int{500, 1000, 1500, 2000}
 	//thresholds := []int{500, 1000, 1500}
 	fmt.Printf("Sequential solving for %d\n", thresholds)
@@ -1522,7 +1784,7 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
-	//INDIVIDUAL := "NA12286"
+	INDIVIDUAL := "NA12286"
 	//
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1531,7 +1793,7 @@ func findAllSolutions() {
 	//INDIVIDUAL := "NA07037"
 	//INDIVIDUAL := "HG03015"
 	//INDIVIDUAL := "HG01253"
-	INDIVIDUAL := "NA19313"
+	//INDIVIDUAL := "NA19313"
 
 	p := pgs.NewPGS()
 	//catalogFile := "PGS000154_hmPOS_GRCh37.txt"
@@ -1555,7 +1817,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004246_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
-	catalogFile := "PGS002735_hmPOS_GRCh37.txt"
+	catalogFile := "PGS003960_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -1593,8 +1855,8 @@ func findAllSolutions() {
 		}
 	}
 	fmt.Println()
-	//solmap := slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
-	solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+	solmap := slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+	//solmap := slv.SolveFromScratchDeterministic(solver.UseLikelihood)
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
 	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
 	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)

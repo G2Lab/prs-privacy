@@ -3,9 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/solver"
-	"github.com/nikirill/prs/tools"
 	"log"
 	"math"
 	"os"
@@ -16,6 +13,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/solver"
+	"github.com/nikirill/prs/tools"
 )
 
 var (
@@ -116,7 +117,7 @@ func fillPreImputeVCF(chrId int, ancestry string) {
 	individuals := make([]string, 0)
 	positionMap := make(map[string]struct{})
 	for idv := range guessed {
-		if ancestry == getIndividualAncestry(idv, ancestries) {
+		if ancestry == pgs.GetIndividualAncestry(idv, ancestries) {
 			individuals = append(individuals, idv)
 			for pos = range guessed[idv][chr] {
 				positionMap[pos] = struct{}{}
@@ -203,7 +204,7 @@ func fillTruthVCF(chrId int, ancestry string) {
 	individuals := make([]string, 0)
 	positionMap := make(map[string]struct{})
 	for idv := range guessed {
-		if ancestry == getIndividualAncestry(idv, ancestries) {
+		if ancestry == pgs.GetIndividualAncestry(idv, ancestries) {
 			individuals = append(individuals, idv)
 			for pos = range guessed[idv][chr] {
 				positionMap[pos] = struct{}{}
@@ -427,7 +428,7 @@ func linkingWithImputation() {
 			relations[idv] = append(relations[idv], newRelation(other, imputedSNPs[idv], relativeSnps[other], gtpFrequencies))
 		}
 		relations[idv] = append(relations[idv], newRelation("reference", imputedSNPs[idv],
-			references[getIndividualAncestry(idv, ancestries)], gtpFrequencies))
+			references[pgs.GetIndividualAncestry(idv, ancestries)], gtpFrequencies))
 	}
 	resultFolder := "results/linking"
 	filepath := path.Join(resultFolder, fmt.Sprintf("imputed%d.json", chrId))
@@ -504,7 +505,7 @@ func linkingWithGuessed() {
 		references = positionsMajorAlleleSamples(chrStr, regions, pgs.POPULATIONS)
 		for idv := range guessed {
 			relations[idv] = append(relations[idv], newRelation("reference", guessed[idv][chrStr],
-				references[getIndividualAncestry(idv, ancestries)], gtpFrequencies))
+				references[pgs.GetIndividualAncestry(idv, ancestries)], gtpFrequencies))
 		}
 		fmt.Println("References' relations calculated")
 
@@ -682,16 +683,16 @@ func evaluateImputation() {
 		}
 
 		// Save results
-		filepath := path.Join("results/impute", fmt.Sprintf("%d.json", chrId))
-		resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+		filePath := path.Join("results/impute", fmt.Sprintf("%d.json", chrId))
+		resFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Fatalf("Error opening result file: %v", err)
 		}
-		defer resFile.Close()
 		encoder := json.NewEncoder(resFile)
 		if err = encoder.Encode(accuracyByDistance); err != nil {
 			log.Fatal("Cannot encode json", err)
 		}
+		resFile.Close()
 	}
 	fmt.Println("Completed")
 }
@@ -1570,17 +1571,6 @@ func positionsMajorAlleleSamples(chr string, regions [][]string, ancestries []st
 
 func samplePredicate(input string) bool {
 	return strings.HasPrefix(input, "HG") || strings.HasPrefix(input, "NA")
-}
-
-func getIndividualAncestry(idv string, ancestry map[string]string) string {
-	if _, ok := ancestry[idv]; !ok {
-		log.Fatalf("Individual %s not found in ancestry file\n", idv)
-	}
-	idvAnc := ancestry[idv]
-	if strings.Contains(idvAnc, ",") {
-		idvAnc = strings.Split(idvAnc, ",")[0]
-	}
-	return idvAnc
 }
 
 func getAllPositions(filepath string) []string {

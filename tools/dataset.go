@@ -39,6 +39,17 @@ func IndividualSnpsQuery(c, p, dataset string) (string, []string) {
 	}
 }
 
+func AllSnpsQuery(c, p, dataset string) (string, []string) {
+	return "bcftools", []string{
+		"query",
+		"-f",
+		"%CHROM:%POS-[%GT\t]\n",
+		"-r",
+		fmt.Sprintf("%s:%s-%s", c, p, p),
+		GetChromosomeFilepath(c, dataset),
+	}
+}
+
 func RangeQuery(searchPattern, c, posBegin, posEnd, dataset string) (string, []string) {
 	return "bcftools", []string{
 		"query",

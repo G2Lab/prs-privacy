@@ -114,6 +114,7 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 
 type Statistics struct {
 	AF map[int][]float32 // Effect Allele Frequency
+	GF map[int][]float32 // Genotype Frequency
 	//FreqSpectrum  []float32         // Allele Frequency Spectrum
 	//FreqBinBounds []float32         // Bounds of the frequency spectrum bins
 }
@@ -260,6 +261,7 @@ scannerLoop:
 	for _, population := range POPULATIONS {
 		p.PopulationStats[population] = &Statistics{
 			AF: make(map[int][]float32, len(p.Loci)),
+			GF: make(map[int][]float32, len(p.Loci)),
 			//FreqSpectrum:  make([]float32, p.NumSpecBins),
 			//FreqBinBounds: make([]float32, p.NumSpecBins),
 		}
@@ -362,6 +364,7 @@ func (p *PGS) LoadDatasetStats() error {
 	filename = fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		p.extractEAF()
+		p.extractGF()
 		//p.computeFrequencySpectrum()
 		p.SaveStats()
 	} else {
@@ -529,6 +532,73 @@ func (p *PGS) extractEAF() {
 	}
 }
 
+func (p *PGS) extractGF() {
+	var err error
+	var found bool
+	var chr, position, snps, anc string
+	var alleles []uint8
+	var output []byte
+	var counts map[string][]int
+	var total map[string]int
+	var positionAndSamples, idvSnps []string
+	ancestries := tools.LoadAncestry()
+	for k, locus := range p.Loci {
+		found = false
+		chr, position = tools.SplitLocus(locus)
+		query, args := tools.IndividualSnpsQuery(chr, position, tools.GG)
+		output, err = exec.Command(query, args...).Output()
+		if err != nil {
+			fmt.Println("Error executing bcftools command:", err)
+			continue
+		}
+		total = make(map[string]int)
+		counts = make(map[string][]int)
+		for _, ppl := range POPULATIONS {
+			total[ppl] = 0
+			counts[ppl] = make([]int, 3)
+		}
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines[:len(lines)-1] {
+			positionAndSamples = strings.Split(line, "-")
+			if positionAndSamples[0] != locus {
+				//fmt.Printf("Locus %s does not match %s\n", locus, positionAndSamples[0])
+				continue
+			}
+			found = true
+			samples := strings.Split(positionAndSamples[1], "\t")
+			samples = samples[:len(samples)-1]
+			for _, sample := range samples {
+				idvSnps = strings.Split(sample, "=")
+				snps, err = tools.NormalizeSnp(idvSnps[1])
+				if err != nil {
+					fmt.Printf("Error normalizing %s: %v", snps, err)
+					continue
+				}
+				alleles, err = tools.SnpToPair(snps)
+				if err != nil {
+					fmt.Printf("Error converting SNPs %s to alleles: %v", snps, err)
+					continue
+				}
+				anc = GetIndividualAncestry(idvSnps[0], ancestries)
+				counts[anc][alleles[0]+alleles[1]]++
+				total[anc]++
+			}
+		}
+		for _, ppl := range POPULATIONS {
+			p.PopulationStats[ppl].GF[k] = make([]float32, 3)
+			if !found {
+				p.PopulationStats[ppl].GF[k][0] = p.PopulationStats[ppl].AF[k][0] * p.PopulationStats[ppl].AF[k][0]
+				p.PopulationStats[ppl].GF[k][1] = 2 * p.PopulationStats[ppl].AF[k][0] * p.PopulationStats[ppl].AF[k][1]
+				p.PopulationStats[ppl].GF[k][2] = p.PopulationStats[ppl].AF[k][1] * p.PopulationStats[ppl].AF[k][1]
+				continue
+			}
+			for i := 0; i < 3; i++ {
+				p.PopulationStats[ppl].GF[k][i] = float32(counts[ppl][i]) / float32(total[ppl])
+			}
+		}
+	}
+}
+
 //func (p *PGS) computeFrequencySpectrum() {
 //	p.assignFreqBins()
 //	p.querySampleFrequencies()
@@ -646,4 +716,15 @@ func (p *PGS) SaveStats() {
 	if err != nil {
 		log.Printf("Error encoding json PopulationStats: %v", err)
 	}
+}
+
+func GetIndividualAncestry(idv string, ancestry map[string]string) string {
+	if _, ok := ancestry[idv]; !ok {
+		log.Fatalf("Individual %s not found in ancestry file\n", idv)
+	}
+	idvAnc := ancestry[idv]
+	if strings.Contains(idvAnc, ",") {
+		idvAnc = strings.Split(idvAnc, ",")[0]
+	}
+	return idvAnc
 }

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,7 +77,7 @@ func numVariantsStats(fileNames []string) {
 }
 
 func getPGSWithFewerVariants(limit int) {
-	ids, err := fewerVariantsPGS(limit)
+	ids, err := fewerVariantsPGS(0, limit)
 	if err != nil {
 		log.Println("Error:", err)
 		return
@@ -86,6 +87,7 @@ func getPGSWithFewerVariants(limit int) {
 	invalidLoci := make([]string, 0)
 	tooFewVariants := make([]string, 0)
 	impreciseWeights := make([]string, 0)
+	logWeights := make([]string, 0)
 	filteredIds := make([]string, 0)
 	idsToNumVariants := make(map[string]int)
 	traits := make(map[string]struct{})
@@ -120,7 +122,16 @@ idLoop:
 		}
 		if p.WeightPrecision < uint32(math.Floor(math.Log2(float64(p.NumVariants)))) {
 			impreciseWeights = append(impreciseWeights, id)
+			//continue idLoop
+		}
+		maxw := findMaxAbsoluteWeight(p)
+		if float64(p.NumVariants)/log3(maxw) > 2 {
+			logWeights = append(logWeights, id)
+			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/log3(maxw))
 			continue idLoop
+		}
+		if p.NumVariants > 50 {
+			fmt.Printf("Large PGS: %s, %d\n", id, p.NumVariants)
 		}
 		filteredIds = append(filteredIds, id)
 		idsToNumVariants[id] = p.NumVariants
@@ -144,59 +155,84 @@ idLoop:
 	fmt.Println("PGS with X or Y chromosomes:", len(hasXYchromosomes), hasXYchromosomes)
 	fmt.Println("PGS with less than 2 variants:", len(tooFewVariants), tooFewVariants)
 	fmt.Println("PGS with imprecise weights:", len(impreciseWeights), impreciseWeights)
+	fmt.Println("PGS with log weights:", len(logWeights), logWeights)
 	fmt.Println("PGS with invalid loci:", len(invalidLoci), invalidLoci)
 	fmt.Println("Filtered PGS:", len(filteredIds))
 	fmt.Println("Unique traits:", len(traits))
 	fmt.Println("Unique publications:", len(publications))
 	fmt.Printf("Total loci: %d, unique %d\n", lociTotal, len(uniqueLoci))
 
-	lociPgpFile, err := os.OpenFile("results/loci_pgp_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
-	if err != nil {
-		log.Println("Error opening loci file:", err)
-		return
-	}
-	defer lociPgpFile.Close()
-	encoder := json.NewEncoder(lociPgpFile)
-	err = encoder.Encode(lociToPgp)
-	if err != nil {
-		log.Println("Error encoding pgp loci:", err)
+	for _, lw := range logWeights {
+		if !slices.Contains(impreciseWeights, lw) {
+			fmt.Printf("%s, ", lw)
+		}
 	}
 
-	lociPgsFile, err := os.OpenFile("results/loci_pgs_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
-	if err != nil {
-		log.Println("Error opening loci file:", err)
-		return
-	}
-	defer lociPgsFile.Close()
-	encoder = json.NewEncoder(lociPgsFile)
-	err = encoder.Encode(lociToPgs)
-	if err != nil {
-		log.Println("Error encoding pgs loci:", err)
-	}
+	//lociPgpFile, err := os.OpenFile("results/loci_pgp_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	//if err != nil {
+	//	log.Println("Error opening loci file:", err)
+	//	return
+	//}
+	//defer lociPgpFile.Close()
+	//encoder := json.NewEncoder(lociPgpFile)
+	//err = encoder.Encode(lociToPgp)
+	//if err != nil {
+	//	log.Println("Error encoding pgp loci:", err)
+	//}
+	//
+	//lociPgsFile, err := os.OpenFile("results/loci_pgs_coverage.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	//if err != nil {
+	//	log.Println("Error opening loci file:", err)
+	//	return
+	//}
+	//defer lociPgsFile.Close()
+	//encoder = json.NewEncoder(lociPgsFile)
+	//err = encoder.Encode(lociToPgs)
+	//if err != nil {
+	//	log.Println("Error encoding pgs loci:", err)
+	//}
+	//
+	//idsFile, err := os.OpenFile("results/filtered_pgs.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	//if err != nil {
+	//	log.Println("Error opening ids file:", err)
+	//	return
+	//}
+	//defer idsFile.Close()
+	//encoder = json.NewEncoder(idsFile)
+	//err = encoder.Encode(idsToNumVariants)
+	//if err != nil {
+	//	log.Println("Error encoding filtered ids:", err)
+	//}
+	//
+	//pgsToPgpFile, err := os.OpenFile("results/pgs_pgp.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
+	//if err != nil {
+	//	log.Println("Error opening ids file:", err)
+	//	return
+	//}
+	//defer idsFile.Close()
+	//encoder = json.NewEncoder(pgsToPgpFile)
+	//err = encoder.Encode(pgsToPgp)
+	//if err != nil {
+	//	log.Println("Error encoding pgs to pgp:", err)
+	//}
+}
 
-	idsFile, err := os.OpenFile("results/filtered_pgs.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
-	if err != nil {
-		log.Println("Error opening ids file:", err)
-		return
+func findMaxAbsoluteWeight(p *pgs.PGS) float64 {
+	maxWeight := 0.0
+	for _, weight := range p.Weights {
+		w, err := weight.Float64()
+		if err != nil {
+			log.Println("Error converting weight to float64:", err)
+		}
+		if math.Abs(w) > maxWeight {
+			maxWeight = math.Abs(w)
+		}
 	}
-	defer idsFile.Close()
-	encoder = json.NewEncoder(idsFile)
-	err = encoder.Encode(idsToNumVariants)
-	if err != nil {
-		log.Println("Error encoding filtered ids:", err)
-	}
+	return maxWeight * math.Pow(10, float64(p.WeightPrecision))
+}
 
-	pgsToPgpFile, err := os.OpenFile("results/pgs_pgp.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0777)
-	if err != nil {
-		log.Println("Error opening ids file:", err)
-		return
-	}
-	defer idsFile.Close()
-	encoder = json.NewEncoder(pgsToPgpFile)
-	err = encoder.Encode(pgsToPgp)
-	if err != nil {
-		log.Println("Error encoding pgs to pgp:", err)
-	}
+func log3(x float64) float64 {
+	return math.Log2(x) / math.Log2(3)
 }
 
 func copyFilteredPGSFiles() {
@@ -215,8 +251,8 @@ func copyFilteredPGSFiles() {
 		return
 	}
 	for id := range idsToNumVariants {
-		src := filepath.Join("catalog", id+"_hmPOS_GRCh38.txt")
-		dst := filepath.Join("filtered", id+"_hmPOS_GRCh38.txt")
+		src := filepath.Join("catalog", id+"_hmPOS_GRCh37.txt")
+		dst := filepath.Join("filtered", id+"_hmPOS_GRCh37.txt")
 		err = copyFile(src, dst)
 		if err != nil {
 			log.Println("Error copying file:", err)
@@ -520,7 +556,7 @@ filesLoop:
 }
 
 func downloadScoreFiles(limit int) {
-	ids, err := fewerVariantsPGS(limit)
+	ids, err := fewerVariantsPGS(0, limit)
 	if err != nil {
 		log.Println("Error:", err)
 		return
@@ -588,7 +624,7 @@ func decompressHTTPResponse(body io.Reader) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func fewerVariantsPGS(limit int) ([]string, error) {
+func fewerVariantsPGS(lowerLimit, upperLimit int) ([]string, error) {
 	file, err := os.Open("catalog/pgs_all_metadata_scores.csv")
 	if err != nil {
 		log.Println("Error opening catalog metadata file:", err)
@@ -620,7 +656,8 @@ func fewerVariantsPGS(limit int) ([]string, error) {
 			}
 			return nil, err
 		}
-		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && numVariants < limit {
+		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && lowerLimit < numVariants &&
+			numVariants < upperLimit {
 			ids = append(ids, record[pgsIdColumn])
 		}
 	}
@@ -670,7 +707,7 @@ func main() {
 	case "overlap":
 		lociOverlapStats(filenames)
 	case "limit":
-		getPGSWithFewerVariants(50)
+		getPGSWithFewerVariants(60)
 	case "copy":
 		copyFilteredPGSFiles()
 	case "validate":

@@ -1,6 +1,8 @@
 import csv
 import fnmatch
 import json
+import random
+
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -1077,6 +1079,8 @@ def imputation_accuracy():
         for distance, accuracies in content.items():
             if distance == "0":
                 continue
+            # if int(distance) > 10000:
+            #     continue
             for acc in accuracies:
                 data.append((int(distance), float(acc)))
 
@@ -1093,8 +1097,60 @@ def imputation_accuracy():
     # xticks = mean_accuracy_by_range['DistanceRange']
     # ax.set_xticks(xticks)
     # ax.set_xticklabels([str(tick) if i % 10000 == 0 else '' for i, tick in enumerate(xticks)])
+    plt.show()
+    # plt.savefig('imputation.png', dpi=300, bbox_inches='tight')
+
+
+def percentile_prediction():
+    filepath = "results/predict/prediction.json"
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for result in content.values():
+        for i, predicted in enumerate(result['Predicted']):
+            data.append({'Known': f'{result["Known"]}/{result["Total"]}',
+                         'Percentile Difference': 100*abs(float(result['Predicted'][i])-float(result['Real'][i]))})
+
+    sorted(data, key=lambda x: float(x['Known'].split("/")[0])/float(x['Known'].split("/")[1]))
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.invert_yaxis()
+    sns.boxplot(x='Known', y='Percentile Difference', data=df)
+    plt.title('Percentile difference between predicted and real PRS')
+    plt.xlabel('Known/Total SNPs')
+    plt.tight_layout()
+    fig.savefig('prediction.png', dpi=300, bbox_inches='tight')
     # plt.show()
-    plt.savefig('imputation.png', dpi=300, bbox_inches='tight')
+
+
+def random_bars():
+    # Data
+    labels = ['TP53', 'BRCA1', 'CFTR']
+    values1 = [10, 15, 20]
+    values2 = [x + random.randint(1, 5) for x in values1]  # Slightly higher values
+
+    # Parameters
+    x = np.arange(len(labels))  # the label locations
+    width = 0.22  # narrower width of the bars
+
+    # Set seaborn color palette
+    palette = sns.color_palette("colorblind")
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+
+    # Plotting the bars with seaborn colors
+    bars1 = ax.bar(x - width/2, values1, width, label='Old technique', color=palette[2])
+    bars2 = ax.bar(x + width/2, values2, width, label='My awesome technique', color=palette[1])
+
+    # Adding labels, title, and legend
+    ax.set_xlabel('Genes')
+    ax.set_ylabel('Predictive power')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.legend()
+
+    fig.savefig('randbars.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
 
 if __name__ == "__main__":
@@ -1137,4 +1193,6 @@ if __name__ == "__main__":
     # guessed_mia()
     # full_imputed()
     # linking_accuracy()
-    imputation_accuracy()
+    # imputation_accuracy()
+    # percentile_prediction()
+    random_bars()
