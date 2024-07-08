@@ -419,6 +419,18 @@ func (p *PGS) extractPopulationAlleles() error {
 				p.EffectAlleles[k] = 0
 				alleleSet = true
 			default:
+				if len(p.ScoreAlleles[k]) > 1 {
+					for _, a := range p.ScoreAlleles[k] {
+						if strings.Contains(alt, string(a)) {
+							p.EffectAlleles[k] = 1
+							alleleSet = true
+							break
+						}
+					}
+					if alleleSet {
+						continue
+					}
+				}
 				log.Printf("Effect/other and reference/alternative alleles do not match at locus %s: %v vs %v",
 					locus, p.ScoreAlleles[k], []string{ref, alt})
 				if !alleleSet {

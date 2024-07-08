@@ -83,7 +83,7 @@ func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float32, efa
 }
 
 func AfToLikelihood(af float32) float32 {
-	return float32(-math.Log(float64(af)))
+	return float32(-math.Log2(float64(af)))
 }
 
 // SampleFromPopulation samples an individual according to the MAF

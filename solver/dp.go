@@ -466,21 +466,12 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 	allNonEffectLikelihood := calculateLociLikelihood([]uint8{}, indices, stats.AF, effectAlleles)
 	//fmt.Printf("Indices %v\n", indices)
 	//fmt.Printf("All zero likelihood: %f\n", allNonEffectLikelihood)
-	//
-	//firstBucketIdx := tools.ValueToBinIdx(stats.AF[indices[0]][effectAlleles[indices[0]]], stats.FreqBinBounds)
-	//lastBucketIdx := tools.ValueToBinIdx(stats.AF[indices[len(indices)-1]][effectAlleles[indices[len(indices)-1]]], stats.FreqBinBounds)
-	//allNonEffectFreqSpec := make([]float32, lastBucketIdx-firstBucketIdx+1)
-	//freqSpecSegment := stats.FreqSpectrum[firstBucketIdx : lastBucketIdx+1]
-	//allNonEffectDistance := CalculateTwoSpectrumDistance(allNonEffectFreqSpec, freqSpecSegment)
-	//fmt.Printf("First bucket %d, last bucket %d, total %d\n", firstBucketIdx, lastBucketIdx, len(stats.FreqSpectrum))
-	//fmt.Printf("All zero distance: %f\n", allNonEffectDistance)
-	// add the zero weight
-	//table[0] = newNode(math.MaxUint8, allNonEffectLikelihood, allNonEffectDistance, 0, 0)
 	table[0] = newNode(math.MaxUint8, allNonEffectLikelihood)
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
+	updates := make([]Update, 0)
+	newSums := make([]int64, 0)
 
-	var updates []Update
 	var ok bool
 	var k, nextPtr uint8
 	//var nextBinIdx, nextBinCount uint8
@@ -488,15 +479,15 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 	var nextLikelihood float32
 	//var nextChi float32
 	var prevSum, nextSum, weight int64
-	for _, pos := range indices {
-		//fmt.Printf("Position %d/%d\n", i, len(betas))
+	for i, pos := range indices {
+		fmt.Printf("Position %d/%d\n", i, len(betas))
 		if betas[uint8(pos)] > 0 {
 			lowerBound += pgs.Ploidy * betas[uint8(pos)]
 		} else {
 			upperBound += pgs.Ploidy * betas[uint8(pos)]
 		}
-		updates = make([]Update, 0)
-		newSums := make([]int64, 0)
+		updates = updates[:0]
+		newSums = newSums[:0]
 		effectAllele = effectAlleles[pos]
 		referenceAllele = ^effectAllele & 1
 		//nextBinIdx = uint8(tools.ValueToBinIdx(stats.AF[pos][effectAllele], stats.FreqBinBounds))
@@ -569,6 +560,7 @@ func calculateSubsetSumTable(betas map[uint8]int64, indices []int, upperBound, l
 	table[0] = make([]uint8, 0)
 	existingSums := make([]int64, 1)
 	existingSums[0] = 0
+	newSums := make([]int64, 0)
 	var k uint8
 	var prevSum, nextSum, weight int64
 	for _, pos := range indices {
@@ -579,7 +571,7 @@ func calculateSubsetSumTable(betas map[uint8]int64, indices []int, upperBound, l
 		} else {
 			upperBound += pgs.Ploidy * betas[uint8(pos)]
 		}
-		newSums := make([]int64, 0)
+		newSums = newSums[:0]
 		for _, prevSum = range existingSums {
 			for k = 1; k <= pgs.Ploidy; k++ {
 				weight = betas[uint8(pos)] * int64(k)

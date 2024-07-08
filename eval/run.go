@@ -26,7 +26,7 @@ import (
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write cpu profile to file")
 
-const DeterminismLimit = 32
+const DeterminismLimit = 34
 
 func main() {
 	flag.Parse()
@@ -61,13 +61,13 @@ func main() {
 	//sortingChoice()
 	//sortingChoiceParallel()
 	//accuracyParallel()
-	findAllSolutions()
+	//findAllSolutions()
 	//sequentialSolving()
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
 	//uniquenessExperiment()
-	//seqSolving()
+	seqSolving()
 	//calculateGenotypeFrequencies()
 	//imputeWorkflow()
 	//linkingWithImputation()
@@ -1077,10 +1077,14 @@ func uniquenessExperiment() {
 	}
 }
 
+type Contender struct {
+	id         string
+	solution   []uint8
+	likelihood float32
+}
+
 func seqSolving() {
-	thresholds := []int{500, 1000, 1500, 2000, 2500, 3000}
-	//thresholds := []int{500, 1000, 1500, 2000}
-	//thresholds := []int{500, 1000, 1500}
+	thresholds := []int{500, 1000, 1500, 2000, 2500}
 	fmt.Printf("Sequential solving for %d\n", thresholds)
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
@@ -1109,7 +1113,6 @@ func seqSolving() {
 		return
 	}
 
-	//individuals := []string{"NA19678"}
 	//individuals := []string{"HG00119", "HG00524", "HG00581", "HG00656", "HG00731", "HG01936", "HG02025", "HG02026",
 	//	"HG02067", "HG02353", "HG02371", "HG02250", "HG02373", "HG02386", "HG02375", "HG03713", "HG03673", "NA19238",
 	//	"NA19239", "NA19027", "NA19334", "NA19331", "NA19664", "NA19678", "NA19661", "NA19713", "NA20321", "NA20334",
@@ -1120,31 +1123,26 @@ func seqSolving() {
 		individuals = append(individuals, idv)
 	}
 	sort.Strings(individuals)
+	individuals = []string{"NA19678"}
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
 	fmt.Println(individuals[chunkNum*chunkSize : (chunkNum+1)*chunkSize])
 
 	type Result struct {
 		Individual string
+		Ancestry   string
 		Accuracies map[int]float32
 	}
-	results := make([]*Result, 0)
 	type Guess struct {
 		Individual string
+		Ancestry   string
 		SNPs       map[string]uint8
 	}
+	results := make([]*Result, 0)
 	guesses := make([]*Guess, 0)
-
-	type contester struct {
-		id         string
-		solution   []uint8
-		likelihood float32
-	}
-	var contenders []contester
-	var pgsID string
-	var accuracyWithMissed, accuracyWithoutMissed float32
-	var individual string
 	populations := tools.LoadAncestry()
+	var pgsID string
+	var individual string
 	for c := chunkNum * chunkSize; c < (chunkNum+1)*chunkSize; c++ {
 		if c >= len(individuals) {
 			break
@@ -1172,22 +1170,13 @@ func seqSolving() {
 			}
 			return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
 		})
-		indPop := populations[individual]
-		if strings.Contains(indPop, ",") {
-			indPop = strings.Split(indPop, ",")[0]
-		}
-		var solmap map[string][]uint8
-		var solutions [][]uint8
-		var recoveredSnps map[int]uint8
-		var recoveredRefs map[int]string
+		indPop := pgs.GetIndividualAncestry(individual, populations)
 		guessedSnps := make(map[string]uint8)
-		guessedRefs := make(map[string]struct{})
 		guessConfidence := make(map[string]int)
 		recoveredPgsReferences := make(map[string]string)
-		trueSnpsWithMissed := make(map[string]uint8)    // Count all the snps
-		trueSnpsWithoutMissed := make(map[string]uint8) // Count only the snps that were "guessed", i.e., no solutions does not Count
-		accuraciesWithMissed := make(map[int]float32)
-		accuraciesWithoutMissed := make(map[int]float32)
+		trueSnps := make(map[string]uint8) // Count only the snps that were "guessed", i.e., no solutions does not Count
+		accuracies := make(map[int]float32)
+		var numMatches float32
 		thresholdPos := 0
 		for {
 			if len(allPgs) == 0 {
@@ -1212,9 +1201,9 @@ func seqSolving() {
 				log.Printf("Error loading stats: %v\n", err)
 				return
 			}
-			recoveredSnps = make(map[int]uint8)
-			recoveredRefs = make(map[int]string)
-			guessedRefs = make(map[string]struct{})
+			recoveredSnps := make(map[int]uint8)
+			recoveredRefs := make(map[int]string)
+			guessedRefs := make(map[string]struct{})
 			for l, locus := range p.Loci {
 				if guess, ok := guessedSnps[locus]; ok {
 					recoveredSnps[l] = guess
@@ -1228,108 +1217,9 @@ func seqSolving() {
 			fmt.Printf("Recovered snps: %v\n", recoveredSnps)
 			fmt.Printf("Recovered references: %v\n", recoveredRefs)
 			cohort := solver.NewCohort(p)
-			slv := solver.NewDP(cohort[individual].Score, p, indPop, recoveredSnps)
-			if len(p.Loci)-len(recoveredSnps) < DeterminismLimit {
-				solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
-			} else {
-				solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
-			}
-			solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+			solutions := findSolutions(p, cohort, individual, indPop, recoveredSnps)
 			if len(solutions) == 0 && len(recoveredSnps) > 0 {
-				fmt.Println("^^^ No solutions with extra loci, trying with a subset")
-				ids := make([]string, 0)
-				for ref := range guessedRefs {
-					if guessConfidence[ref] > 10 {
-						continue
-					}
-					ids = append(ids, ref)
-				}
-				contenders = make([]contester, 0)
-				for _, id := range ids {
-					recoveredSnps = make(map[int]uint8)
-					for l, locus := range p.Loci {
-						if guess, ok := guessedSnps[locus]; ok {
-							if recoveredPgsReferences[locus] != id {
-								recoveredSnps[l] = guess
-							}
-						}
-					}
-					fmt.Printf("Solving w/o %s\n", id)
-					// Decrease the confidence now so that it does not increase at the next step
-					guessConfidence[id]--
-					slv := solver.NewDP(cohort[individual].Score, p, indPop, recoveredSnps)
-					if len(p.Loci) < DeterminismLimit {
-						solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
-					} else {
-						solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
-					}
-					solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
-					if len(solutions) > 0 {
-						contenders = append(contenders, contester{id, solutions[0],
-							solver.CalculateFullSequenceLikelihood(solutions[0], p.PopulationStats[indPop].AF, p.EffectAlleles)})
-						fmt.Printf("Got %s: %.3f\n", id, contenders[len(contenders)-1].likelihood)
-					} else {
-						fmt.Printf("No solution w/o %s\n", id)
-					}
-				}
-				sort.Slice(contenders, func(i, j int) bool {
-					return contenders[i].likelihood < contenders[j].likelihood
-				})
-				// Resolving the references to see if there is a valid solution with the new SNP results
-				for _, cnt := range contenders {
-					pcnt := pgs.NewPGS()
-					err = pcnt.LoadCatalogFile(path.Join(params.DataFolder, cnt.id+"_hmPOS_GRCh37.txt"))
-					if err != nil {
-						log.Printf("Error loading catalog file: %v\n", err)
-						return
-					}
-					err = pcnt.LoadStats()
-					if err != nil {
-						log.Printf("Error loading stats: %v\n", err)
-						return
-					}
-					fmt.Printf("Re-solving %s with ", cnt.id)
-					recoveredSnps = make(map[int]uint8)
-					for l, prevLocus := range pcnt.Loci {
-						for r, resolvedLocus := range p.Loci {
-							if resolvedLocus != prevLocus {
-								continue
-							}
-							recoveredSnps[l] = cnt.solution[pgs.Ploidy*r] + cnt.solution[pgs.Ploidy*r+1]
-							break
-						}
-						fmt.Printf("%d:%d ", l, recoveredSnps[l])
-					}
-					fmt.Println()
-					cohortcnt := solver.NewCohort(pcnt)
-					slvcnt := solver.NewDP(cohortcnt[individual].Score, pcnt, indPop, recoveredSnps)
-					if len(pcnt.Loci)-len(recoveredSnps) < DeterminismLimit {
-						solmap = slvcnt.SolveFromScratchDeterministic(solver.UseLikelihood)
-					} else {
-						solmap = slvcnt.SolveFromScratchProbabilistic(solver.UseLikelihood)
-					}
-					solcnt := solver.SortByLikelihoodAndFrequency(solmap, pcnt.PopulationStats[indPop], pcnt.EffectAlleles, solver.UseLikelihood)
-					if len(solcnt) > 0 {
-						for i, lcnt := range pcnt.Loci {
-							guessedSnps[lcnt] = solcnt[0][pgs.Ploidy*i] + solcnt[0][pgs.Ploidy*i+1]
-						}
-						fmt.Printf("New %s accuracy: %.3f\n", cnt.id, solver.Accuracy(solcnt[0], cohortcnt[individual].Genotype))
-						solutions = [][]uint8{cnt.solution}
-						guessConfidence[cnt.id] = 0
-						break
-					}
-				}
-				if len(solutions) == 0 {
-					// Solve from scratch
-					fmt.Println("No solutions with any subset, calculating from scratch")
-					slv := solver.NewDP(cohort[individual].Score, p, indPop, make(map[int]uint8))
-					if len(p.Loci) < DeterminismLimit {
-						solmap = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
-					} else {
-						solmap = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
-					}
-					solutions = solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
-				}
+				solutions = selfRepair(p, cohort, individual, indPop, guessedSnps, guessedRefs, guessConfidence, recoveredSnps, recoveredPgsReferences)
 			}
 			if len(solutions) > 0 {
 				fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[individual].Genotype))
@@ -1357,40 +1247,21 @@ func seqSolving() {
 				fmt.Println("!!!!!!! Still could not find a solution !!!!!!!")
 			}
 			for i, locus := range p.Loci {
-				if _, ok := trueSnpsWithMissed[locus]; ok {
-					continue
-				}
-				trueSnpsWithMissed[locus] = cohort[individual].Genotype[pgs.Ploidy*i] + cohort[individual].Genotype[pgs.Ploidy*i+1]
-				if len(solutions) > 0 {
-					trueSnpsWithoutMissed[locus] = trueSnpsWithMissed[locus]
-				}
+				trueSnps[locus] = cohort[individual].Genotype[pgs.Ploidy*i] + cohort[individual].Genotype[pgs.Ploidy*i+1]
 			}
-			if len(guessedSnps) >= thresholds[thresholdPos] {
-				accuracyWithMissed, accuracyWithoutMissed = 0, 0
-				for locus, snp := range trueSnpsWithMissed {
-					if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
-						accuracyWithMissed += 1
+			if thresholdPos < len(thresholds) && len(guessedSnps) >= thresholds[thresholdPos] {
+				numMatches = 0
+				for locus, guessed := range guessedSnps {
+					if trueSnp, ok := trueSnps[locus]; ok && trueSnp == guessed {
+						numMatches += 1
 					}
 				}
-				accuraciesWithMissed[thresholds[thresholdPos]] = accuracyWithMissed / float32(len(trueSnpsWithMissed))
-				//
-				for locus, snp := range trueSnpsWithoutMissed {
-					if guessed, ok := guessedSnps[locus]; ok && snp == guessed {
-						accuracyWithoutMissed += 1
-					}
-				}
-				accuraciesWithoutMissed[thresholds[thresholdPos]] = accuracyWithoutMissed / float32(len(trueSnpsWithoutMissed))
-				fmt.Printf("### CountAccuracy %d: w/ missed %.3f, w/o missed %.3f\n", thresholds[thresholdPos],
-					accuracyWithMissed/float32(len(trueSnpsWithMissed)), accuracyWithoutMissed/float32(len(trueSnpsWithoutMissed)))
+				accuracies[thresholds[thresholdPos]] = numMatches / float32(len(guessedSnps))
+				fmt.Printf("### CountAccuracy %d: %.3f\n", thresholds[thresholdPos],
+					accuracies[thresholds[thresholdPos]])
 				thresholdPos++
-				if thresholdPos == len(thresholds) {
-					break
-				}
 			}
 			fmt.Printf("Guessed %d\n", len(guessedSnps))
-			if len(guessedSnps) > thresholds[len(thresholds)-1] {
-				break
-			}
 			allPgs = allPgs[1:]
 			for _, locus := range p.Loci {
 				for _, id := range lociToPgs[locus] {
@@ -1403,12 +1274,12 @@ func seqSolving() {
 				}
 			}
 		}
-		results = append(results, &Result{Individual: individual, Accuracies: accuraciesWithMissed})
-		guesses = append(guesses, &Guess{Individual: individual, SNPs: guessedSnps})
+		results = append(results, &Result{Individual: individual, Ancestry: indPop, Accuracies: accuracies})
+		guesses = append(guesses, &Guess{Individual: individual, Ancestry: indPop, SNPs: guessedSnps})
 	}
 
 	resultFolder := "results/sequential"
-	filepath := path.Join(resultFolder, fmt.Sprintf("chunk%d.json", chunkNum))
+	filepath := path.Join(resultFolder, fmt.Sprintf("accuracies%d.json", chunkNum))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening result file: %v", err)
@@ -1429,6 +1300,101 @@ func seqSolving() {
 	if err = encoder.Encode(guesses); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
+}
+
+func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop string, guessedSnps map[string]uint8,
+	guessedRefs map[string]struct{}, guessConfidence map[string]int,
+	recoveredSnps map[int]uint8, recoveredPgsReferences map[string]string) [][]uint8 {
+	fmt.Println("^^^ No solutions with extra loci, trying with a subset")
+	var err error
+	ids := make([]string, 0)
+	for ref := range guessedRefs {
+		if guessConfidence[ref] > 10 {
+			continue
+		}
+		ids = append(ids, ref)
+	}
+	contenders := make([]Contender, 0)
+	var solutions [][]uint8
+	for _, id := range ids {
+		recoveredSnps = make(map[int]uint8)
+		for l, locus := range p.Loci {
+			if guess, ok := guessedSnps[locus]; ok {
+				if recoveredPgsReferences[locus] != id {
+					recoveredSnps[l] = guess
+				}
+			}
+		}
+		fmt.Printf("Solving w/o %s\n", id)
+		// Decrease the confidence now so that it does not increase at the next step
+		guessConfidence[id]--
+		solutions = findSolutions(p, cohort, individual, indPop, recoveredSnps)
+		if len(solutions) > 0 {
+			contenders = append(contenders, Contender{id, solutions[0],
+				solver.CalculateFullSequenceLikelihood(solutions[0], p.PopulationStats[indPop].AF, p.EffectAlleles)})
+			fmt.Printf("Got %s: %.3f\n", id, contenders[len(contenders)-1].likelihood)
+		} else {
+			fmt.Printf("No solution w/o %s\n", id)
+		}
+	}
+	sort.Slice(contenders, func(i, j int) bool {
+		return contenders[i].likelihood < contenders[j].likelihood
+	})
+	// Resolving the references to see if there is a valid solution with the new SNP results
+	for _, cnt := range contenders {
+		pcnt := pgs.NewPGS()
+		err = pcnt.LoadCatalogFile(path.Join(params.DataFolder, cnt.id+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return nil
+		}
+		err = pcnt.LoadStats()
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return nil
+		}
+		fmt.Printf("Re-solving %s with ", cnt.id)
+		recoveredSnps = make(map[int]uint8)
+		for l, prevLocus := range pcnt.Loci {
+			for r, resolvedLocus := range p.Loci {
+				if resolvedLocus != prevLocus {
+					continue
+				}
+				recoveredSnps[l] = cnt.solution[pgs.Ploidy*r] + cnt.solution[pgs.Ploidy*r+1]
+				break
+			}
+			fmt.Printf("%d:%d ", l, recoveredSnps[l])
+		}
+		fmt.Println()
+		cohortcnt := solver.NewCohort(pcnt)
+		solcnt := findSolutions(pcnt, cohortcnt, individual, indPop, recoveredSnps)
+		if len(solcnt) > 0 {
+			for i, lcnt := range pcnt.Loci {
+				guessedSnps[lcnt] = solcnt[0][pgs.Ploidy*i] + solcnt[0][pgs.Ploidy*i+1]
+			}
+			fmt.Printf("New %s accuracy: %.3f\n", cnt.id, solver.Accuracy(solcnt[0], cohortcnt[individual].Genotype))
+			solutions = [][]uint8{cnt.solution}
+			guessConfidence[cnt.id] = 0
+			break
+		}
+	}
+	if len(solutions) == 0 {
+		// Solve from scratch
+		fmt.Println("No solutions with any subset, calculating from scratch")
+		solutions = findSolutions(p, cohort, individual, indPop, make(map[int]uint8))
+	}
+	return solutions
+}
+
+func findSolutions(p *pgs.PGS, cht solver.Cohort, idv, pop string, priorSnps map[int]uint8) [][]uint8 {
+	var sm map[string][]uint8
+	slv := solver.NewDP(cht[idv].Score, p, pop, priorSnps)
+	if len(p.Loci) < DeterminismLimit {
+		sm = slv.SolveFromScratchDeterministic(solver.UseLikelihood)
+	} else {
+		sm = slv.SolveFromScratchProbabilistic(solver.UseLikelihood)
+	}
+	return solver.SortByLikelihoodAndFrequency(sm, p.PopulationStats[pop], p.EffectAlleles, solver.UseLikelihood)
 }
 
 func sequentialSolving() {
@@ -2168,59 +2134,6 @@ func buildDPTables() {
 		}
 	}
 }
-
-//func evaluateGA() {
-//	//INDIVIDUAL := "NA18595"
-//	INDIVIDUAL := "HG02182" // lowest score for PGS000040
-//	//INDIVIDUAL := "HG02215" // highest score for PGS000040
-//	//INDIVIDUAL := "HG02728" // middle 648
-//	//INDIVIDUAL := "NA19780" // high 648
-//	//INDIVIDUAL := "HG00551" // low 648
-//	//
-//	//INDIVIDUAL := "HG01028"
-//	//INDIVIDUAL := "NA18531"
-//	//INDIVIDUAL := "NA20872"
-//
-//	p := pgs.NewPGS()
-//	//catalogFile := "PGS000073_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
-//	catalogFile := "PGS000040_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
-//	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
-//	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
-//	if err != nil {
-//		log.Printf("Error loading catalog file: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
-//	p.LoadStats()
-//	cohort := solver.NewCohort(p)
-//	populations := tools.LoadAncestry()
-//	indPop := populations[INDIVIDUAL]
-//
-//	slv := solver.NewGenetic(cohort[INDIVIDUAL].Score, p, indPop)
-//
-//	solmap := slv.Solve()
-//	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-//	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
-//	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihoodAndSpectrum)
-//	fmt.Printf("\nTrue:\n%s, %.2f, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
-//		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles),
-//		solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop], p.EffectAlleles))
-//
-//	fmt.Printf("Guessed %d:\n", len(solutions))
-//	for _, solution := range solutions {
-//		diff := new(apd.Decimal)
-//		p.Context.Sub(diff, cohort[INDIVIDUAL].Score, solver.CalculateDecimalScore(p.Context, solution, p.Weights, p.EffectAlleles))
-//		fmt.Printf("%s -- %.3f, %s, %.2f, %.2f\n", solver.ArrayToString(solution), solver.CountAccuracy(solution, cohort[INDIVIDUAL].Genotype),
-//			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[indPop].AF, p.EffectAlleles),
-//			solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[indPop], p.EffectAlleles))
-//	}
-//}
 
 //func evaluateReferences() {
 //	resFolder := "results"
