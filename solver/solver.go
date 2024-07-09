@@ -25,7 +25,7 @@ const (
 )
 
 //type Solver interface {
-//	SolveFromScratchProbabilistic() map[string][]uint8
+//	SolveProbabilistic() map[string][]uint8
 //	SolveFromSavedProbabilistic() map[string][]uint8
 //}
 

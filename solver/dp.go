@@ -1,12 +1,9 @@
 package solver
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
-	"os"
-	"path"
 	"sort"
 
 	"github.com/cockroachdb/apd/v3"
@@ -103,36 +100,12 @@ func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, known map[int]uint8) *DP 
 	return s
 }
 
-func (dp *DP) SolveFromSavedProbabilistic(sorting uint8) map[string][]uint8 {
-	numSegments := 2
-	_, target, roundingError := dp.getTargetAndWeightsAsInts()
-
-	state := loadProbabilisticState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
-	targets := []int64{target}
-	if dp.rounder.RoundedMode {
-		for w := target - 1; w > target-roundingError; w-- {
-			targets = append(targets, w)
-		}
-	}
-
-	solutionHeap := newGenHeap()
-	dp.probabilisticMitM(numSegments, state.Nodes, state.Betas, targets, solutionHeap, sorting)
-
-	solutions := make(map[string][]uint8)
-	for _, sol := range *solutionHeap {
-		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)
-		solutions[ArrayToString(subset)] = subset
-	}
-	return solutions
-}
-
-func (dp *DP) SolveFromScratchProbabilistic(sorting uint8) map[string][]uint8 {
+func (dp *DP) SolveProbabilistic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving probabilistically")
 	numSegments := 2
 	_, target, roundingError := dp.getTargetAndWeightsAsInts()
 
 	state := dp.BuildProbabilisticState(numSegments, sorting)
-	//state := loadProbabilisticState(fmt.Sprintf("%s-%s.dp", dp.p.PgsID, dp.ppl), numSegments)
 	targets := make([]int64, 0)
 	for w := target; w > target-roundingError-1; w-- {
 		targets = append(targets, w)
@@ -151,28 +124,7 @@ func (dp *DP) SolveFromScratchProbabilistic(sorting uint8) map[string][]uint8 {
 	return solutions
 }
 
-//func (dp *DP) SolveFromSavedDeterministic(sorting uint8) map[string][]uint8 {
-//	numSegments := 2
-//	fmt.Printf("Loci: %v\n", dp.p.Loci)
-//	_, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-//	state := loadDeterministicState(fmt.Sprintf("%s.dp", dp.p.PgsID), numSegments)
-//	targets := make([]int64, 0)
-//	for w := target; w > target-roundingError-1; w-- {
-//		targets = append(targets, w)
-//	}
-//
-//	solutionHeap := newGenHeap()
-//	dp.deterministicMitM(numSegments, state.Indices, state.Tables, state.Betas, targets, solutionHeap, sorting)
-//
-//	solutions := make(map[string][]uint8)
-//	for _, sol := range *solutionHeap {
-//		subset := lociToGenotype(sol.mutations, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles)
-//		solutions[ArrayToString(subset)] = subset
-//	}
-//	return solutions
-//}
-
-func (dp *DP) SolveFromScratchDeterministic(sorting uint8) map[string][]uint8 {
+func (dp *DP) SolveDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
 	//fmt.Printf("Loci: %v\n", dp.p.Loci)
@@ -237,60 +189,6 @@ func (dp *DP) PrepareData(numSeg int) ([]int64, int64, int64, [][]int, []map[uin
 	return weights, target, roundingError, indices, betas
 }
 
-//func (dp *DP) BuildDeterministicState(numSegments int) *DeterministicState {
-//	weights, target, roundingError := getTargetAndWeightsAsInts(dp.p, dp.target, dp.rounder)
-//	splitIdxs := []int{0, len(weights) / 2, len(weights)}
-//	indices := make([][]int, numSegments)
-//	for i := 0; i < numSegments; i++ {
-//		indices[i] = make([]int, 0)
-//		for j := splitIdxs[i]; j < splitIdxs[i+1]; j++ {
-//			indices[i] = append(indices[i], j)
-//		}
-//	}
-//	betas := make([]map[uint8]int64, numSegments)
-//	for i := 0; i < numSegments; i++ {
-//		betas[i] = makeBetaMap(weights, indices[i])
-//	}
-//
-//	maxTotalPositive, maxTotalNegative := GetMaxTotal(weights)
-//	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
-//	tables := make([]map[int64][]uint8, numSegments)
-//	for i := 0; i < numSegments; i++ {
-//		tables[i] = calculateSubsetSumTable(betas[i], upper, lower)
-//	}
-//	return newDeterministicState(indices, tables, betas)
-//}
-
-//func SaveDeterministicState(state *DeterministicState, filepath string) {
-//	tf, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-//	if err != nil {
-//		log.Fatalf("Error opening tables file: %v", err)
-//	}
-//	defer tf.Close()
-//	encoder := json.NewEncoder(tf)
-//	if err = encoder.Encode(state); err != nil {
-//		log.Fatalf("Error encoding tables: %v", err)
-//	}
-//}
-
-//func loadDeterministicState(filename string, numSegments int) *DeterministicState {
-//	filepath := path.Join(params.DataFolder, filename)
-//	tf, err := os.Open(filepath)
-//	if err != nil {
-//		log.Fatalf("Error opening tables file: %v", err)
-//	}
-//	defer tf.Close()
-//	decoder := json.NewDecoder(tf)
-//	tables := make([]map[int64][]uint8, numSegments)
-//	betas := make([]map[uint8]int64, numSegments)
-//	indices := make([][]int, numSegments)
-//	state := &DeterministicState{Indices: indices, Tables: tables, Betas: betas}
-//	if err = decoder.Decode(state); err != nil {
-//		log.Fatalf("Error decoding tables: %v", err)
-//	}
-//	return state
-//}
-
 func (dp *DP) BuildProbabilisticState(numSegments int, sorting uint8) *ProbabilisticState {
 	_, target, roundingError, indices, betas := dp.PrepareData(numSegments)
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(betas)
@@ -300,35 +198,6 @@ func (dp *DP) BuildProbabilisticState(numSegments int, sorting uint8) *Probabili
 		nodes[i] = calculateSubsetSumTableWithLikelihood(betas[i], indices[i], upper, lower, dp.stats, dp.p.EffectAlleles, sorting)
 	}
 	return newProbabilisticState(nodes, betas)
-}
-
-func SaveProbabilisticState(state *ProbabilisticState, filepath string) {
-	tf, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Error opening tables file: %v", err)
-	}
-	defer tf.Close()
-	encoder := json.NewEncoder(tf)
-	if err = encoder.Encode(state); err != nil {
-		log.Fatalf("Error encoding tables: %v", err)
-	}
-}
-
-func loadProbabilisticState(filename string, numSegments int) *ProbabilisticState {
-	filepath := path.Join(params.DataFolder, filename)
-	tf, err := os.Open(filepath)
-	if err != nil {
-		log.Fatalf("Error opening tables file: %v", err)
-	}
-	defer tf.Close()
-	decoder := json.NewDecoder(tf)
-	tables := make([]map[int64]*Node, numSegments)
-	betas := make([]map[uint8]int64, numSegments)
-	state := &ProbabilisticState{Nodes: tables, Betas: betas}
-	if err = decoder.Decode(state); err != nil {
-		log.Fatalf("Error decoding tables: %v", err)
-	}
-	return state
 }
 
 func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint8]int64, targets []int64,
