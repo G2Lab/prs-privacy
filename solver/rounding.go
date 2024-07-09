@@ -144,6 +144,12 @@ func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) 
 	if err != nil {
 		log.Fatalf("Failed to multiply decimal by multiplier: %s", d.String())
 	}
+	roundingCtx := apd.BaseContext.WithPrecision(ctx.Precision)
+	roundingCtx.Rounding = apd.RoundHalfUp
+	_, err = roundingCtx.RoundToIntegralValue(tmp, tmp)
+	if err != nil {
+		log.Fatalf("Failed to round decimal: %s", tmp.String())
+	}
 	decStr := tmp.Text('f')
 	b := apd.NewBigInt(0)
 	_, success := b.SetString(decStr, 10)
@@ -151,14 +157,4 @@ func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) 
 		log.Fatalf("Failed to convert decimal string %s to big.Int %s", decStr, b.String())
 	}
 	return b
-
-	//tmp := new(apd.Decimal)
-	//ctx.Mul(tmp, d, multiplier)
-	//b := apd.NewBigInt(0)
-	//b.Set(&tmp.Coeff)
-	//b.Mul(b, apd.NewBigInt(int64(math.Pow(10, float64(tmp.Exponent)))))
-	//if tmp.Negative {
-	//	b.Neg(b)
-	//}
-	//return b
 }

@@ -89,8 +89,8 @@ func newUpdate(sum int64, likelihood float32, fptr, bptr uint8) Update {
 
 func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, known map[int]uint8) *DP {
 	s := &DP{
-		//target:  ScoreToTarget(score, p),
-		target:  score,
+		//target:  score,
+		target:  ScoreToTarget(score, p),
 		p:       p,
 		stats:   p.PopulationStats[ppl],
 		ppl:     ppl,

@@ -39,15 +39,15 @@ func main() {
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
-	//if *memprofile != "" {
-	f, err := os.Create(*memprofile)
-	if err != nil {
-		log.Fatal(err)
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		runtime.MemProfileRate = 1
+		defer pprof.WriteHeapProfile(f)
 	}
-	defer f.Close()
-	runtime.MemProfileRate = 1
-	defer pprof.WriteHeapProfile(f)
-	//}
 
 	//scoreDistribution()
 	//likelihoodEffect()
@@ -1383,15 +1383,15 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	return solutions
 }
 
-func findSolutions(p *pgs.PGS, cht solver.Cohort, idv, pop string, priorSnps map[int]uint8) [][]uint8 {
+func findSolutions(p *pgs.PGS, cht solver.Cohort, idv, ppl string, priorSnps map[int]uint8) [][]uint8 {
 	var sm map[string][]uint8
-	slv := solver.NewDP(cht[idv].Score, p, pop, priorSnps)
+	slv := solver.NewDP(cht[idv].Score, p, ppl, priorSnps)
 	if len(p.Loci) < DeterminismLimit {
 		sm = slv.SolveDeterministic(solver.UseLikelihood)
 	} else {
 		sm = slv.SolveProbabilistic(solver.UseLikelihood)
 	}
-	return solver.SortByLikelihoodAndFrequency(sm, p.PopulationStats[pop], p.EffectAlleles, solver.UseLikelihood)
+	return solver.SortByLikelihoodAndFrequency(sm, p.PopulationStats[ppl], p.EffectAlleles, solver.UseLikelihood)
 }
 
 type accuracyOutput struct {

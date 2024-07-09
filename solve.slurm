@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=solve                   # Job name
+#SBATCH --job-name=prs                   # Job name
 #SBATCH --mem=200G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log           # Standard output and error log
 #SBATCH --cpus-per-task=2                  # Number of CPUs per task
 #SBATCH --time=2-0:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
-#SBATCH --priority=TOP                     # Job priority
+#SBATCH --priority=Priority                     # Job priority
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
 
 module load bcftools/1.20

@@ -24,17 +24,12 @@ const (
 	UseLikelihoodAndSpectrum
 )
 
-//type Solver interface {
-//	SolveProbabilistic() map[string][]uint8
-//	SolveFromSavedProbabilistic() map[string][]uint8
-//}
-
 func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
 	target := new(apd.Decimal)
 	multiplier := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
 	_, err := p.Context.Mul(target, score, multiplier)
 	if err != nil {
-		log.Printf("Error caluclating target from the score: %v", err)
+		log.Printf("Error calculating target from the score: %v", err)
 		return nil
 	}
 	return target

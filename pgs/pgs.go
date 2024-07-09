@@ -54,15 +54,6 @@ func NewVariant(fields map[string]interface{}) *Variant {
 		fields: make(map[string]interface{}),
 	}
 
-	//if weight, ok := fields["effect_weight"].(string); ok {
-	//	value := new(big.Rat)
-	//	if _, ok := value.SetString(weight); ok {
-	//		fields["effect_weight"] = value
-	//	} else {
-	//		log.Printf("Error parsing weight %s: %s", weight, value.RatString())
-	//	}
-	//}
-
 	if frequency, ok := fields["allelefrequency_effect"].(string); ok {
 		if value, err := strconv.ParseFloat(frequency, 64); err == nil {
 			fields["allelefrequency_effect"] = value

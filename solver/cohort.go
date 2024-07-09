@@ -153,16 +153,16 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 		c[idv].Score = CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
 		//fmt.Printf("Individual %s: %v\n", idv, c[idv].Genotype)
 	}
-	// TODO: Storing the linear sum for now to avoid precision issues with division
-	//// Normalize the score for each individual by the number of loci
-	//divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
-	//for idv := range c {
-	//	_, err = ctx.Quo(c[idv].Score, c[idv].Score, divisor)
-	//	if err != nil {
-	//		log.Println("Error dividing score by the number of loci:", err)
-	//		return
-	//	}
-	//}
+	// Normalize the score for each individual by the number of loci
+	var err error
+	divisor := new(apd.Decimal).SetInt64(int64(len(p.Loci) * pgs.Ploidy))
+	for idv := range c {
+		_, err = p.Context.Quo(c[idv].Score, c[idv].Score, divisor)
+		if err != nil {
+			log.Println("Error dividing score by the number of loci:", err)
+			return
+		}
+	}
 }
 
 func (c Cohort) SortByScore() []string {
