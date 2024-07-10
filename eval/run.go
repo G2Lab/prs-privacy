@@ -1481,11 +1481,11 @@ func accuracyParallel() {
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
-	//INDIVIDUAL := "HG02215" // highest score for PGS000040
+	INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
-	INDIVIDUAL := "HG00124"
+	//INDIVIDUAL := "HG00124"
 	//
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1516,10 +1516,10 @@ func findAllSolutions() {
 	//catalogFile := "PGS003436_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS002264_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS004246_hmPOS_GRCh37.txt"
+	catalogFile := "PGS004222_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
-	catalogFile := "PGS000760_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000037_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000760_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS001828_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
@@ -1534,15 +1534,12 @@ func findAllSolutions() {
 	cohort := solver.NewCohort(p)
 
 	populations := tools.LoadAncestry()
-	indPop := populations[INDIVIDUAL]
-	if strings.Contains(indPop, ",") {
-		indPop = strings.Split(indPop, ",")[0]
-	}
+	idvAnc := pgs.GetIndividualAncestry(INDIVIDUAL, populations)
 	//recovered := map[int]uint8{0: 0, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 1, 8: 2, 10: 1, 11: 0}
 	recovered := make(map[int]uint8)
-	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, indPop, recovered)
+	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, idvAnc, recovered)
 
-	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[indPop].AF)
+	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[idvAnc].AF)
 	fmt.Printf("CountAccuracy with reference: %f\n",
 		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
 
@@ -1556,15 +1553,15 @@ func findAllSolutions() {
 		}
 	}
 	fmt.Println()
-	solmap := slv.SolveProbabilistic(solver.UseLikelihood)
-	//solmap := slv.SolveDeterministic(solver.UseLikelihood)
+	//solmap := slv.SolveProbabilistic(solver.UseLikelihood)
+	solmap := slv.SolveDeterministic(solver.UseLikelihood)
 	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[indPop])
-	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[indPop], p.EffectAlleles, solver.UseLikelihood)
+	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[idvAnc])
+	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[idvAnc], p.EffectAlleles, solver.UseLikelihood)
 
 	fmt.Printf("\nTrue:\n%s, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
-		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop].AF, p.EffectAlleles))
-	//solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[indPop], p.EffectAlleles))
+		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[idvAnc].AF, p.EffectAlleles))
+	//solver.CalculateSolutionSpectrumDistance(cohort[INDIVIDUAL].Genotype, p.PopulationStats[idvAnc], p.EffectAlleles))
 
 	fmt.Printf("Guessed %d:\n", len(solutions))
 	//Target := solver.ScoreToTarget(cohort[INDIVIDUAL].Score, p)
@@ -1573,8 +1570,8 @@ func findAllSolutions() {
 		diff := new(apd.Decimal)
 		p.Context.Sub(diff, target, solver.CalculateDecimalScore(p.Context, solution, p.Weights, p.EffectAlleles))
 		fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(solution), solver.Accuracy(solution, cohort[INDIVIDUAL].Genotype),
-			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[indPop].AF, p.EffectAlleles))
-		//	solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[indPop], p.EffectAlleles))
+			diff.String(), solver.CalculateFullSequenceLikelihood(solution, p.PopulationStats[idvAnc].AF, p.EffectAlleles))
+		//	solver.CalculateSolutionSpectrumDistance(solution, p.PopulationStats[idvAnc], p.EffectAlleles))
 	}
 }
 
@@ -2044,7 +2041,7 @@ func accuracyLikelihood() {
 //		"true position", "total solutions",
 //		"first likelihood", "true likelihood", "major likelihood"})
 //	majorReference := p.AllReferenceAlleleSample()
-//	majorScore := solver.CalculateDecimalScore(p.Context, majorReference, p.Weights)
+//	majorScore := solver.CalculateDecimalSum(p.Context, majorReference, p.Weights)
 //	majorLikelihood := p.CalculateFullSequenceLikelihood(majorReference)
 //	medianScore := cohort[cohort.SortByScore()[len(cohort)/2]].Score
 //	for i := chunkNum * chunkSize; i < (chunkNum+1)*chunkSize; i++ {
@@ -2066,7 +2063,7 @@ func accuracyLikelihood() {
 //			}
 //			acc = solver.CountAccuracy(solution, cohort[samples[i]].Genotype)
 //			if acc == 1.0 {
-//				writer.Write([]string{samples[i], fmt.Sprintf("%.3f", solver.CalculateDecimalScore(p.Context, solution, p.Weights)),
+//				writer.Write([]string{samples[i], fmt.Sprintf("%.3f", solver.CalculateDecimalSum(p.Context, solution, p.Weights)),
 //					fmt.Sprintf("%.3f", majorScore), fmt.Sprintf("%.3f", medianScore),
 //					fmt.Sprintf("%.3f", firstAcc),
 //					fmt.Sprintf("%.3f", solver.CountAccuracy(majorReference, cohort[samples[i]].Genotype)),
@@ -2077,13 +2074,13 @@ func accuracyLikelihood() {
 //		}
 //		if acc != 1.0 {
 //			diff := new(apd.Decimal)
-//			p.Context.Sub(diff, cohort[samples[i]].Score, solver.CalculateDecimalScore(p.Context, cohort[samples[i]].Genotype, p.Weights))
+//			p.Context.Sub(diff, cohort[samples[i]].Score, solver.CalculateDecimalSum(p.Context, cohort[samples[i]].Genotype, p.Weights))
 //			fmt.Printf("\nNo solution for %s\n", samples[i])
 //			fmt.Printf("\nTrue:\n%s -- %s, %f\n", solver.ArrayToString(cohort[samples[i]].Genotype),
 //				diff.String(),
 //				solver.CalculateFullSequenceLikelihood(cohort[samples[i]].Genotype))
 //			for _, sol := range solutions {
-//				p.Context.Sub(diff, cohort[samples[i]].Score, solver.CalculateDecimalScore(p.Context, sol, p.Weights))
+//				p.Context.Sub(diff, cohort[samples[i]].Score, solver.CalculateDecimalSum(p.Context, sol, p.Weights))
 //				fmt.Printf("%s -- %.3f, %s, %.2f\n", solver.ArrayToString(sol), solver.CountAccuracy(sol, cohort[samples[i]].Genotype),
 //					diff.String(), solver.CalculateFullSequenceLikelihood(sol))
 //			}
@@ -2228,11 +2225,11 @@ func likelihoodWeight() {
 //	}
 //	for _, sample := range samples {
 //		for i := 0; i < len(indices)-1; i++ {
-//			score, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype[indices[i]*pgs.Ploidy:indices[i+1]*pgs.Ploidy],
+//			score, _ := solver.CalculateDecimalSum(p.Context, cohort[sample].Genotype[indices[i]*pgs.Ploidy:indices[i+1]*pgs.Ploidy],
 //				p.Weights[indices[i]:indices[i+1]]).Float64()
 //			scores[i] = append(scores[i], score)
 //		}
-//		//fullscore, _ := solver.CalculateDecimalScore(p.Context, cohort[sample].Genotype, p.Weights).Float64()
+//		//fullscore, _ := solver.CalculateDecimalSum(p.Context, cohort[sample].Genotype, p.Weights).Float64()
 //		//fmt.Println(sample, fullscore, scores[0][len(scores[0])-1], scores[1][len(scores[1])-1])
 //	}
 //	for r := 0; r < len(scores); r++ {

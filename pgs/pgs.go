@@ -218,7 +218,6 @@ scannerLoop:
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
-	//p.Loci = p.GetUnSortedVariantLoci()
 	p.Loci, err = p.GetSortedVariantLoci()
 	if err != nil {
 		return err

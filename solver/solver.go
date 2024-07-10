@@ -32,6 +32,27 @@ func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
 		log.Printf("Error calculating target from the score: %v", err)
 		return nil
 	}
+	precision := p.WeightPrecision
+	one := new(apd.Decimal)
+	if target.Negative {
+		one.SetInt64(-1)
+		if target.Cmp(one) <= 0 {
+			precision++
+		}
+	} else {
+		one.SetInt64(1)
+		if target.Cmp(one) >= 0 {
+			precision++
+		}
+	}
+	// Rounding the target to the correct precision
+	roundingCtx := apd.BaseContext.WithPrecision(precision)
+	roundingCtx.Rounding = apd.RoundHalfUp
+	_, err = roundingCtx.Round(target, target)
+	if err != nil {
+		log.Printf("Error rounding the target: %v", err)
+		return nil
+	}
 	return target
 }
 
@@ -143,17 +164,29 @@ func locusAlreadyExists(v uint8, array []uint8) bool {
 	return false
 }
 
-func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal, efal []uint8) *apd.Decimal {
-	score := apd.New(0, 0)
+func CalculateDecimalSum(ctx *apd.Context, snps []uint8, weights []*apd.Decimal, efal []uint8) *apd.Decimal {
+	sum := apd.New(0, 0)
 	for i := 0; i < len(snps); i += pgs.Ploidy {
 		for j := 0; j < pgs.Ploidy; j++ {
 			switch snps[i+j] == efal[i/pgs.Ploidy] {
 			case true:
-				ctx.Add(score, score, weights[i/pgs.Ploidy])
+				ctx.Add(sum, sum, weights[i/pgs.Ploidy])
 			case false:
 				continue
 			}
 		}
+	}
+	return sum
+}
+
+func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal, efal []uint8) *apd.Decimal {
+	score := CalculateDecimalSum(ctx, snps, weights, efal)
+	// Normalize the score by dividing by the number of loci and ploidy
+	divisor := new(apd.Decimal).SetInt64(int64(len(weights) * pgs.Ploidy))
+	_, err := ctx.Quo(score, score, divisor)
+	if err != nil {
+		log.Println("Error normalizing the score:", err)
+		return nil
 	}
 	return score
 }

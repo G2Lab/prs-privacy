@@ -127,8 +127,12 @@ func (dp *DP) SolveProbabilistic(sorting uint8) map[string][]uint8 {
 func (dp *DP) SolveDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
-	//fmt.Printf("Loci: %v\n", dp.p.Loci)
 	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
+	//for i := range weights {
+	//	fmt.Printf("%d ", weights[i])
+	//}
+	//fmt.Printf("\n")
+	//fmt.Printf("Target: %d\n", target)
 
 	indices := splitIndices(dp.p.Loci, dp.known, numSegments)
 	betas := make([]map[uint8]int64, numSegments)
@@ -479,6 +483,8 @@ func (dp *DP) combinePartials(segmentNum, totalSegments int, indices [][]int, in
 	var newLkl float32
 	if segmentNum == totalSegments {
 		if dp.rounder.RoundedMode {
+			//fmt.Printf("-- %s\n", ArrayToString(lociToGenotype(input, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)))
+			//fmt.Printf("Score: %s, Target: %s\n", score.String(), dp.rounder.ScaledTarget.String())
 			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
 				return
 			}
@@ -565,14 +571,6 @@ func makeBetaMap(betas []int64, indices []int) map[uint8]int64 {
 	return bmap
 }
 
-func scaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Decimal) []*apd.BigInt {
-	scaled := make([]*apd.BigInt, len(weights))
-	for i := range weights {
-		scaled[i] = DecimalToBigInt(ctx, weights[i], multiplier)
-	}
-	return scaled
-}
-
 func GetMaxTotal(values []map[uint8]int64) (int64, int64) {
 	var positive, negative int64 = 0, 0
 	for _, row := range values {
@@ -593,6 +591,17 @@ func lociToScore(loci []uint8, weights []*apd.BigInt) *apd.BigInt {
 		score.Add(score, weights[locus/pgs.Ploidy])
 		if locus%pgs.Ploidy == 1 {
 			score.Add(score, weights[locus/pgs.Ploidy])
+		}
+	}
+	return score
+}
+
+func lociToDecimalScore(ctx *apd.Context, loci []uint8, weights []*apd.Decimal) *apd.Decimal {
+	score := new(apd.Decimal).SetInt64(0)
+	for _, locus := range loci {
+		ctx.Add(score, score, weights[locus/pgs.Ploidy])
+		if locus%pgs.Ploidy == 1 {
+			ctx.Add(score, score, weights[locus/pgs.Ploidy])
 		}
 	}
 	return score
