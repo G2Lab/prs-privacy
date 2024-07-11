@@ -33,17 +33,13 @@ func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
 		return nil
 	}
 	precision := p.WeightPrecision
-	one := new(apd.Decimal)
-	if target.Negative {
-		one.SetInt64(-1)
-		if target.Cmp(one) <= 0 {
-			precision++
-		}
-	} else {
-		one.SetInt64(1)
-		if target.Cmp(one) >= 0 {
-			precision++
-		}
+	tf, err := target.Float64()
+	if err != nil {
+		log.Printf("Error converting target to float: %v", err)
+		return nil
+	}
+	if tf != 0 {
+		precision += uint32(len(fmt.Sprintf("%.0f", math.Abs(tf))))
 	}
 	// Rounding the target to the correct precision
 	roundingCtx := apd.BaseContext.WithPrecision(precision)

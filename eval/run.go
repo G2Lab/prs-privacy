@@ -27,7 +27,7 @@ import (
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write cpu profile to file")
 
-const DeterminismLimit = 34
+const DeterminismLimit = 33
 
 func main() {
 	flag.Parse()
@@ -60,12 +60,11 @@ func main() {
 	//sortingChoice()
 	//sortingChoiceParallel()
 	//accuracyParallel()
-	findAllSolutions()
+	//findAllSolutions()
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
 	//uniquenessExperiment()
-	//sequenceSolving()
 	//calculateGenotypeFrequencies()
 	//imputeWorkflow()
 	//linkingWithImputation()
@@ -73,6 +72,7 @@ func main() {
 	//evaluateImputation()
 	//findUnsolvablePRSWithOverlap()
 	//predictPRS()
+	sequenceSolving()
 }
 
 func predictPRS() {
@@ -1484,8 +1484,8 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
-	//INDIVIDUAL := "HG00124"
+	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG00124"
 
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1504,7 +1504,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000043_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
-	catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000786_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"

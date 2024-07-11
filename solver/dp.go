@@ -128,11 +128,11 @@ func (dp *DP) SolveDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
 	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
-	for i := range weights {
-		fmt.Printf("%d ", weights[i])
-	}
-	fmt.Printf("\n")
-	fmt.Printf("Target: %d\n", target)
+	//for i := range weights {
+	//	fmt.Printf("%d ", weights[i])
+	//}
+	//fmt.Printf("\n")
+	//fmt.Printf("Target: %d\n", target)
 
 	indices := splitIndices(dp.p.Loci, dp.known, numSegments)
 	betas := make([]map[uint8]int64, numSegments)
