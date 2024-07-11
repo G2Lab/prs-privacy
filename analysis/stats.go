@@ -120,7 +120,7 @@ idLoop:
 			}
 		}
 		maxw := findMaxAbsoluteWeight(p)
-		if float64(p.NumVariants)/log3(maxw) > 2 {
+		if float64(p.NumVariants)/log3(maxw) > 2.5 {
 			highDensity = append(highDensity, id)
 			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/log3(maxw))
 			continue idLoop
@@ -704,7 +704,7 @@ func main() {
 		copyFilteredPGSFiles()
 	case "validate":
 		validateBases()
-	case "loci":
+	case "index":
 		makeLociIndex()
 	}
 }

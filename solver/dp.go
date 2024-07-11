@@ -2,13 +2,12 @@ package solver
 
 import (
 	"fmt"
-	"log"
-	"math"
-	"sort"
-
 	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
+	"log"
+	"math"
+	"sort"
 )
 
 type DP struct {
@@ -128,11 +127,11 @@ func (dp *DP) SolveDeterministic(sorting uint8) map[string][]uint8 {
 	fmt.Println("Solving deterministically")
 	numSegments := 2
 	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
-	//for i := range weights {
-	//	fmt.Printf("%d ", weights[i])
-	//}
-	//fmt.Printf("\n")
-	//fmt.Printf("Target: %d\n", target)
+	for i := range weights {
+		fmt.Printf("%d ", weights[i])
+	}
+	fmt.Printf("\n")
+	fmt.Printf("Target: %d\n", target)
 
 	indices := splitIndices(dp.p.Loci, dp.known, numSegments)
 	betas := make([]map[uint8]int64, numSegments)
@@ -206,41 +205,34 @@ func (dp *DP) BuildProbabilisticState(numSegments int, sorting uint8) *Probabili
 
 func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint8]int64, targets []int64,
 	solHeap *genHeap, sorting uint8) {
-	matchHeapSize := 1000 * dp.p.NumVariants
+	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
+	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
+	matchHeapSize := 1000 * dp.p.NumVariants
 	mheap := newMatchHeap()
 	var s int
 	var ok bool
 	var leftSum int64
-	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
-	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	for leftSum = range tables[0] {
 		if s++; s%step == 0 {
 			fmt.Printf("Progress: %d%%\n", s*10/step)
 		}
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {
-				switch sorting {
-				case UseLikelihood:
-					mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
-					//case UseSpectrum:
-					//	mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
-					//case UseLikelihoodAndSpectrum:
-					//	mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].TopLikelihood, tables[0][leftSum].TopChiValue)+
-					//		CombineLikelihoodAndChiSquared(tables[1][t-leftSum].TopLikelihood, tables[1][t-leftSum].TopChiValue),
-					//		[]int64{leftSum, t - leftSum}, matchHeapSize)
-				}
-				//mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
-				//mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
-				//mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].TopLikelihood, tables[0][leftSum].TopChiValue)+
-				//	CombineLikelihoodAndChiSquared(tables[1][t-leftSum].TopLikelihood, tables[1][t-leftSum].TopChiValue),
-				//	[]int64{leftSum, t - leftSum}, matchHeapSize)
+				mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
+				//case UseSpectrum:
+				//	mheap.addToMatchHeap(tables[0][leftSum].TopChiValue+tables[1][t-leftSum].TopChiValue, []int64{leftSum, t - leftSum}, matchHeapSize)
+				//case UseLikelihoodAndSpectrum:
+				//	mheap.addToMatchHeap(CombineLikelihoodAndChiSquared(tables[0][leftSum].TopLikelihood, tables[0][leftSum].TopChiValue)+
+				//		CombineLikelihoodAndChiSquared(tables[1][t-leftSum].TopLikelihood, tables[1][t-leftSum].TopChiValue),
+				//		[]int64{leftSum, t - leftSum}, matchHeapSize)
 			}
 		}
 	}
+
 	score := apd.NewBigInt(0)
 	for _, mtch := range *mheap {
 		var solution []uint8
@@ -266,6 +258,11 @@ func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[i
 	}
 	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
 	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
+	//smallerTableIdx, biggerTableIdx := 0, 1
+	//if len(tables[0]) > len(tables[1]) {
+	//	smallerTableIdx = 1
+	//	biggerTableIdx = 0
+	//}
 	var i, s int
 	var ok bool
 	//var lkl, chi float32
@@ -483,8 +480,9 @@ func (dp *DP) combinePartials(segmentNum, totalSegments int, indices [][]int, in
 	var newLkl float32
 	if segmentNum == totalSegments {
 		if dp.rounder.RoundedMode {
-			//fmt.Printf("-- %s\n", ArrayToString(lociToGenotype(input, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)))
-			//fmt.Printf("Score: %s, Target: %s\n", score.String(), dp.rounder.ScaledTarget.String())
+			//fmt.Printf("-- %s: score %s, target %s\n",
+			//	ArrayToString(lociToGenotype(input, len(dp.p.Weights)*pgs.Ploidy, dp.p.EffectAlleles, dp.known)),
+			//	score.String(), dp.rounder.ScaledTarget.String())
 			if score.Cmp(dp.rounder.ScaledTarget) != 0 {
 				return
 			}

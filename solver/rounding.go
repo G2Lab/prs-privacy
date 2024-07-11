@@ -1,7 +1,6 @@
 package solver
 
 import (
-	"fmt"
 	"log"
 	"math"
 
@@ -54,10 +53,8 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 		//for i := range dp.rounder.ScaledWeights {
 		//	fmt.Printf("%s ", dp.rounder.ScaledWeights[i].String())
 		//}
-		dp.rounder.ScaledTarget = scaleTarget(dp.p.Context, target, multiplier)
+		dp.rounder.ScaledTarget = DecimalToBigInt(dp.p.Context, target, multiplier)
 		multiplier.SetFinite(1, params.PrecisionsLimit)
-		//fmt.Printf("Scaled ogTarget: %s\n", rdr.ScaledTarget.String())
-		//fmt.Printf("Scaled weights: %v\n", rdr.ScaledWeights)
 	}
 	//for i := range dp.p.Weights {
 	//	fmt.Printf("%s ", dp.p.Weights[i].String())
@@ -145,6 +142,12 @@ func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) 
 	if err != nil {
 		log.Fatalf("Failed to multiply decimal by multiplier: %s", d.String())
 	}
+	roundingCtx := apd.BaseContext.WithPrecision(ctx.Precision)
+	roundingCtx.Rounding = apd.RoundHalfUp
+	_, err = roundingCtx.RoundToIntegralValue(tmp, tmp)
+	if err != nil {
+		log.Fatalf("Failed to round decimal: %s", tmp.String())
+	}
 	decStr := tmp.Text('f')
 	b := apd.NewBigInt(0)
 	_, success := b.SetString(decStr, 10)
@@ -160,28 +163,4 @@ func scaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Deci
 		scaled[i] = DecimalToBigInt(ctx, weights[i], multiplier)
 	}
 	return scaled
-}
-
-func scaleTarget(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) *apd.BigInt {
-	var err error
-	tmp := new(apd.Decimal)
-	_, err = ctx.Mul(tmp, d, multiplier)
-	if err != nil {
-		log.Fatalf("Failed to multiply decimal by multiplier: %s", d.String())
-	}
-	fmt.Printf("%s->", tmp.String())
-	roundingCtx := apd.BaseContext.WithPrecision(ctx.Precision)
-	roundingCtx.Rounding = apd.RoundHalfUp
-	_, err = roundingCtx.RoundToIntegralValue(tmp, tmp)
-	if err != nil {
-		log.Fatalf("Failed to round decimal: %s", tmp.String())
-	}
-	fmt.Printf("%s\n", tmp.String())
-	decStr := tmp.Text('f')
-	b := apd.NewBigInt(0)
-	_, success := b.SetString(decStr, 10)
-	if !success {
-		log.Fatalf("Failed to convert decimal string %s to big.Int %s", decStr, b.String())
-	}
-	return b
 }

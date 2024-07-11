@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=prs                   # Job name
-#SBATCH --mem=2G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
+#SBATCH --mem=15G                         # Job memory request. Different units can be specified using the suffix [K|M|G|T]
 #SBATCH --output=solution_%j.log           # Standard output and error log
-#SBATCH --cpus-per-task=2                  # Number of CPUs per task
+#SBATCH --cpus-per-task=4                  # Number of CPUs per task
 #SBATCH --time=2-0:00:00                    # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
-#SBATCH --priority=Priority                     # Job priority
+#SBATCH --priority=10                     # Job priority
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
 
 module load bcftools/1.20
 module load go/1.20.2
 go build -o solve ./eval/
-GOMEMLIMIT=190GiB ./solve -memprofile=mem_%j.prof $1 $2
+GOMEMLIMIT=14GiB ./solve -memprofile=mem"$SLURM_JOB_ID".prof $1 $2

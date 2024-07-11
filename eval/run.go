@@ -1481,11 +1481,11 @@ func accuracyParallel() {
 func findAllSolutions() {
 	//INDIVIDUAL := "NA18595"
 	//INDIVIDUAL := "HG02182" // lowest score for PGS000040
-	INDIVIDUAL := "HG02215" // highest score for PGS000040
+	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
 	//INDIVIDUAL := "HG00551" // low 648
-	//INDIVIDUAL := "HG00124"
+	INDIVIDUAL := "HG00124"
 	//
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1507,18 +1507,17 @@ func findAllSolutions() {
 	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+	catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000307_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000534_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000011_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS003436_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS002264_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS003760_hmPOS_GRCh37.txt"
-	catalogFile := "PGS004222_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS004238_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS004222_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000760_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000589_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS001828_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
@@ -1537,27 +1536,7 @@ func findAllSolutions() {
 	idvAnc := pgs.GetIndividualAncestry(INDIVIDUAL, populations)
 	//recovered := map[int]uint8{0: 0, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 1, 8: 2, 10: 1, 11: 0}
 	recovered := make(map[int]uint8)
-	slv := solver.NewDP(cohort[INDIVIDUAL].Score, p, idvAnc, recovered)
-
-	majorReference := solver.AllReferenceAlleleSample(p.PopulationStats[idvAnc].AF)
-	fmt.Printf("CountAccuracy with reference: %f\n",
-		solver.Accuracy(majorReference, cohort[INDIVIDUAL].Genotype))
-
-	fmt.Printf("Effect loci: ")
-	for i := 0; i < len(cohort[INDIVIDUAL].Genotype); i += 2 {
-		if cohort[INDIVIDUAL].Genotype[i] == p.EffectAlleles[i/2] && cohort[INDIVIDUAL].Genotype[i+1] == p.EffectAlleles[i/2] {
-			fmt.Printf("%d ", i+1)
-		}
-		if cohort[INDIVIDUAL].Genotype[i]+cohort[INDIVIDUAL].Genotype[i+1] == 1 {
-			fmt.Printf("%d ", i)
-		}
-	}
-	fmt.Println()
-	//solmap := slv.SolveProbabilistic(solver.UseLikelihood)
-	solmap := slv.SolveDeterministic(solver.UseLikelihood)
-	//solutions := solver.SortByAccuracy(solmap, cohort[INDIVIDUAL].Genotype)
-	//solutions := solver.SortByLikelihood(solmap, p.PopulationEAF[idvAnc])
-	solutions := solver.SortByLikelihoodAndFrequency(solmap, p.PopulationStats[idvAnc], p.EffectAlleles, solver.UseLikelihood)
+	solutions := findSolutions(p, cohort, INDIVIDUAL, idvAnc, recovered)
 
 	fmt.Printf("\nTrue:\n%s, %.2f\n", solver.ArrayToString(cohort[INDIVIDUAL].Genotype),
 		solver.CalculateFullSequenceLikelihood(cohort[INDIVIDUAL].Genotype, p.PopulationStats[idvAnc].AF, p.EffectAlleles))
