@@ -348,7 +348,7 @@ func (p *PGS) LoadDatasetStats() error {
 		if err != nil {
 			log.Printf("Error decoding effect alleles json: %v", err)
 		}
-		fmt.Println("Loaded population alleles", p.EffectAlleles)
+		//fmt.Println("Loaded population alleles", p.EffectAlleles)
 	}
 
 	filename = fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)

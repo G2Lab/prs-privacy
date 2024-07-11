@@ -1484,9 +1484,9 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
-	INDIVIDUAL := "HG00124"
-	//
+	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00124"
+
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
 	//INDIVIDUAL := "NA20872"
@@ -1504,10 +1504,10 @@ func findAllSolutions() {
 	//catalogFile := "PGS000040_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000043_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000639_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000648_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000648_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000891_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS001827_hmPOS_GRCh37.txt"
-	catalogFile := "PGS002302_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS002302_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000307_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000066_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000845_hmPOS_GRCh37.txt"
@@ -1517,7 +1517,8 @@ func findAllSolutions() {
 	//catalogFile := "PGS004238_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004222_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000589_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000119_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000146_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS001828_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {

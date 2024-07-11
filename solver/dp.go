@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"sort"
+	"sync"
 )
 
 type DP struct {
@@ -142,9 +143,15 @@ func (dp *DP) SolveDeterministic(sorting uint8) map[string][]uint8 {
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(betas)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
 	tables := make([]map[int64][]uint8, numSegments)
+	var wg sync.WaitGroup
 	for i := 0; i < numSegments; i++ {
-		tables[i] = calculateSubsetSumTable(betas[i], indices[i], upper, lower)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tables[i] = calculateSubsetSumTable(betas[i], indices[i], upper, lower)
+		}(i)
 	}
+	wg.Wait()
 
 	targets := make([]int64, 0)
 	for w := target; w > target-roundingError-1; w-- {
@@ -197,9 +204,15 @@ func (dp *DP) BuildProbabilisticState(numSegments int, sorting uint8) *Probabili
 	maxTotalPositive, maxTotalNegative := GetMaxTotal(betas)
 	upper, lower := target-maxTotalNegative+roundingError, target-maxTotalPositive-roundingError
 	nodes := make([]map[int64]*Node, numSegments)
+	var wg sync.WaitGroup
 	for i := 0; i < numSegments; i++ {
-		nodes[i] = calculateSubsetSumTableWithLikelihood(betas[i], indices[i], upper, lower, dp.stats, dp.p.EffectAlleles, sorting)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			nodes[i] = calculateSubsetSumTableWithLikelihood(betas[i], indices[i], upper, lower, dp.stats, dp.p.EffectAlleles)
+		}(i)
 	}
+	wg.Wait()
 	return newProbabilisticState(nodes, betas)
 }
 
@@ -258,11 +271,6 @@ func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[i
 	}
 	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
 	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
-	//smallerTableIdx, biggerTableIdx := 0, 1
-	//if len(tables[0]) > len(tables[1]) {
-	//	smallerTableIdx = 1
-	//	biggerTableIdx = 0
-	//}
 	var i, s int
 	var ok bool
 	//var lkl, chi float32
@@ -329,7 +337,7 @@ func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[i
 
 // We assume that the weights are sorted in ascending order
 func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int, upperBound, lowerBound int64,
-	stats *pgs.Statistics, effectAlleles []uint8, sorting uint8) map[int64]*Node {
+	stats *pgs.Statistics, effectAlleles []uint8) map[int64]*Node {
 	// Fill out the table using dynamic programming
 	table := make(map[int64]*Node)
 	// the fitness of all the snps being 0
@@ -382,22 +390,19 @@ func calculateSubsetSumTableWithLikelihood(betas map[uint8]int64, indices []int,
 					newSums = append(newSums, nextSum)
 				}
 				table[nextSum].Pointers[nextPtr] = table[prevSum].TopPointer
-				switch sorting {
-				case UseLikelihood:
-					if nextLikelihood < table[nextSum].TopLikelihood {
-						//updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
-						updates = append(updates, newUpdate(nextSum, nextLikelihood, nextPtr, table[prevSum].TopPointer))
-					}
-					//case UseSpectrum:
-					//	if nextChi < table[nextSum].TopChiValue {
-					//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
-					//	}
-					//case UseLikelihoodAndSpectrum:
-					//	if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
-					//		CombineLikelihoodAndChiSquared(table[nextSum].TopLikelihood, table[nextSum].TopChiValue) {
-					//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
-					//	}
+				if nextLikelihood < table[nextSum].TopLikelihood {
+					//updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+					updates = append(updates, newUpdate(nextSum, nextLikelihood, nextPtr, table[prevSum].TopPointer))
 				}
+				//case UseSpectrum:
+				//	if nextChi < table[nextSum].TopChiValue {
+				//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+				//	}
+				//case UseLikelihoodAndSpectrum:
+				//	if CombineLikelihoodAndChiSquared(nextLikelihood, nextChi) <
+				//		CombineLikelihoodAndChiSquared(table[nextSum].TopLikelihood, table[nextSum].TopChiValue) {
+				//		updates = append(updates, newUpdate(nextSum, nextLikelihood, nextChi, nextBinIdx, nextBinCount, nextPtr, table[prevSum].TopPointer))
+				//	}
 			}
 		}
 		// We postpone the updates to avoid the sums for the same locus stacking up on each other
