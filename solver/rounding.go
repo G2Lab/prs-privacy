@@ -1,25 +1,23 @@
 package solver
 
 import (
-	"log"
-	"math"
-
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/pgs"
+	"log"
 )
 
 type Rounder struct {
-	RoundedMode   bool
-	ScaledWeights []*apd.BigInt
-	ScaledTarget  *apd.BigInt
+	RoundedMode    bool
+	PrecisionLimit uint32
+	ScaledWeights  []*apd.BigInt
+	ScaledTarget   *apd.BigInt
 }
 
-func newRounder() *Rounder {
+func newRounder(pl uint32) *Rounder {
 	return &Rounder{
-		RoundedMode:   false,
-		ScaledWeights: make([]*apd.BigInt, 0),
-		ScaledTarget:  new(apd.BigInt),
+		RoundedMode:    false,
+		PrecisionLimit: pl,
+		ScaledWeights:  make([]*apd.BigInt, 0),
+		ScaledTarget:   new(apd.BigInt),
 	}
 }
 
@@ -45,7 +43,7 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 
 	var roundingError int64 = 0
 	multiplier := apd.New(1, int32(dp.p.WeightPrecision))
-	if dp.p.WeightPrecision > params.PrecisionsLimit {
+	if dp.p.WeightPrecision > dp.rounder.PrecisionLimit {
 		//roundingError = int64(p.NumVariants) * 5 / 4
 		roundingError = int64(dp.p.NumVariants - len(dp.known))
 		dp.rounder.RoundedMode = true
@@ -54,7 +52,7 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 		//	fmt.Printf("%s ", dp.rounder.ScaledWeights[i].String())
 		//}
 		dp.rounder.ScaledTarget = DecimalToBigInt(dp.p.Context, target, multiplier)
-		multiplier.SetFinite(1, params.PrecisionsLimit)
+		multiplier.SetFinite(1, int32(dp.rounder.PrecisionLimit))
 	}
 	//for i := range dp.p.Weights {
 	//	fmt.Printf("%s ", dp.p.Weights[i].String())
@@ -78,30 +76,30 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 	return weights, intTarget, roundingError
 }
 
-func getTargetAndWeightsAsFloats(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([]float64, float64, float64) {
-	var err error
-	var roundingError float64 = 0
-	precision := int(p.WeightPrecision)
-	if p.WeightPrecision > params.PrecisionsLimit {
-		precision = params.PrecisionsLimit
-		roundingError = math.Pow10(-precision) * float64(p.NumVariants)
-		multiplier := apd.New(1, int32(p.WeightPrecision))
-		rdr.RoundedMode = true
-		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)
-		sct := new(apd.Decimal)
-		p.Context.Mul(sct, target, multiplier)
-		rdr.ScaledTarget.SetString(sct.String(), 10)
-		multiplier.SetFinite(1, params.PrecisionsLimit)
-	}
-	scale := math.Pow10(precision)
-	weights := DecimalsToFloats(p.Weights, scale)
-	tf, err := target.Float64()
-	if err != nil {
-		log.Fatalf("Failed to convert ogTarget decimal to float64: %s", target.String())
-	}
-	tf = float64(int64(tf*scale)) / scale
-	return weights, tf, roundingError
-}
+//func getTargetAndWeightsAsFloats(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([]float64, float64, float64) {
+//	var err error
+//	var roundingError float64 = 0
+//	precision := int(p.WeightPrecision)
+//	if p.WeightPrecision > dp.rounder.PrecisionLimit {
+//		precision = params.PrecisionsLimit
+//		roundingError = math.Pow10(-precision) * float64(p.NumVariants)
+//		multiplier := apd.New(1, int32(p.WeightPrecision))
+//		rdr.RoundedMode = true
+//		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)
+//		sct := new(apd.Decimal)
+//		p.Context.Mul(sct, target, multiplier)
+//		rdr.ScaledTarget.SetString(sct.String(), 10)
+//		multiplier.SetFinite(1, params.PrecisionsLimit)
+//	}
+//	scale := math.Pow10(precision)
+//	weights := DecimalsToFloats(p.Weights, scale)
+//	tf, err := target.Float64()
+//	if err != nil {
+//		log.Fatalf("Failed to convert ogTarget decimal to float64: %s", target.String())
+//	}
+//	tf = float64(int64(tf*scale)) / scale
+//	return weights, tf, roundingError
+//}
 
 func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {
 	ints := make([]int64, len(decimals))

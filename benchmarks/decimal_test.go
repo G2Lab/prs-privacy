@@ -72,6 +72,16 @@ func BenchmarkInt64Add(b *testing.B) {
 	}
 }
 
+func BenchmarkFloat64Add(b *testing.B) {
+	num1 := float64(0.12345678901234567)
+	num2 := float64(0.98765432109876543)
+
+	for i := 0; i < b.N; i++ {
+		result := num1 + num2
+		_ = result // Avoid compiler optimization
+	}
+}
+
 func main() {
 	// Run the benchmarks
 	benchmarkResults := testing.Benchmark(BenchmarkBigRatAdd)
@@ -91,4 +101,7 @@ func main() {
 
 	benchmarkResults = testing.Benchmark(BenchmarkInt64Add)
 	fmt.Println("Int64 addition:", benchmarkResults)
+
+	benchmarkResults = testing.Benchmark(BenchmarkFloat64Add)
+	fmt.Println("Float64 addition:", benchmarkResults)
 }

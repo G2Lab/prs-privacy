@@ -86,6 +86,7 @@ func getPGSWithFewerVariants(limit int) {
 	invalidLoci := make([]string, 0)
 	tooFewVariants := make([]string, 0)
 	highDensity := make([]string, 0)
+	bigDiff := make([]string, 0)
 	filteredIds := make([]string, 0)
 	idsToNumVariants := make(map[string]int)
 	traits := make(map[string]struct{})
@@ -125,6 +126,11 @@ idLoop:
 			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/log3(maxw))
 			continue idLoop
 		}
+		if p.WeightPrecision-p.MinPrecision > 5 && p.MinPrecision > 2 && p.MinPrecision < 10 {
+			fmt.Printf("------- Big difference in precision: %d, %d\n", p.WeightPrecision, p.MinPrecision)
+			bigDiff = append(bigDiff, id)
+			continue idLoop
+		}
 		filteredIds = append(filteredIds, id)
 		idsToNumVariants[id] = p.NumVariants
 		pgsToPgp[id] = p.PgpID
@@ -147,6 +153,7 @@ idLoop:
 	fmt.Println("PGS with X or Y chromosomes:", len(hasXYchromosomes), hasXYchromosomes)
 	fmt.Println("PGS with less than 2 variants:", len(tooFewVariants), tooFewVariants)
 	fmt.Println("PGS with too high density:", len(highDensity), highDensity)
+	fmt.Println("PGS with big precision difference:", len(bigDiff), bigDiff)
 	fmt.Println("PGS with invalid loci:", len(invalidLoci), invalidLoci)
 	fmt.Println("Filtered PGS:", len(filteredIds))
 	fmt.Println("Unique traits:", len(traits))

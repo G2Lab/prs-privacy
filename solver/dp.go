@@ -87,14 +87,14 @@ func newUpdate(sum int64, likelihood float32, fptr, bptr uint8) Update {
 	}
 }
 
-func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, known map[int]uint8) *DP {
+func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, precisionLimit uint32, known map[int]uint8) *DP {
 	s := &DP{
 		//target:  score,
 		target:  ScoreToTarget(score, p),
 		p:       p,
 		stats:   p.PopulationStats[ppl],
 		ppl:     ppl,
-		rounder: newRounder(),
+		rounder: newRounder(precisionLimit),
 		known:   known,
 	}
 	return s

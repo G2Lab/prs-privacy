@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -127,6 +128,7 @@ type PGS struct {
 	EffectAlleles   []uint8  // 0 if the effect allele is the reference allele, 1 if it is the alternative allele
 	Context         *apd.Context
 	WeightPrecision uint32
+	MinPrecision    uint32
 	StudyEAF        [][]float64 // [other, effect] allele frequency from the study / catalogue file
 	PopulationStats map[string]*Statistics
 	//NumSpecBins     int
@@ -147,7 +149,7 @@ func (p *PGS) LoadCatalogFile(inputFile string) error {
 	defer file.Close()
 
 	headerInProgress := true
-	maxPrecision := uint32(0)
+	precisions := make([]uint32, 0)
 	scanner := bufio.NewScanner(file)
 scannerLoop:
 	for scanner.Scan() {
@@ -212,15 +214,31 @@ scannerLoop:
 			}
 			fields[p.Fieldnames[i]] = value
 		}
-		if maxPrecision < getPrecision(fields["effect_weight"].(string)) {
-			maxPrecision = getPrecision(fields["effect_weight"].(string))
-		}
+		precisions = append(precisions, getPrecision(fields["effect_weight"].(string)))
+		//precision = getPrecision(fields["effect_weight"].(string))
+		//if maxPrecision < precision {
+		//	maxPrecision = precision
+		//}
+		//if minPrecision > precision && precision != 1 {
+		//	minPrecision = precision
+		//}
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
 	p.Loci, err = p.GetSortedVariantLoci()
 	if err != nil {
 		return err
+	}
+
+	sort.Slice(precisions, func(i, j int) bool {
+		return precisions[i] < precisions[j]
+	})
+	var minPrecision uint32
+	maxPrecision := precisions[len(precisions)-1]
+	if len(precisions) > 2 {
+		minPrecision = precisions[2]
+	} else {
+		minPrecision = precisions[0]
 	}
 
 	p.Context = &apd.Context{
@@ -244,6 +262,7 @@ scannerLoop:
 		p.StudyEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
 	}
 	p.WeightPrecision = maxPrecision
+	p.MinPrecision = minPrecision
 	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	//p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
