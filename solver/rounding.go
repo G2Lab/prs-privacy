@@ -25,19 +25,21 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 	var err error
 	target := new(apd.Decimal)
 	target.Set(dp.target)
-	for i := range dp.p.Loci {
-		if _, ok := dp.known[i]; !ok {
-			continue
-		}
-		if (dp.known[i] == 0 && dp.p.EffectAlleles[i] == 0) || (dp.known[i] == 2 && dp.p.EffectAlleles[i] == 1) {
-			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
-			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
-		}
-		if dp.known[i] == 1 {
-			_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
-		}
-		if err != nil {
-			log.Fatalf("Failed to subtract known locus from target: %s", dp.p.Weights[i].String())
+	if len(dp.known) > 0 {
+		for i := range dp.p.Loci {
+			if _, ok := dp.known[i]; !ok {
+				continue
+			}
+			if (dp.known[i] == 0 && dp.p.EffectAlleles[i] == 0) || (dp.known[i] == 2 && dp.p.EffectAlleles[i] == 1) {
+				_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+				_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+			}
+			if dp.known[i] == 1 {
+				_, err = dp.p.Context.Sub(target, target, dp.p.Weights[i])
+			}
+			if err != nil {
+				log.Fatalf("Failed to subtract known locus from target: %s", dp.p.Weights[i].String())
+			}
 		}
 	}
 

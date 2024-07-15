@@ -220,11 +220,11 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 	solHeap *genHeap, sorting uint8) {
 	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
 	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
+	matchHeapSize := 1000 * dp.p.NumVariants
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
-	matchHeapSize := 1000 * dp.p.NumVariants
 	mheap := newMatchHeap()
 	var s int
 	var ok bool
@@ -265,12 +265,12 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 
 func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[int64][]uint8, betas []map[uint8]int64,
 	targets []int64, solHeap *genHeap, sorting uint8) {
+	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
+	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
-	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
-	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	var i, s int
 	var ok bool
 	//var lkl, chi float32

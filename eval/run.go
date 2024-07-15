@@ -27,7 +27,11 @@ import (
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var memprofile = flag.String("memprofile", "", "write cpu profile to file")
 
-const DeterminismLimit = 34
+const (
+	DeterminismLimit       = 34
+	ScratchSolvingSnpLimit = 44
+	ConfidenceThreshold    = 5
+)
 
 func main() {
 	flag.Parse()
@@ -681,7 +685,7 @@ func kinshipExperiment() {
 			solutions = findSolutions(p, cohort, relative, indPop, recoveredSnps)
 			if len(solutions) == 0 && len(recoveredSnps) > 0 {
 				fmt.Println("^^^ No solutions with extra loci, calculating from scratch ^^^")
-				solutions = findSolutions(p, cohort, relative, indPop, nil)
+				solutions = findSolutions(p, cohort, relative, indPop, make(map[int]uint8))
 			}
 			if len(solutions) > 0 {
 				fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[relative].Genotype))
@@ -1158,8 +1162,8 @@ func sequenceSolving() {
 		fmt.Println(allPgs)
 		indPop := pgs.GetIndividualAncestry(individual, populations)
 		guessedSnps := make(map[string]uint8)
+		guessedRefs := make(map[string]string)
 		guessConfidence := make(map[string]int)
-		recoveredPgsReferences := make(map[string]string)
 		trueSnps := make(map[string]uint8) // Count only the snps that were "guessed", i.e., no solutions does not Count
 		accuracies := make(map[int]float32)
 		var numMatches float32
@@ -1189,13 +1193,13 @@ func sequenceSolving() {
 			}
 			recoveredSnps := make(map[int]uint8)
 			recoveredRefs := make(map[int]string)
-			guessedRefs := make(map[string]struct{})
+			includedRefs := make(map[string]struct{})
 			for l, locus := range p.Loci {
 				if guess, ok := guessedSnps[locus]; ok {
 					recoveredSnps[l] = guess
-					recoveredRefs[l] = recoveredPgsReferences[locus]
-					if _, ok = guessedRefs[recoveredPgsReferences[locus]]; !ok {
-						guessedRefs[recoveredPgsReferences[locus]] = struct{}{}
+					recoveredRefs[l] = guessedRefs[locus]
+					if _, ok = includedRefs[guessedRefs[locus]]; !ok {
+						includedRefs[guessedRefs[locus]] = struct{}{}
 					}
 				}
 			}
@@ -1205,7 +1209,9 @@ func sequenceSolving() {
 			cohort := solver.NewCohort(p)
 			solutions := findSolutions(p, cohort, individual, indPop, recoveredSnps)
 			if len(solutions) == 0 && len(recoveredSnps) > 0 {
-				solutions = selfRepair(p, cohort, individual, indPop, guessedSnps, guessedRefs, guessConfidence, recoveredSnps, recoveredPgsReferences)
+				solutions = selfRepair(p, cohort, individual, indPop, guessedSnps, guessedRefs, guessConfidence,
+					recoveredSnps, recoveredRefs)
+				recoveredSnps = nil
 			}
 			if len(solutions) > 0 {
 				fmt.Printf("Top solution accuracy: %.3f\n", solver.Accuracy(solutions[0], cohort[individual].Genotype))
@@ -1214,17 +1220,17 @@ func sequenceSolving() {
 						continue
 					}
 					guessedSnps[locus] = solutions[0][pgs.Ploidy*i] + solutions[0][pgs.Ploidy*i+1]
-					recoveredPgsReferences[locus] = pgsID
+					guessedRefs[locus] = pgsID
 				}
 				//
 				guessConfidence[pgsID] = 1
 				fmt.Printf("Increasing guess confidence for ")
-				for ref := range guessedRefs {
+				for ref := range includedRefs {
 					guessConfidence[ref]++
 					// If all or all but one snps have been guessed prior, and they work,
 					// we have higher confidence that they are correct
-					if len(p.Loci)-len(recoveredSnps) < 2 {
-						guessConfidence[ref] += 5
+					if len(p.Loci)-len(recoveredSnps) <= 1 {
+						guessConfidence[ref] += 3
 					}
 					fmt.Printf("%s:%d ", ref, guessConfidence[ref])
 				}
@@ -1289,86 +1295,134 @@ func sequenceSolving() {
 }
 
 func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop string, guessedSnps map[string]uint8,
-	guessedRefs map[string]struct{}, guessConfidence map[string]int,
-	recoveredSnps map[int]uint8, recoveredPgsReferences map[string]string) [][]uint8 {
-	fmt.Println("^^^ No solutions with extra loci, trying with a subset ^^^")
-	var err error
-	ids := make([]string, 0)
-	for ref := range guessedRefs {
-		// If we are confident about the reference, we do not need to try excluding it
-		if guessConfidence[ref] > 10 {
-			continue
+	guessedRefs map[string]string, guessConfidence map[string]int,
+	recoveredSnps map[int]uint8, recoveredRefs map[int]string) [][]uint8 {
+	fmt.Println("^^^ No solutions with all the extra loci ^^^")
+	highConfidenceSnps := make(map[int]uint8)
+	highConfidenceRefs := make(map[int]string)
+	for i, snp := range recoveredSnps {
+		if guessConfidence[recoveredRefs[i]] > ConfidenceThreshold {
+			highConfidenceSnps[i] = snp
+			highConfidenceRefs[i] = recoveredRefs[i]
 		}
-		ids = append(ids, ref)
 	}
-	contenders := make([]Contender, 0)
-	var solutions [][]uint8
-	for _, id := range ids {
-		recoveredSnps = make(map[int]uint8)
-		for l, locus := range p.Loci {
-			if guess, ok := guessedSnps[locus]; ok {
-				if recoveredPgsReferences[locus] != id {
-					recoveredSnps[l] = guess
-				}
-			}
-		}
-		fmt.Printf("Solving w/o %s\n", id)
-		// Decrease the confidence now so that it does not increase at the next step
-		guessConfidence[id]--
-		solutions = findSolutions(p, cohort, individual, indPop, recoveredSnps)
-		if len(solutions) > 0 {
-			contenders = append(contenders, Contender{id, solutions[0],
-				solver.CalculateFullSequenceLikelihood(solutions[0], p.PopulationStats[indPop].AF, p.EffectAlleles)})
-			fmt.Printf("Got %s: %.3f\n", id, contenders[len(contenders)-1].likelihood)
+	// Too hard to solve from scratch
+	if p.NumVariants-len(highConfidenceSnps) > ScratchSolvingSnpLimit {
+		fmt.Printf("Too few high-confidence SNPs (%d/%d), skipping\n", len(highConfidenceSnps), p.NumVariants)
+		return nil
+	}
+	fmt.Printf("Solving with high-confidence SNPs: %v\n", highConfidenceRefs)
+	solutions := findSolutions(p, cohort, individual, indPop, highConfidenceSnps)
+	highConfidence := true
+	if len(solutions) == 0 {
+		if p.NumVariants > ScratchSolvingSnpLimit {
+			return nil
 		} else {
-			fmt.Printf("No solution w/o %s\n", id)
-		}
-	}
-	sort.Slice(contenders, func(i, j int) bool {
-		return contenders[i].likelihood < contenders[j].likelihood
-	})
-	// Resolving the references to see if there is a valid solution with the new SNP results
-	for _, cnt := range contenders {
-		pcnt := pgs.NewPGS()
-		err = pcnt.LoadCatalogFile(path.Join(params.DataFolder, cnt.id+"_hmPOS_GRCh37.txt"))
-		if err != nil {
-			log.Printf("Error loading catalog file: %v\n", err)
-			return nil
-		}
-		err = pcnt.LoadStats()
-		if err != nil {
-			log.Printf("Error loading stats: %v\n", err)
-			return nil
-		}
-		fmt.Printf("Re-solving %s with ", cnt.id)
-		recoveredSnps = make(map[int]uint8)
-		for l, prevLocus := range pcnt.Loci {
-			for r, resolvedLocus := range p.Loci {
-				if resolvedLocus != prevLocus {
-					continue
-				}
-				recoveredSnps[l] = cnt.solution[pgs.Ploidy*r] + cnt.solution[pgs.Ploidy*r+1]
-				break
-			}
-			fmt.Printf("%d:%d ", l, recoveredSnps[l])
-		}
-		fmt.Println()
-		cohortcnt := solver.NewCohort(pcnt)
-		solcnt := findSolutions(pcnt, cohortcnt, individual, indPop, recoveredSnps)
-		if len(solcnt) > 0 {
-			for i, lcnt := range pcnt.Loci {
-				guessedSnps[lcnt] = solcnt[0][pgs.Ploidy*i] + solcnt[0][pgs.Ploidy*i+1]
-			}
-			fmt.Printf("New %s accuracy: %.3f\n", cnt.id, solver.Accuracy(solcnt[0], cohortcnt[individual].Genotype))
-			solutions = [][]uint8{cnt.solution}
-			guessConfidence[cnt.id] = 0
-			break
+			highConfidence = false
+			solutions = findSolutions(p, cohort, individual, indPop, make(map[int]uint8))
 		}
 	}
 	if len(solutions) == 0 {
-		// Solve from scratch
-		fmt.Println("No solutions with any subset, calculating from scratch")
-		solutions = findSolutions(p, cohort, individual, indPop, make(map[int]uint8))
+		return nil
+	}
+	fmt.Printf("Top solution with high-confidence snps/from scratch: accuracy %.2f, likelihood %.2f\n",
+		solver.Accuracy(solutions[0], cohort[individual].Genotype),
+		solver.CalculateFullSequenceLikelihood(solutions[0], p.PopulationStats[indPop].AF, p.EffectAlleles))
+
+	refMap := make(map[string]struct{})
+	refs := make([]string, 0)
+	for _, ref := range recoveredRefs {
+		if guessConfidence[ref] > ConfidenceThreshold && highConfidence {
+			fmt.Printf("Already confident about %s\n", ref)
+			continue
+		}
+		if _, ok := refMap[ref]; !ok {
+			refMap[ref] = struct{}{}
+			refs = append(refs, ref)
+			guessConfidence[ref] -= 1
+		}
+	}
+
+	// Resolving the references to see if there is a valid solution with the new SNP results
+	fmt.Println("Resolving mismatching references")
+	limit := 30
+	if len(solutions) < limit {
+		limit = len(solutions)
+	}
+	var allMatching bool
+	var err error
+solutionLoop:
+	for k, solution := range solutions[:limit] {
+		fmt.Printf("Trying a solution %d with accuracy %.3f\n", k, solver.Accuracy(solution, cohort[individual].Genotype))
+		refSols := make([][][]uint8, len(refs))
+		for j, ref := range refs {
+			fmt.Printf("--- %s ---\n", ref)
+			allMatching = true
+			for i := range p.Loci {
+				if recoveredRefs[i] == ref {
+					if guess, ok := recoveredSnps[i]; ok && solutions[0][pgs.Ploidy*i]+solutions[0][pgs.Ploidy*i+1] != guess {
+						allMatching = false
+					}
+				}
+			}
+			if allMatching {
+				fmt.Println("No mismatching SNPs")
+				continue
+			}
+			refp := pgs.NewPGS()
+			err = refp.LoadCatalogFile(path.Join(params.DataFolder, ref+"_hmPOS_GRCh37.txt"))
+			if err != nil {
+				log.Printf("Error loading catalog file %s: %v\n", ref, err)
+				return nil
+			}
+			err = refp.LoadStats()
+			if err != nil {
+				log.Printf("Error loading stats for %s: %v\n", ref, err)
+				return nil
+			}
+			refCohort := solver.NewCohort(refp)
+			newSnps := make(map[int]uint8)
+			for i, locus := range p.Loci {
+				if recoveredRefs[i] == ref {
+					for j, refLocus := range refp.Loci {
+						if refLocus == locus {
+							newSnps[j] = solution[pgs.Ploidy*i] + solution[pgs.Ploidy*i+1]
+							break
+						}
+					}
+				}
+			}
+			if refp.NumVariants-len(newSnps) > DeterminismLimit {
+				continue
+			}
+			refSols[j] = findSolutions(refp, refCohort, individual, indPop, newSnps)
+			if len(refSols[j]) == 0 {
+				fmt.Printf("Could not resolve %s with new SNPs\n", ref)
+				//guessConfidence[ref]--
+				continue solutionLoop
+			}
+			fmt.Printf("New %s accuracy: %.3f\n", ref, solver.Accuracy(refSols[j][0], refCohort[individual].Genotype))
+		}
+		fmt.Printf("Solution %d is valid\n", k)
+		// All refs are solvable, updating old loci
+		for j, ref := range refs {
+			if len(refSols[j]) == 0 {
+				continue
+			}
+			refp := pgs.NewPGS()
+			err = refp.LoadCatalogFile(path.Join(params.DataFolder, ref+"_hmPOS_GRCh37.txt"))
+			if err != nil {
+				log.Printf("Error loading catalog file %s: %v\n", ref, err)
+				return nil
+			}
+			for i, refl := range refp.Loci {
+				guessedSnps[refl] = refSols[j][0][pgs.Ploidy*i] + refSols[j][0][pgs.Ploidy*i+1]
+				guessedRefs[refl] = ref
+			}
+			guessConfidence[ref] = 0
+		}
+		solutions[0] = solution
+		break solutionLoop
 	}
 	return solutions
 }
@@ -1376,11 +1430,11 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 func findSolutions(p *pgs.PGS, cht solver.Cohort, idv, ppl string, priorSnps map[int]uint8) [][]uint8 {
 	var sm map[string][]uint8
 	var precision uint32 = 9
-	if len(p.Loci) >= DeterminismLimit {
+	if len(p.Loci)-len(priorSnps) >= DeterminismLimit {
 		precision = 8
 	}
 	slv := solver.NewDP(cht[idv].Score, p, ppl, precision, priorSnps)
-	if len(p.Loci) < DeterminismLimit {
+	if len(p.Loci)-len(priorSnps) < DeterminismLimit {
 		sm = slv.SolveDeterministic(solver.UseLikelihood)
 	} else {
 		sm = slv.SolveProbabilistic(solver.UseLikelihood)
@@ -1470,8 +1524,8 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	//INDIVIDUAL := "HG00551" // low 648
-	INDIVIDUAL := "HG00124"
+	INDIVIDUAL := "HG00551" // low 648
+	//INDIVIDUAL := "HG00124"
 
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1504,8 +1558,8 @@ func findAllSolutions() {
 	//catalogFile := "PGS004222_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000119_hmPOS_GRCh37.txt"
-	catalogFile := "PGS000341_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS001826_hmPOS_GRCh37.txt"
+	//catalogFile := "PGS000880_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000723_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
