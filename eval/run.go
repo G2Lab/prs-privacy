@@ -1103,14 +1103,12 @@ func sequenceSolving() {
 		return
 	}
 
-	related := solver.AllRelativeSamples()
-	individuals := make([]string, 0)
-	for _, idv := range related {
-		individuals = append(individuals, idv)
-	}
+	//individuals := solver.AllRelativeSamples()
+	individuals := solver.All1000GenomesSamples()
 	sort.Strings(individuals)
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
+	fmt.Printf("Chunk %d, size %d\n", chunkNum, chunkSize)
 	end := (chunkNum + 1) * chunkSize
 	if end > len(individuals) {
 		end = len(individuals)

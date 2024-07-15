@@ -667,7 +667,8 @@ def sequential():
     files = os.listdir(directory)
     data = []
     for file_name in files:
-        if "with_repair" not in file_name:
+        if "raccuracies" not in file_name:
+        # if "with_repair" not in file_name:
 #         if "without_repair" not in file_name:
             continue
         filepath = os.path.join(directory, file_name)
@@ -689,7 +690,7 @@ def sequential():
     plt.ylim(0.87, 1.01)
     plt.show()
 #     fig.savefig('sequential-unrepaired.png', dpi=300, bbox_inches='tight')
-    fig.savefig('sequential-repaired.png', dpi=300, bbox_inches='tight')
+#     fig.savefig('sequential-repaired.png', dpi=300, bbox_inches='tight')
 
 
 def king_test():
@@ -1185,7 +1186,7 @@ if __name__ == "__main__":
     # loci_coverage()
     # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
     # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-    # sequential()
+    sequential()
     # king_test()
     # kinship_experiment()
     # score_uniqueness()
@@ -1195,4 +1196,4 @@ if __name__ == "__main__":
     # linking_accuracy()
     # imputation_accuracy()
     # percentile_prediction()
-    random_bars()
+    # random_bars()
