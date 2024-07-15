@@ -1230,7 +1230,7 @@ func sequenceSolving() {
 					// If all or all but one snps have been guessed prior, and they work,
 					// we have higher confidence that they are correct
 					if len(p.Loci)-len(recoveredSnps) <= 1 {
-						guessConfidence[ref] += 3
+						guessConfidence[ref]++
 					}
 					fmt.Printf("%s:%d ", ref, guessConfidence[ref])
 				}
@@ -1315,7 +1315,7 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	solutions := findSolutions(p, cohort, individual, indPop, highConfidenceSnps)
 	highConfidence := true
 	if len(solutions) == 0 {
-		if p.NumVariants > ScratchSolvingSnpLimit {
+		if p.NumVariants > DeterminismLimit {
 			return nil
 		} else {
 			highConfidence = false
@@ -1333,6 +1333,7 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	refs := make([]string, 0)
 	for _, ref := range recoveredRefs {
 		if guessConfidence[ref] > ConfidenceThreshold && highConfidence {
+			//if guessConfidence[ref] > ConfidenceThreshold {
 			fmt.Printf("Already confident about %s\n", ref)
 			continue
 		}
@@ -1398,7 +1399,6 @@ solutionLoop:
 			refSols[j] = findSolutions(refp, refCohort, individual, indPop, newSnps)
 			if len(refSols[j]) == 0 {
 				fmt.Printf("Could not resolve %s with new SNPs\n", ref)
-				//guessConfidence[ref]--
 				continue solutionLoop
 			}
 			fmt.Printf("New %s accuracy: %.3f\n", ref, solver.Accuracy(refSols[j][0], refCohort[individual].Genotype))
@@ -1415,9 +1415,12 @@ solutionLoop:
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
 			}
-			for i, refl := range refp.Loci {
-				guessedSnps[refl] = refSols[j][0][pgs.Ploidy*i] + refSols[j][0][pgs.Ploidy*i+1]
-				guessedRefs[refl] = ref
+			for i, refloc := range refp.Loci {
+				if guessConfidence[guessedRefs[refloc]] > ConfidenceThreshold {
+					continue
+				}
+				guessedSnps[refloc] = refSols[j][0][pgs.Ploidy*i] + refSols[j][0][pgs.Ploidy*i+1]
+				guessedRefs[refloc] = ref
 			}
 			guessConfidence[ref] = 0
 		}
@@ -1524,8 +1527,8 @@ func findAllSolutions() {
 	//INDIVIDUAL := "HG02215" // highest score for PGS000040
 	//INDIVIDUAL := "HG02728" // middle 648
 	//INDIVIDUAL := "NA19780" // high 648
-	INDIVIDUAL := "HG00551" // low 648
-	//INDIVIDUAL := "HG00124"
+	//INDIVIDUAL := "HG00551" // low 648
+	INDIVIDUAL := "HG02024"
 
 	//INDIVIDUAL := "HG01028"
 	//INDIVIDUAL := "NA18531"
@@ -1559,7 +1562,7 @@ func findAllSolutions() {
 	//catalogFile := "PGS004249_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000119_hmPOS_GRCh37.txt"
 	//catalogFile := "PGS000880_hmPOS_GRCh37.txt"
-	catalogFile := "PGS000723_hmPOS_GRCh37.txt"
+	catalogFile := "PGS000083_hmPOS_GRCh37.txt"
 	err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
