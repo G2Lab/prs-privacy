@@ -12,7 +12,7 @@ job_script="solve.slurm"
 
 # Function to count the number of running jobs
 count_running_jobs() {
-    squeue -u "$USER" --name "prs" -t R,PD | grep -c "^[0-9]"
+    squeue -u "$USER" --name "prs" -t R,PD | awk 'NR>1 {print $1}' | wc -l
 }
 
 # Function to check for job errors
@@ -28,8 +28,8 @@ check_job_errors() {
 
 echo "Waiting to submit jobs..."
 # Submit the jobs in batches
-for ((i=2; i<total_chunks; i++)); do
-    while [ $(count_running_jobs) -le $max_concurrent_jobs ]; do
+for ((i=9; i<total_chunks; i++)); do
+    while [ $(count_running_jobs) -ge $max_concurrent_jobs ]; do
 #        echo "Waiting for a job to finish..."
         sleep 60  # Wait for 60 seconds before checking again
         check_job_errors  # Check for job errors
@@ -37,6 +37,7 @@ for ((i=2; i<total_chunks; i++)); do
 
     echo "Submitting job: $job_script $i $chunk_size"
     sbatch $job_script $i $chunk_size
+    sleep 5
 done
 
 # Final check for errors in case there are remaining jobs

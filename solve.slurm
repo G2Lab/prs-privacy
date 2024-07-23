@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4                  # Number of CPUs per task
 #SBATCH --time=2-0:00:00                   # Time limit hrs:min:sec
 #SBATCH --partition=pe2                    # Partition (queue) name
-#SBATCH --priority=3294967000              # Job priority
+#SBATCH --priority=3294966000              # Job priority
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
 
 module load bcftools/1.20

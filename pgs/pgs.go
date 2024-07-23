@@ -38,7 +38,6 @@ var ALL_FIELDS = []string{
 const (
 	Ploidy     = 2
 	MissingEAF = 0.0002
-	//MissingEAF = 0
 )
 
 var (

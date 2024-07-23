@@ -53,22 +53,10 @@ func main() {
 		defer pprof.WriteHeapProfile(f)
 	}
 
-	//scoreDistribution()
-	//likelihoodEffect()
-	//scoreToLikelihoodDistribution()
-	//scoreToLikelihood()
-	//evaluateReferences()
-	//accuracyLikelihood()
-	//buildDPTables()
-	//likelihoodWeight()
-	//sortingChoice()
-	//sortingChoiceParallel()
-	//accuracyParallel()
 	//findAllSolutions()
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
-	//uniquenessExperiment()
 	//calculateGenotypeFrequencies()
 	//imputeWorkflow()
 	//linkingWithImputation()
@@ -76,6 +64,9 @@ func main() {
 	//evaluateImputation()
 	//findUnsolvablePRSWithOverlap()
 	//predictPRS()
+	//uniquenessExperiment()
+	//calculateGenotypeFrequenciesOnlyGuessed()
+	//guessAccuracy()
 	sequenceSolving()
 }
 
@@ -990,13 +981,14 @@ func uniquenessExperiment() {
 		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
 	})
 
-	//allPgs = []string{"PGS004164"}
+	individuals := solver.All1000GenomesSamples()
 	populations := tools.LoadAncestry()
 	type Result struct {
-		PgsID           string
-		NumVariants     int
-		NumUniqueScores int
-		AnonymitySets   []int
+		PgsID                string
+		NumVariants          int
+		TotalScores          int
+		NumUniqueIndividuals int
+		AnonymitySets        []int
 	}
 	results := make([]*Result, 0)
 	var sc, idvPop string
@@ -1018,7 +1010,7 @@ func uniquenessExperiment() {
 		}
 		cohort := solver.NewCohort(p)
 		scores = make(map[string][]string)
-		for idv := range cohort {
+		for _, idv := range individuals {
 			sc = cohort[idv].Score.String()
 			if _, ok := scores[sc]; !ok {
 				scores[sc] = make([]string, 0)
@@ -1026,10 +1018,7 @@ func uniquenessExperiment() {
 			scores[sc] = append(scores[sc], idv)
 			scoreList = append(scoreList, sc)
 			// Check for impossible SNPs
-			idvPop = populations[idv]
-			if strings.Contains(idvPop, ",") {
-				idvPop = strings.Split(idvPop, ",")[0]
-			}
+			idvPop = pgs.GetIndividualAncestry(idv, populations)
 			for j, af := range p.PopulationStats[idvPop].AF {
 				if (af[0] == 0 && cohort[idv].Genotype[pgs.Ploidy*j]+cohort[idv].Genotype[pgs.Ploidy*j+1] == 0) ||
 					(af[1] == 0 && cohort[idv].Genotype[pgs.Ploidy*j]+cohort[idv].Genotype[pgs.Ploidy*j+1] > 0) {
@@ -1048,10 +1037,11 @@ func uniquenessExperiment() {
 			anonsets = append(anonsets, len(idvs))
 		}
 		results = append(results, &Result{
-			PgsID:           pgsID,
-			NumVariants:     pgsToNumVariants[pgsID],
-			NumUniqueScores: numUnique,
-			AnonymitySets:   anonsets,
+			PgsID:                pgsID,
+			NumVariants:          pgsToNumVariants[pgsID],
+			TotalScores:          len(scores),
+			NumUniqueIndividuals: numUnique,
+			AnonymitySets:        anonsets,
 		})
 	}
 	resultFolder := "results/uniqueness"
@@ -1307,6 +1297,10 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	// Too hard to solve from scratch
 	if p.NumVariants-len(highConfidenceSnps) > ScratchSolvingSnpLimit {
 		fmt.Printf("Too few high-confidence SNPs (%d/%d), skipping\n", len(highConfidenceSnps), p.NumVariants)
+		return nil
+	}
+	if p.PgsID == "PGS000648" && p.NumVariants-len(highConfidenceSnps) > DeterminismLimit {
+		fmt.Printf("Ignoring %s, only %d/%d SNPs are known\n", p.PgsID, len(highConfidenceSnps), p.NumVariants)
 		return nil
 	}
 	fmt.Printf("Solving with high-confidence SNPs: %v\n", highConfidenceRefs)
@@ -2312,48 +2306,3 @@ func numHeterozygous(seq []uint8) int {
 	}
 	return num
 }
-
-//func selectPGS() {
-//	var pgsToNumVariants map[string]int
-//	var pgsToPgp map[string]string
-//	numVariantsFile, err := os.Open("results/filtered_pgs.json")
-//	if err != nil {
-//		log.Fatalf("Error opening file: %v", err)
-//	}
-//	defer numVariantsFile.Close()
-//	decoder := json.NewDecoder(numVariantsFile)
-//	err = decoder.Decode(&pgsToNumVariants)
-//	if err != nil {
-//		log.Fatalf("Error decoding num variants json: %v", err)
-//	}
-//	pgpFile, err := os.Open("results/pgs_pgp.json")
-//	if err != nil {
-//		log.Fatalf("Error opening file: %v", err)
-//	}
-//	defer pgpFile.Close()
-//	decoder = json.NewDecoder(pgpFile)
-//	err = decoder.Decode(&pgsToPgp)
-//	if err != nil {
-//		log.Fatalf("Error decoding pgp json: %v", err)
-//	}
-//
-//	baggedPgp := make(map[string]struct{})
-//	pgsToSelect := make(map[string]int)
-//
-//	for i := 5; i <= 50; i += 5 {
-//		if i == 50 {
-//			i = 49
-//		}
-//		for pgs, num := range pgsToNumVariants {
-//			if num == i {
-//				if _, ok := baggedPgp[pgsToPgp[pgs]]; ok {
-//					continue
-//				}
-//				pgsToSelect[pgs] = num
-//				baggedPgp[pgsToPgp[pgs]] = struct{}{}
-//				break
-//			}
-//		}
-//	}
-//	fmt.Println(pgsToSelect)
-//}

@@ -313,6 +313,100 @@ func retrievePositionAlleles(chr, pos string) (string, string) {
 	return ".", "."
 }
 
+func guessAccuracy() {
+	guessed := loadGuessedGenotypes()
+	relatives := solver.AllRelativeSamples()
+	mainSamples := solver.All1000GenomesSamples()
+	var err error
+	var chr, idv, pos, anc, filepath string
+	var positionMap map[string]struct{}
+	var positions []string
+	trueSnps := make(map[string]map[string]map[string]uint8)
+	for _, idv = range solver.All1000GenomesAndRelativeSamples() {
+		trueSnps[idv] = make(map[string]map[string]uint8)
+	}
+	for chrId := 1; chrId <= 22; chrId++ {
+		chr = strconv.Itoa(chrId)
+		positionMap = make(map[string]struct{})
+		for idv = range guessed {
+			for pos = range guessed[idv][chr] {
+				positionMap[pos] = struct{}{}
+			}
+		}
+		positions = make([]string, 0, len(positionMap))
+		for pos = range positionMap {
+			positions = append(positions, pos)
+		}
+		retrieved := getIndividualPositionSNPs(chr, positions, mainSamples, tools.GG)
+		for idv = range retrieved {
+			trueSnps[idv][chr] = retrieved[idv]
+		}
+		retrieved = getIndividualPositionSNPs(chr, positions, relatives, tools.RL)
+		for idv = range retrieved {
+			trueSnps[idv][chr] = retrieved[idv]
+		}
+	}
+	// Find the most frequent genotype for each position
+	gtpFrequencies := loadGenotypeFrequenciesForGuessed()
+	references := make(map[string]map[string]map[string]uint8)
+	var gtp uint8
+	for anc = range gtpFrequencies {
+		references[anc] = make(map[string]map[string]uint8)
+		for chrStr := range gtpFrequencies[anc] {
+			references[anc][chrStr] = make(map[string]uint8)
+			for pos = range gtpFrequencies[anc][chrStr] {
+				gtp = 0
+				for j := 1; j <= 2; j++ {
+					if gtpFrequencies[anc][chrStr][pos][j] > gtpFrequencies[anc][chrStr][pos][gtp] {
+						gtp = uint8(j)
+					}
+				}
+				references[anc][chrStr][pos] = gtp
+			}
+		}
+	}
+	ancestries := tools.LoadAncestry()
+	type Result struct {
+		Individual        string
+		Ancestry          string
+		SNPs              int
+		GuessAccuracy     float32
+		ReferenceAccuracy float32
+	}
+	results := make([]Result, 0)
+	for idv = range guessed {
+		res := Result{Individual: idv, Ancestry: pgs.GetIndividualAncestry(idv, ancestries),
+			SNPs: 0, GuessAccuracy: 0, ReferenceAccuracy: 0}
+		for chr = range guessed[idv] {
+			for pos = range guessed[idv][chr] {
+				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
+					res.GuessAccuracy++
+				}
+				if guessed[idv][chr][pos] == references[res.Ancestry][chr][pos] {
+					res.ReferenceAccuracy++
+				}
+				res.SNPs++
+			}
+		}
+		res.GuessAccuracy /= float32(res.SNPs)
+		res.ReferenceAccuracy /= float32(res.SNPs)
+		results = append(results, res)
+	}
+
+	resultFolder := "results/guessAccuracy"
+	filepath = path.Join(resultFolder, "accuracy.json")
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Println("Completed")
+}
+
 type Relation struct {
 	Target      string
 	Count       []int
@@ -870,6 +964,80 @@ func calculateGenotypeFrequencies() {
 	}
 }
 
+func calculateGenotypeFrequenciesOnlyGuessed() {
+	guessed := loadGuessedGenotypes()
+	missingGenotypeFrequencies := []float32{(1 - pgs.MissingEAF) * (1 - pgs.MissingEAF),
+		2 * pgs.MissingEAF * (1 - pgs.MissingEAF), pgs.MissingEAF * pgs.MissingEAF}
+	folder := "data/frequencies"
+	samples := solver.All1000GenomesSamples()
+	var filepath string
+	var outFile *os.File
+	var err error
+	var ok bool
+	var positions []string
+	var chrStr, pos, idv, anc string
+	var positionMap map[string]struct{}
+	frequencies := make(map[string]map[string]map[string][]float32)
+	ancestries := tools.LoadAncestry()
+	for _, ppl := range pgs.POPULATIONS {
+		frequencies[ppl] = make(map[string]map[string][]float32)
+		for chr := 1; chr <= 22; chr++ {
+			frequencies[ppl][strconv.Itoa(chr)] = make(map[string][]float32)
+		}
+	}
+	for chr := 1; chr <= 22; chr++ {
+		fmt.Printf("---- %d ----\n", chr)
+		chrStr = strconv.Itoa(chr)
+		positionMap = make(map[string]struct{})
+		for idv = range guessed {
+			for pos = range guessed[idv][chrStr] {
+				positionMap[pos] = struct{}{}
+			}
+		}
+		positions = make([]string, 0, len(positionMap))
+		for pos = range positionMap {
+			positions = append(positions, pos)
+		}
+		retrieved := getIndividualPositionSNPs(chrStr, positions, samples, tools.GG)
+		for idv = range retrieved {
+			anc = pgs.GetIndividualAncestry(idv, ancestries)
+			for pos = range retrieved[idv] {
+				if _, ok := frequencies[anc][chrStr][pos]; !ok {
+					frequencies[anc][chrStr][pos] = make([]float32, 3)
+				}
+				frequencies[anc][chrStr][pos][retrieved[idv][pos]]++
+			}
+		}
+		for anc = range frequencies {
+			for pos = range frequencies[anc][chrStr] {
+				for i := range frequencies[anc][chrStr][pos] {
+					frequencies[anc][chrStr][pos][i] /= float32(len(retrieved))
+				}
+			}
+		}
+
+		for _, ppl := range pgs.POPULATIONS {
+			for _, pos := range positions {
+				if _, ok = frequencies[ppl][chrStr][pos]; !ok {
+					fmt.Printf("%s: position %s:%s is missing\n", ppl, chrStr, pos)
+					frequencies[ppl][chrStr][pos] = missingGenotypeFrequencies
+				}
+			}
+		}
+	}
+	filepath = path.Join(folder, "guessed.json")
+	outFile, err = os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening output file: %v", err)
+	}
+	encoder := json.NewEncoder(outFile)
+	if err = encoder.Encode(frequencies); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	outFile.Close()
+	fmt.Printf("=== Completed ===\n")
+}
+
 func getAllImputedPositions(chr int) []int {
 	imputedMap := make(map[string]struct{})
 	var imputedPositionsPerAncestry []string
@@ -971,6 +1139,22 @@ func loadGenotypeFrequencies(chr int) map[string][]float32 {
 	}
 	defer file.Close()
 	var frequencies map[string][]float32
+	decoder := json.NewDecoder(file)
+	if err = decoder.Decode(&frequencies); err != nil {
+		log.Fatalf("Cannot decode json file %s: %v", filepath, err)
+	}
+	return frequencies
+}
+
+func loadGenotypeFrequenciesForGuessed() map[string]map[string]map[string][]float32 {
+	folder := "data/frequencies"
+	filepath := path.Join(folder, "guessed.json")
+	file, err := os.Open(filepath)
+	if err != nil {
+		log.Fatalf("Cannot open file %s: %v", filepath, err)
+	}
+	defer file.Close()
+	var frequencies map[string]map[string]map[string][]float32
 	decoder := json.NewDecoder(file)
 	if err = decoder.Decode(&frequencies); err != nil {
 		log.Fatalf("Cannot decode json file %s: %v", filepath, err)

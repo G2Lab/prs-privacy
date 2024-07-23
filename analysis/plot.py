@@ -19,10 +19,10 @@ def pairwise(filepath):
             row_values = [float(value) for value in row]
             correlations.append(row_values)
 
-    xs = np.arange(1, len(correlations)+1, 1)
+    xs = np.arange(1, len(correlations) + 1, 1)
     ys = []
     for i in range(len(correlations)):
-        ys.append([correlations[i][j] for j in range(i+1, len(correlations))])
+        ys.append([correlations[i][j] for j in range(i + 1, len(correlations))])
         plt.scatter([xs[i] for _ in range(len(ys[i]))], ys[i], s=1)
 
     plt.xlabel("Distance between a pair of SNPs")
@@ -73,9 +73,9 @@ def solution_ranking(pgs_id):
                 first_likelihood, likelihood, major_likelihood = float(row[8]), float(row[9]), float(row[10])
                 accuracies.append(accuracy)
                 major_accuracies.append(major_accuracy)
-                positions.append(1-position/total_solutions)
+                positions.append(1 - position / total_solutions)
                 likelihoods.append(likelihood)
-                major_likelihoods.append(major_likelihood*score/major_score)
+                major_likelihoods.append(major_likelihood * score / major_score)
 
     # plt.hist(accuracies, bins=50, histtype='step', label="Top-choice accuracy")
     # plt.hist(major_accuracies, bins=50, histtype='step', label="All-major accuracy")
@@ -108,11 +108,13 @@ def likelihood_distribution(pgs_id):
                 likelihoods.append(list(map(lambda x: float(x), likelihood)))
 
     colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
-    for i in range(0, int(len(labels)/2)):
-        plt.hist(likelihoods[2*i], bins=8, histtype='step', linewidth=2, color=colors[i], label=f"{labels[i]}({scores[2*i]})")
-        plt.hist(likelihoods[2*i+1], bins=8, histtype='step', linewidth=2, color=colors[i], label=f"{labels[i]}({scores[2*i+1]})")
-        plt.plot(likelihoods[2*i][0], 1600, 'x', markersize=5, color=colors[i])
-        plt.plot(likelihoods[2*i+1][0], 1600, 'x', markersize=5, color=colors[i])
+    for i in range(0, int(len(labels) / 2)):
+        plt.hist(likelihoods[2 * i], bins=8, histtype='step', linewidth=2, color=colors[i],
+                 label=f"{labels[i]}({scores[2 * i]})")
+        plt.hist(likelihoods[2 * i + 1], bins=8, histtype='step', linewidth=2, color=colors[i],
+                 label=f"{labels[i]}({scores[2 * i + 1]})")
+        plt.plot(likelihoods[2 * i][0], 1600, 'x', markersize=5, color=colors[i])
+        plt.plot(likelihoods[2 * i + 1][0], 1600, 'x', markersize=5, color=colors[i])
     plt.title(pgs_id)
     plt.xlabel("Likelihood")
     plt.ylabel("Count")
@@ -149,10 +151,12 @@ def score_to_likelihood(pgs_id, num_snps):
     transparency = 1
     marker_size = 0.5
     plt.scatter(scores, likelihoods, color='black', s=1, label="Correct solutions")
-    plt.scatter([scores[0] for x in range(0, len(distribution[0]))], distribution[0], alpha=transparency, color='moccasin',
+    plt.scatter([scores[0] for x in range(0, len(distribution[0]))], distribution[0], alpha=transparency,
+                color='moccasin',
                 s=marker_size, label="Incorrect solutions")
     for i in range(1, len(scores)):
-        plt.scatter([scores[i] for x in range(0, len(distribution[i]))], distribution[i], alpha=transparency, color='moccasin',
+        plt.scatter([scores[i] for x in range(0, len(distribution[i]))], distribution[i], alpha=transparency,
+                    color='moccasin',
                     s=marker_size)
     plt.title(pgs_id + f" ({num_snps} variants)")
     plt.xlabel("Score")
@@ -192,7 +196,7 @@ def score_to_likelihood_position(pgs_id, num_snps):
             position = bisect(sorted(distribution[i], reverse=True), likelihoods[i])
         else:
             position = 0
-        proximity.append(float(position)*100/float(len(distribution[i])+1))
+        proximity.append(float(position) * 100 / float(len(distribution[i]) + 1))
         # print(f"{position}/{len(distribution[i])+1}", end=" ")
 
     plt.scatter(scores, proximity, color='sandybrown', s=1, label="Correct solutions")
@@ -259,15 +263,15 @@ def true_position_cdf(pgs_ids):
     directory = "results/accuracyLikelihood/"
     positions = []
     for pgs in pgs_ids:
-        filepath = os.path.join(directory, pgs+".json")
+        filepath = os.path.join(directory, pgs + ".json")
         with open(filepath, 'r') as file:
             for row in file:
                 row = row.strip()
                 data = json.loads(row)
                 accuracy = list(map(lambda x: float(x), data["Accuracies"]))
-                positions.append(float(accuracy.index(1.0))/float(len(accuracy)))
+                positions.append(float(accuracy.index(1.0)) / float(len(accuracy)))
 
-        spos = [pos*100 for pos in np.sort(positions)]
+        spos = [pos * 100 for pos in np.sort(positions)]
         cdf = np.arange(1, len(spos) + 1) / len(spos)
         plt.plot(spos, cdf, label=pgs, linewidth=2, color=colors[pgs_ids.index(pgs)])
 
@@ -288,7 +292,7 @@ def accuracy_cdf(pgs_ids):
     directory = "results/accuracyLikelihood/"
     accuracy = []
     for pgs in pgs_ids:
-        filepath = os.path.join(directory, pgs+".json")
+        filepath = os.path.join(directory, pgs + ".json")
         with open(filepath, 'r') as file:
             for row in file:
                 row = row.strip()
@@ -327,7 +331,7 @@ def score_deviation():
     left = rows[2]
     right = rows[3]
     # diff = [left[i]-right[i] for i in range(0, len(left))]
-    full = [left[i]+right[i] for i in range(0, len(left))]
+    full = [left[i] + right[i] for i in range(0, len(left))]
     print(len(left), len(right))
     mf = statistics.median(full)
     leftLim, rightLim = mf - maxTotal[0], mf - maxTotal[1]
@@ -345,7 +349,7 @@ def score_deviation():
     # for example in examples:
     #     plt.axvline(example[0], color=colors[0], linestyle='dashed', linewidth=1, label=labels[0])
     #     plt.axvline(example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
-        # plt.axvline(example[0]+example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
+    # plt.axvline(example[0]+example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
     # for v in major:
     #     plt.axvline(v, color=colors[major.index(v)], linestyle='dashed', linewidth=1, label=labels[major.index(v)])
     # for v in minor:
@@ -403,7 +407,7 @@ def likelihood_spectrum_select(pgs_id):
     }
     pops = ["AFR", "AMR", "EAS", "EUR", "SAS"]
     directory = "results/sorting/"
-    filepath = os.path.join(directory, pgs_id+".json")
+    filepath = os.path.join(directory, pgs_id + ".json")
     with open(filepath, 'r') as f:
         data = json.load(f)
     individuals, ancestry, scores, true_lkl, true_spec, ref_acc = [], [], [], [], [], []
@@ -479,7 +483,7 @@ def likelihood_spectrum_total():
     likelihoods_median, spectra_median, likelihoods_spectra_median = [], [], []
     likelihoods_mean, spectra_mean, likelihoods_spectra_mean = [], [], []
     for pgs_id in pgs_ids:
-        filepath = os.path.join(directory, pgs_id+".json")
+        filepath = os.path.join(directory, pgs_id + ".json")
         with open(filepath, 'r') as f:
             data = json.load(f)
         individuals, ancestry, scores, true_lkl, true_spec, ref_acc = [], [], [], [], [], []
@@ -516,9 +520,10 @@ def likelihood_spectrum_total():
     # Create a figure and axis
     fig1, ax1 = plt.subplots(figsize=(6, 4))
     ax1.plot(loci, likelihoods_median, color=colors[0], marker=".", markersize=8, label="Likelihood")
-    ax1.plot(loci, spectra_median, color=colors[1], marker=".", markersize=8,label="Spectrum")
+    ax1.plot(loci, spectra_median, color=colors[1], marker=".", markersize=8, label="Spectrum")
     ax1.plot(loci, likelihoods_spectra_median, color=colors[2], marker=".", markersize=8, label="Likelihood+Spectrum")
-    ax1.plot(loci, reference_median, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5, label="Reference")
+    ax1.plot(loci, reference_median, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5,
+             label="Reference")
 
     for i, tup in enumerate(zip(likelihoods_median, spectra_median, likelihoods_spectra_median)):
         print(f"{likelihoods_median[i]:.3f}/{likelihoods_mean[i]:.3f}\t{spectra_median[i]:.3f}/{spectra_mean[i]:.3f}\t"
@@ -536,7 +541,8 @@ def likelihood_spectrum_total():
     ax2.plot(loci, likelihoods_mean, color=colors[0], marker=".", markersize=8, label="Likelihood")
     ax2.plot(loci, spectra_mean, color=colors[1], marker=".", markersize=8, label="Spectrum")
     ax2.plot(loci, likelihoods_spectra_mean, color=colors[2], marker=".", markersize=8, label="Likelihood+Spectrum")
-    ax2.plot(loci, reference_mean, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5, label="Reference")
+    ax2.plot(loci, reference_mean, color='k', linewidth=0.5, linestyle='--', marker=".", markersize=5,
+             label="Reference")
 
     # Set axis labels and title for mean plot
     ax2.set_xlabel("Number of variants")
@@ -599,26 +605,26 @@ def loci_coverage():
 
 def accuracy(pgs_ids):
     num_variants = {
-            "PGS003181": 15,
-            "PGS000778": 20,
-            "PGS004249": 25,
-            "PGS001868": 30,
-            "PGS002270": 33,
-            "PGS001835": 38,
-        }
+        "PGS003181": 15,
+        "PGS000778": 20,
+        "PGS004249": 25,
+        "PGS001868": 30,
+        "PGS002270": 33,
+        "PGS001835": 38,
+    }
     world = "All"
     pops = ["AFR", "AMR", "EAS", "EUR", "SAS"]
     directory = "results/accuracy/"
     data = {}
-    for pgs_id in pgs_ids+[world]:
+    for pgs_id in pgs_ids + [world]:
         data[pgs_id] = {
-                               'Ancestry': [],
-                               'Accuracy': [],
-                               'Score': []
-                           }
+            'Ancestry': [],
+            'Accuracy': [],
+            'Score': []
+        }
     for pgs_id in pgs_ids:
         filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                         fnmatch.fnmatch(filename, f"*{pgs_id}-*")]
+                     fnmatch.fnmatch(filename, f"*{pgs_id}-*")]
         for filepath in filepaths:
             with open(filepath, 'r') as f:
                 content = json.load(f)
@@ -642,15 +648,15 @@ def accuracy(pgs_ids):
         else:
             ax.set_title(f'Accuracy by Ancestry {pgs_id}')
         fig.savefig(f'{pgs_id}-ancestry.png', dpi=300, bbox_inches='tight')
-#         plt.tight_layout()
-#         plt.show()
+        #         plt.tight_layout()
+        #         plt.show()
 
         decile_labels = ['10%', '20%', '30%', '40%', '50%',
                          '60%', '70%', '80%', '90%', '100%']
 
         df['Decile'] = pd.qcut(df['Score'], q=10, labels=decile_labels)
         fig, ax = plt.subplots(figsize=(4, 3))
-#         sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2, medianprops=dict(color='white'))
+        #         sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2, medianprops=dict(color='white'))
         sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2)
         if pgs_id != world:
             ax.set_title(f'Accuracy by Score {pgs_id} ({num_variants[pgs_id]} variants)')
@@ -658,6 +664,8 @@ def accuracy(pgs_ids):
             ax.set_title(f'Accuracy by Score {pgs_id}')
         plt.xticks(rotation=45)
         fig.savefig(f'{pgs_id}-score.png', dpi=300, bbox_inches='tight')
+
+
 #         plt.tight_layout()
 #         plt.show()
 
@@ -668,8 +676,8 @@ def sequential():
     data = []
     for file_name in files:
         if "raccuracies" not in file_name:
-        # if "with_repair" not in file_name:
-#         if "without_repair" not in file_name:
+            # if "with_repair" not in file_name:
+            #         if "without_repair" not in file_name:
             continue
         filepath = os.path.join(directory, file_name)
         with open(filepath, 'r') as f:
@@ -693,6 +701,49 @@ def sequential():
 #     fig.savefig('sequential-repaired.png', dpi=300, bbox_inches='tight')
 
 
+def sequential_accuracy():
+    directory = "results/guessAccuracy/"
+    data = []
+    filepath = os.path.join(directory, "accuracy.json")
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for result in content:
+        individual = result['Individual']
+        ancestry = result['Ancestry']
+        snps = int(result['SNPs'])
+        guess_acc = float(result['GuessAccuracy']) * 100
+        reference_acc = float(result['ReferenceAccuracy']) * 100
+        data.append({'Individual': individual, 'Ancestry': ancestry, 'SNPs': snps,
+                     'GuessAccuracy': guess_acc, 'ReferenceAccuracy': reference_acc})
+
+    df = pd.DataFrame(data)
+
+    # Calculate and print the median number of SNPs per ancestry
+    median_snps_per_ancestry = df.groupby('Ancestry')['SNPs'].median()
+    print("Median number of SNPs per ancestry:")
+    print(median_snps_per_ancestry)
+    # Calculate and print the median number of SNPs total
+    median_snps_total = df['SNPs'].median()
+    print("Median number of SNPs total:", median_snps_total)
+
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.boxplot(x='Ancestry', y='GuessAccuracy', data=df, palette='Pastel1', hue='Ancestry')
+
+    median_ref_acc = df.groupby('Ancestry')['ReferenceAccuracy'].median()
+    for i, (ancestry, median) in enumerate(median_ref_acc.items()):
+        ax.plot([i - 0.35, i + 0.35], [median, median], linestyle='--', alpha=0.7, color='black')
+        # Add "Baseline" label above the dashed line
+        if i == 2:
+            ax.text(i, median - 4, 'Baseline', ha='center', va='bottom', fontsize=10, color='black')
+
+    plt.xlabel('Ancestry')
+    plt.ylabel('Genotype recovery accuracy, %')
+    plt.tight_layout()
+    # plt.ylim(64, 100)
+    # fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
 def king_test():
     directory = "results/kinship/"
     filepath = os.path.join(directory, "truth.json")
@@ -703,30 +754,32 @@ def king_test():
         print(np.median([int(x['Position']) for x in results]))
         for result in results:
             data.append({'SNPs': int(num_snps), 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
-             'Position': int(result['Position'])})
+                         'Position': int(result['Position'])})
 
     df = pd.DataFrame(data)
     fig, ax = plt.subplots(figsize=(4, 3))
-#     sns.violinplot(x='SNPs', y='Position', ax=ax, data=df)
-#     plt.gca().invert_yaxis()
+    #     sns.violinplot(x='SNPs', y='Position', ax=ax, data=df)
+    #     plt.gca().invert_yaxis()
     sns.boxplot(x='SNPs', y='TruePhi', data=df)
     plt.axhline(y=0.25, linestyle='--', color='r')
     plt.axhline(y=0.125, linestyle='--', color='r')
     plt.xlabel('#SNPs')
     plt.title('Phi of a relative in the KING test')
     plt.ylabel('Phi')
-#     plt.title('Position of a relative by KING test')
-#     plt.ylabel('Position')
+    #     plt.title('Position of a relative by KING test')
+    #     plt.ylabel('Position')
     plt.tight_layout()
-#     fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
+    #     fig.savefig('king-position.png', dpi=300, bbox_inches='tight')
     fig.savefig('king-phi.png', dpi=300, bbox_inches='tight')
+
+
 #     plt.show()
 
 
 def kinship_experiment():
     directory = "results/kinship/"
     num_snps = [2000, 2500]
-#     num_snps = [2000]
+    #     num_snps = [2000]
     data = []
     for snps in num_snps:
         filepath = os.path.join(directory, f"{snps}.json")
@@ -735,24 +788,24 @@ def kinship_experiment():
         print(f"{snps}: {np.median([int(x['Position']) for x in content])}")
         for result in content:
             data.append({'SNPs': snps, 'TruePhi': float(result['TruePhi']), 'TopPhi': float(result['HighPhi']),
-             'Position': int(result['Position']), 'Accuracy': float(result['Accuracy'])})
+                         'Position': int(result['Position']), 'Accuracy': float(result['Accuracy'])})
 
     df = pd.DataFrame(data)
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.boxplot(x='SNPs', y='Accuracy', data=df)
-#     plt.gca().invert_yaxis()
-#     sns.boxplot(x='SNPs', y='Position', data=df)
-#     sns.boxplot(x='SNPs', y='TruePhi', data=df)
-#     plt.axhline(y=0.25, linestyle='--', color='r')
-#     plt.axhline(y=0.125, linestyle='--', color='r')
-#     plt.title('Phi of a relative by KING test')
+    #     plt.gca().invert_yaxis()
+    #     sns.boxplot(x='SNPs', y='Position', data=df)
+    #     sns.boxplot(x='SNPs', y='TruePhi', data=df)
+    #     plt.axhline(y=0.25, linestyle='--', color='r')
+    #     plt.axhline(y=0.125, linestyle='--', color='r')
+    #     plt.title('Phi of a relative by KING test')
     plt.title('Position of a relative by KING test')
     plt.xlabel('#SNPs')
-#     plt.ylabel('Phi')
+    #     plt.ylabel('Phi')
     plt.ylabel('Position')
     plt.tight_layout()
-#     fig.savefig('kinship-position.png', dpi=300, bbox_inches='tight')
-#     fig.savefig('kinship-phi.png', dpi=300, bbox_inches='tight')
+    #     fig.savefig('kinship-position.png', dpi=300, bbox_inches='tight')
+    #     fig.savefig('kinship-phi.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
@@ -763,17 +816,39 @@ def score_uniqueness():
     with open(filepath, 'r') as f:
         content = json.load(f)
     for result in content:
-        data.append({'Number of Variants': int(result['NumVariants']),
-        'Mean Anonymity Set Size': np.mean([float(x) for x in result['AnonymitySets']])})
+        data.append({'NumVariants': int(result['NumVariants']),
+                     'Unique': 100*float(result['NumUniqueIndividuals'])/2504,
+                     'AnonSize': np.median([float(x) for x in result['AnonymitySets']])})
 
+    first_color = 'teal'
+    second_color = 'coral'
     df = pd.DataFrame(data)
-    fig, ax = plt.subplots(figsize=(4, 3))
-    sns.lineplot(x='Number of Variants', y='Mean Anonymity Set Size', data=df)
-    plt.title('Score uniqueness in 1000 genomes')
-    plt.xlabel('Number of Variants in PRS')
+    fig, ax1 = plt.subplots(figsize=(4, 3))
+    sns.lineplot(x='NumVariants', y='AnonSize', data=df, ax=ax1, color=first_color, linestyle='--')
+    plt.xlabel('Number of variants in a PRS')
+    plt.ylabel('Median anonymity set size', color=first_color)
+    ax1.tick_params(axis='y', labelcolor=first_color)
+
+    ax2 = ax1.twinx()
+    sns.lineplot(x='NumVariants', y='Unique', data=df, ax=ax2, color=second_color)
+    plt.ylabel('Uniquely scored individuals (%)', color=second_color)
+    ax2.tick_params(axis='y', labelcolor=second_color)
+
+    grouped = df.groupby('NumVariants')['AnonSize'].median().reset_index()
+    for _, row in grouped.iterrows():
+        num_variants = row['NumVariants']
+        median_anon_size = row['AnonSize']
+        print(f'Number of Variants: {num_variants}, Median Anonymity Set Size: {median_anon_size}')
+
+    grouped = df.groupby('NumVariants')['Unique'].median().reset_index()
+    for _, row in grouped.iterrows():
+        print(f'Number of Variants: {row['NumVariants']}, Unique percentage: {row['Unique']}')
+
     plt.tight_layout()
-    fig.savefig('uniqueness.png', dpi=300, bbox_inches='tight')
-#     plt.show()
+    fig.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
+
+
 
 
 def random_hist():
@@ -782,7 +857,7 @@ def random_hist():
     # Create a histogram using seaborn
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.histplot(data, bins=20, kde=False, color='darkorange')
-#     plt.hist(data, bins=30, color='darkorange', linewidth=2)
+    #     plt.hist(data, bins=30, color='darkorange', linewidth=2)
     plt.xlabel('Allele Frequency')
     plt.ylabel('Count')
 
@@ -827,8 +902,10 @@ def full_imputed():
         content = json.load(f)
     for idv, result in content.items():
         data.append({'SelfPosCount': int(result['Self']['count']), 'SelfPosKing': int(result['Self']['king']),
-                     'RelativePosCount': int(result['Relative']['count']), 'RelativePosKing': int(result['Relative']['king']),
-                     'SelfAccuracy': float(result['CountAccuracy']["self"]), 'RelativeAccuracy': float(result['KingScore']["relative"])})
+                     'RelativePosCount': int(result['Relative']['count']),
+                     'RelativePosKing': int(result['Relative']['king']),
+                     'SelfAccuracy': float(result['CountAccuracy']["self"]),
+                     'RelativeAccuracy': float(result['KingScore']["relative"])})
 
     df = pd.DataFrame(data)
     fig, ax = plt.subplots(figsize=(3, 3))
@@ -885,7 +962,8 @@ def linking_accuracy():
         for target in data[idv]:
             divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
             divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
-            divided[idv]["Information"].append((target, data[idv][target]["Information"][0] / data[idv][target]["Information"][1]))
+            divided[idv]["Information"].append(
+                (target, data[idv][target]["Information"][0] / data[idv][target]["Information"][1]))
         # sort by the second element of the tuple
         divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
         divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
@@ -950,8 +1028,10 @@ def linking_accuracy():
     print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
     print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
     print(f"SelfInformationAcc: {np.median(parsed['SelfInformationAcc'])}, {np.mean(parsed['SelfInformationAcc'])}")
-    print(f"RelativeInformationAcc: {np.median(parsed['RelativeInformationAcc'])}, {np.mean(parsed['RelativeInformationAcc'])}")
-    print(f"ReferenceInformationAcc: {np.median(parsed['ReferenceInformationAcc'])}, {np.mean(parsed['ReferenceInformationAcc'])}")
+    print(
+        f"RelativeInformationAcc: {np.median(parsed['RelativeInformationAcc'])}, {np.mean(parsed['RelativeInformationAcc'])}")
+    print(
+        f"ReferenceInformationAcc: {np.median(parsed['ReferenceInformationAcc'])}, {np.mean(parsed['ReferenceInformationAcc'])}")
 
     palette = {}
     for key in parsed:
@@ -982,7 +1062,7 @@ def linking_accuracy():
         sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
         medians = df[i].groupby(['Versus'])['Value'].median()
         print(f"Medians for df[{i}]:", medians)  # Debug print
-            # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
+        # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
         #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
         #                  xy=(tick, medians[label.get_text()]),
         #                  xytext=(0, 5),  # 5 points vertical offset
@@ -1002,10 +1082,10 @@ def linking_accuracy():
     for i, ax2 in enumerate(axes2):
         ax2.set_xlabel('')
         ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
-        sns.boxplot(x='Versus', y='Value', data=df[i+3], hue='Versus', palette=palette, ax=axes2[i])
-        medians = df[i+3].groupby(['Versus'])['Value'].median()
+        sns.boxplot(x='Versus', y='Value', data=df[i + 3], hue='Versus', palette=palette, ax=axes2[i])
+        medians = df[i + 3].groupby(['Versus'])['Value'].median()
         print(f"Medians for df[{i}]:", medians)  # Debug print
-            # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
+        # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
         #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
         #                  xy=(tick, medians[label.get_text()]),
         #                  xytext=(0, 5),  # 5 points vertical offset
@@ -1110,9 +1190,9 @@ def percentile_prediction():
     for result in content.values():
         for i, predicted in enumerate(result['Predicted']):
             data.append({'Known': f'{result["Known"]}/{result["Total"]}',
-                         'Percentile Difference': 100*abs(float(result['Predicted'][i])-float(result['Real'][i]))})
+                         'Percentile Difference': 100 * abs(float(result['Predicted'][i]) - float(result['Real'][i]))})
 
-    sorted(data, key=lambda x: float(x['Known'].split("/")[0])/float(x['Known'].split("/")[1]))
+    sorted(data, key=lambda x: float(x['Known'].split("/")[0]) / float(x['Known'].split("/")[1]))
     df = pd.DataFrame(data)
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.invert_yaxis()
@@ -1140,8 +1220,8 @@ def random_bars():
     fig, ax = plt.subplots(figsize=(5, 4))
 
     # Plotting the bars with seaborn colors
-    bars1 = ax.bar(x - width/2, values1, width, label='Old technique', color=palette[2])
-    bars2 = ax.bar(x + width/2, values2, width, label='My awesome technique', color=palette[1])
+    bars1 = ax.bar(x - width / 2, values1, width, label='Old technique', color=palette[2])
+    bars2 = ax.bar(x + width / 2, values2, width, label='My awesome technique', color=palette[1])
 
     # Adding labels, title, and legend
     ax.set_xlabel('Genes')
@@ -1186,10 +1266,8 @@ if __name__ == "__main__":
     # loci_coverage()
     # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
     # accuracy(["PGS003181", "PGS000778", "PGS004249", "PGS001868", "PGS002270", "PGS001835"])
-    sequential()
     # king_test()
     # kinship_experiment()
-    # score_uniqueness()
     # random_hist()
     # guessed_mia()
     # full_imputed()
@@ -1197,3 +1275,6 @@ if __name__ == "__main__":
     # imputation_accuracy()
     # percentile_prediction()
     # random_bars()
+    # score_uniqueness()
+    # sequential()
+    sequential_accuracy()
