@@ -68,6 +68,7 @@ func main() {
 	//calculateGenotypeFrequenciesOnlyGuessed()
 	//guessAccuracy()
 	sequenceSolving()
+	//constructIBDVCFs()
 }
 
 func predictPRS() {

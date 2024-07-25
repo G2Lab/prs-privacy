@@ -3,6 +3,7 @@ import fnmatch
 import json
 import random
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -849,21 +850,29 @@ def score_uniqueness():
     # plt.show()
 
 
-
-
 def random_hist():
+    params = {
+        'axes.labelsize': 36,
+        'xtick.labelsize': 36,
+        'ytick.labelsize': 36,
+        'text.usetex': True,
+        'font.family': 'serif'
+              }
+    mpl.rcParams.update(params)
     data = np.random.beta(0.5, 0.5, 100)
 
     # Create a histogram using seaborn
     fig, ax = plt.subplots(figsize=(4, 3))
-    sns.histplot(data, bins=20, kde=False, color='darkorange')
-    #     plt.hist(data, bins=30, color='darkorange', linewidth=2)
-    plt.xlabel('Allele Frequency')
-    plt.ylabel('Count')
-
+    sns.histplot(data, bins=10, kde=False, color='darkorange')
+    plt.xlabel('Population AF', fontweight='bold')
+    plt.ylabel('')
+    plt.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
+    plt.xlim(0, 1)
+    plt.xticks([0, 0.5, 1])
     # Show the plot
-    fig.savefig('hist.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    fig.savefig('allelefreq.pdf', dpi=300, bbox_inches='tight')
+    # plt.tight_layout()
+    # plt.show()
 
 
 def guessed_mia():
