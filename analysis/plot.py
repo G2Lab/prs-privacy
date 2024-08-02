@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import seaborn as sns
 import statistics
+from scipy.stats import norm
 
 
 def pairwise(filepath):
@@ -875,6 +876,31 @@ def random_hist():
     # plt.show()
 
 
+def af_hist():
+    params = {
+        'axes.labelsize': 36,
+        'xtick.labelsize': 36,
+        'ytick.labelsize': 36,
+        'text.usetex': True,
+        'font.family': 'serif'
+    }
+    mpl.rcParams.update(params)
+
+    x = [0, 1, 2]
+    y = [0.6, 0.3, 0.1]
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.barplot(x=x, y=y, ax=ax, color='darkorange')
+    ax.set_xticks([0, 1, 2])
+    ax.set_yticks([0, 0.5, 1])
+    plt.ylabel('Frequency')
+    plt.xlabel('Genotype')
+    # plt.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
+    # Show the plot
+    fig.savefig('allelefreq.pdf', dpi=300, bbox_inches='tight')
+    # plt.tight_layout()
+    # plt.show()
+
+
 def guessed_mia():
     directory = "results/impute/"
     filepath = os.path.join(directory, "unimputed.json")
@@ -1114,6 +1140,155 @@ def linking_accuracy():
     plt.show()
 
 
+def king_accuracy():
+    directory = "results/king/"
+    filepath = os.path.join(directory, "relations.json")
+    # filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
+    #              fnmatch.fnmatch(filename, f"unimputed*.json")]
+
+    data = {}
+    ancestries = {}
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for idv, entry in content.items():
+        if idv not in data:
+            data[idv] = {}
+        ancestries[idv] = entry["Ancestry"]
+        for target, relation in entry["Relations"].items():
+            if target not in data[idv]:
+                data[idv][target] = {}
+                data[idv][target]["Count"] = [float(c) for c in relation["Count"]]
+                data[idv][target]["King"] = [float(c) for c in relation["King"]]
+            else:
+                for i, c in enumerate(relation["Count"]):
+                    data[idv][target]["Count"][i] += float(c)
+                for i, c in enumerate(relation["King"]):
+                    data[idv][target]["King"][i] += float(c)
+
+    divided = {}
+    for idv in data:
+        divided[idv] = {"Count": [], "King": []}
+        for target in data[idv]:
+            divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
+            divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
+        # sort by the match count and king score
+        divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
+        divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
+        # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
+
+    parsed = {"SelfCountPos": [], "SelfKingPos": [],
+              "RelativeCountPos": [], "RelativeKingPos": [],
+              "ReferenceCountPos": [], "ReferenceKingPos": [],
+              "SelfCountAcc": [], "SelfKingAcc": [],
+              "RelativeCountAcc": [], "RelativeKingAcc": [],
+              "ReferenceCountAcc": [], "ReferenceKingAcc": [],
+              "EveryCountRatio": [], "EveryKingRatio": []}
+    related = read_related_individuals()
+    for idv in divided:
+        relative_found = False
+        for i, tpl in enumerate(divided[idv]["Count"]):
+            if tpl[0] == idv:
+                parsed["SelfCountPos"].append(i)
+                parsed["SelfCountAcc"].append(tpl[1])
+            if tpl[0] == "reference":
+                parsed["ReferenceCountPos"].append(i)
+                parsed["ReferenceCountAcc"].append(tpl[1])
+            if not relative_found and idv in related and tpl[0] in related[idv]:
+                parsed["RelativeCountPos"].append(i)
+                parsed["RelativeCountAcc"].append(tpl[1])
+                relative_found = True
+            parsed["EveryCountRatio"].append(tpl[1])
+    for idv in divided:
+        relative_found = False
+        for i, tpl in enumerate(divided[idv]["King"]):
+            if tpl[0] == idv:
+                parsed["SelfKingPos"].append(i)
+                parsed["SelfKingAcc"].append(tpl[1])
+            if tpl[0] == "reference":
+                parsed["ReferenceKingPos"].append(i)
+                parsed["ReferenceKingAcc"].append(tpl[1])
+            if not relative_found and idv in related and tpl[0] in related[idv]:
+                parsed["RelativeKingPos"].append(i)
+                parsed["RelativeKingAcc"].append(tpl[1])
+                relative_found = True
+            parsed["EveryKingRatio"].append(tpl[1])
+
+    print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
+    print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
+    print(f"ReferenceCountAcc: {np.median(parsed['ReferenceCountAcc'])}, {np.mean(parsed['ReferenceCountAcc'])}")
+    print(f"EveryCountRatio: {np.median(parsed['EveryCountRatio'])}, {np.mean(parsed['EveryCountRatio'])}")
+    print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
+    print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
+    print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
+    print(f"EveryKingRatio: {np.median(parsed['EveryKingRatio'])}, {np.mean(parsed['EveryKingRatio'])}")
+
+
+    palette = {}
+    for key in parsed:
+        if key.startswith("Self"):
+            palette[key] = sns.color_palette("pastel")[0]
+        elif key.startswith("Relative"):
+            palette[key] = sns.color_palette("pastel")[1]
+        elif key.startswith("Reference"):
+            palette[key] = sns.color_palette("pastel")[2]
+        else:
+            palette[key] = sns.color_palette("pastel")[3]
+
+    keys = [["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"],
+            ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"],
+            ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"],
+            ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"]]
+    df = []
+    for key in keys:
+        df.append(prepare_data(parsed, key))
+    fig1, axes1 = plt.subplots(1, 2, figsize=(12, 5))
+    for i, ax1 in enumerate(axes1):
+        ax1.invert_yaxis()
+        ax1.set_ylabel('Rank')
+        ax1.set_xlabel('')
+        ax1.set_xticklabels(["Self", "Relative", "Reference"])
+        sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
+        medians = df[i].groupby(['Versus'])['Value'].median()
+        print(f"Medians for df[{i}]:", medians)  # Debug print
+        # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
+        #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
+        #                  xy=(tick, medians[label.get_text()]),
+        #                  xytext=(0, 5),  # 5 points vertical offset
+        #                  textcoords='offset points',
+        #                  ha='center', va='center',
+        #                  color='red', fontsize=10, fontweight='bold')
+    axes1[0].set_title('Match Count Based')
+    axes1[0].set_ylim(2550, -50)
+    axes1[1].set_title('KING Based')
+    axes1[1].set_ylim(2550, -50)
+    # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
+    # fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
+
+    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
+    for i, ax2 in enumerate(axes2):
+        ax2.set_xlabel('')
+        ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
+        sns.boxplot(x='Versus', y='Value', data=df[i + int(len(df)/2)], hue='Versus', palette=palette, ax=axes2[i])
+        medians = df[i + int(len(df)/2)].groupby(['Versus'])['Value'].median()
+        print(f"Medians for df[{i}]:", medians)  # Debug print
+        # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
+        #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
+        #                  xy=(tick, medians[label.get_text()]),
+        #                  xytext=(0, 5),  # 5 points vertical offset
+        #                  textcoords='offset points',
+        #                  ha='center', va='center',
+        #                  color='red', fontsize=10, fontweight='bold')
+    axes2[0].set_title('Match Count Based')
+    axes2[0].set_ylabel('Match ratio')
+    axes2[1].set_ylabel('KING score')
+    axes2[1].set_title('KING Based')
+    # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
+    # fig2.savefig('imputed-acc.png', dpi=300, bbox_inches='tight')
+
+    plt.tight_layout()
+    plt.show()
+
+
 def prepare_data(parsed, keys):
     data = []
     for key in keys:
@@ -1243,6 +1418,38 @@ def random_bars():
     # plt.show()
 
 
+def plot_normal_distribution_with_fill(mu=0, sigma=1):
+    params = {
+        'axes.labelsize': 36,
+        'xtick.labelsize': 36,
+        'ytick.labelsize': 36,
+        'text.usetex': True,
+        'font.family': 'serif'
+    }
+    mpl.rcParams.update(params)
+
+    x = np.linspace(mu - 4*sigma, mu + 4*sigma, 1000)
+    y = norm.pdf(x, mu, sigma)
+    plt.figure(figsize=(4, 3))
+    plt.plot(x, y, 'k')  # 'k' for black color
+    # Calculate the cutoff value for the top 10%
+    cutoff = norm.ppf(0.85, mu, sigma)
+
+    x_fill = np.linspace(cutoff, mu + 4*sigma, 1000)
+    y_fill = norm.pdf(x_fill, mu, sigma)
+    plt.fill_between(x_fill, y_fill, color='red', alpha=0.5)
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
+                   labelbottom=False, labelleft=False)
+
+    # Add labels and legend
+    plt.xlabel('Risk score')
+    plt.ylabel('Frequency')
+    plt.savefig('risk_distro.pdf', dpi=300, bbox_inches='tight')
+    # Show the plot
+    # plt.tight_layout()
+    # plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -1286,4 +1493,7 @@ if __name__ == "__main__":
     # random_bars()
     # score_uniqueness()
     # sequential()
-    sequential_accuracy()
+    # sequential_accuracy()
+    # af_hist()
+    # plot_normal_distribution_with_fill()
+    king_accuracy()

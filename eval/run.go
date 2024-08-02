@@ -34,6 +34,7 @@ const (
 )
 
 func main() {
+	expr := flag.String("e", "", "Experiment type")
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -52,8 +53,24 @@ func main() {
 		runtime.MemProfileRate = 1
 		defer pprof.WriteHeapProfile(f)
 	}
-
-	//findAllSolutions()
+	switch *expr {
+	case "sequence":
+		sequenceSolving()
+	case "findall":
+		findAllSolutions()
+	case "impute":
+		imputeWorkflow()
+	case "accuracy":
+		guessAccuracy()
+	case "genfreq":
+		calculateGenotypeFrequenciesOnlyGuessed()
+	case "predict":
+		predictPRS()
+	case "king":
+		linkingWithKing()
+	case "ibd":
+		linkingWithIBD()
+	}
 	//kinshipExperiment()
 	//kingTest()
 	//consensusSolving()
@@ -65,10 +82,6 @@ func main() {
 	//findUnsolvablePRSWithOverlap()
 	//predictPRS()
 	//uniquenessExperiment()
-	//calculateGenotypeFrequenciesOnlyGuessed()
-	//guessAccuracy()
-	sequenceSolving()
-	//constructIBDVCFs()
 }
 
 func predictPRS() {
@@ -2105,14 +2118,14 @@ func accuracyLikelihood() {
 func getChunkInfo(totalLen int) (int, int) {
 	var err error
 	var chunkNum, chunkSize = 0, 0
-	if len(os.Args) > 2 {
-		chunkNum, err = strconv.Atoi(os.Args[1])
+	if len(os.Args) > 3 {
+		chunkNum, err = strconv.Atoi(os.Args[2])
 		if err != nil {
-			log.Fatalf("Error parsing chunkNum %s: %v", os.Args[1], err)
+			log.Fatalf("Error parsing chunkNum %s: %v", os.Args[2], err)
 		}
-		chunkSize, err = strconv.Atoi(os.Args[2])
+		chunkSize, err = strconv.Atoi(os.Args[3])
 		if err != nil {
-			log.Fatalf("Error parsing chunkSize %s: %v", os.Args[2], err)
+			log.Fatalf("Error parsing chunkSize %s: %v", os.Args[3], err)
 		}
 	} else {
 		chunkSize = totalLen

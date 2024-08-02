@@ -290,8 +290,7 @@ func fillTruthVCF(chrId int, ancestry string) {
 
 func constructIBDVCFs() {
 	ancestry := "AMR"
-	numWorkers := 15
-	//var chr, idv, pos, ref, alt string
+	numWorkers := 8
 	var chr, idv, pos string
 	var individuals []string
 	var positionMap map[string]struct{}
@@ -299,7 +298,8 @@ func constructIBDVCFs() {
 	imputedSNPs := make(map[string]map[string]map[string]string)
 	trueSNPs := make(map[string]map[string]map[string]string)
 	alleles := make(map[string]map[string][]string)
-	for chrId := 1; chrId <= 22; chrId++ {
+	for chrId := 22; chrId <= 22; chrId++ {
+		//for chrId := 1; chrId <= 22; chrId++ {
 		fmt.Printf("Reading SNPs chr %d\n", chrId)
 		// Read imputed SNPs
 		chr = strconv.Itoa(chrId)
@@ -326,9 +326,7 @@ func constructIBDVCFs() {
 			posInt, _ := strconv.Atoi(pos)
 			positions[chrId] = append(positions[chrId], posInt)
 		}
-		sort.Slice(positions[chrId], func(i, j int) bool {
-			return positions[chrId][i] < positions[chrId][i]
-		})
+		sort.Ints(positions[chrId])
 		imputedRegions := dividePositionsIntoRegions(positions[chrId], imputationChunkSize)
 		retrieved := getRegionIndividualSNPsAsStrings(chr, tools.GetChromosomeFilepath(chr, tools.RL), individuals,
 			positions[chrId], imputedRegions, numWorkers)
@@ -343,17 +341,14 @@ func constructIBDVCFs() {
 		fmt.Printf("Loaded alleles\n")
 	}
 
-	// Adding the entries for the true SNPs
-	truthIdvs := make([]string, 0)
-	for _, idv = range individuals {
-		truthIdvs = append(truthIdvs, "T"+idv)
-	}
 	// Construct VCF
 	formatHeader := "##fileformat=VCFv4.1\n" +
 		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
 	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
 	for _, idv = range individuals {
 		samplesHeader += fmt.Sprintf("\t%s", idv)
+		// Adding the entries for the true SNPs
+		samplesHeader += fmt.Sprintf("\t%s", "T-"+idv)
 	}
 	samplesHeader += "\n"
 	vcfFile, err := os.OpenFile("ibd.vcf", os.O_CREATE|os.O_WRONLY, 0644)
@@ -372,10 +367,14 @@ func constructIBDVCFs() {
 	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
 	var ok bool
 	var posStr string
-	for chrId := 1; chrId <= 22; chrId++ {
+	//for chrId := 1; chrId <= 22; chrId++ {
+	for chrId := 22; chrId <= 22; chrId++ {
 		chr = strconv.Itoa(chrId)
 		for _, pos := range positions[chrId] {
 			posStr = strconv.Itoa(pos)
+			if _, ok = alleles[chr][posStr]; !ok {
+				continue
+			}
 			line := fmt.Sprintf(lineTemplate, chr, posStr, alleles[chr][posStr][0], alleles[chr][posStr][1])
 			for _, idv = range individuals {
 				if _, ok = imputedSNPs[idv][chr][posStr]; ok {
@@ -383,12 +382,127 @@ func constructIBDVCFs() {
 				} else {
 					line += "\t.|."
 				}
-			}
-			for _, idv = range truthIdvs {
 				if _, ok = trueSNPs[idv][chr][posStr]; ok {
-					line += fmt.Sprintf("\t%s", imputedSNPs[idv][chr][posStr])
+					line += fmt.Sprintf("\t%s", trueSNPs[idv][chr][posStr])
 				} else {
 					line += "\t.|."
+				}
+			}
+			_, err = vcfFile.WriteString(line + "\n")
+			if err != nil {
+				log.Fatalf("Cannot write to ibd file %s: %v", line, err)
+			}
+		}
+	}
+}
+
+func linkingWithIBD() {
+	ancestry := "AMR"
+	var chr, idv, pos, ref, alt string
+	var snp uint8
+	var individuals []string
+	var positionMap map[string]struct{}
+	positions := make(map[int][]int)
+	trueSNPs := make(map[string]map[string]map[string]string)
+	alleles := make(map[string]map[string][]string)
+	guessed := loadGuessedGenotypes()
+	ancestries := tools.LoadAncestry()
+	for chrId := 1; chrId <= 1; chrId++ {
+		//for chrId := 1; chrId <= 22; chrId++ {
+		fmt.Printf("Reading SNPs chr %d\n", chrId)
+		chr = strconv.Itoa(chrId)
+		// Read true SNPs
+		positionMap = make(map[string]struct{})
+		individuals = make([]string, 0)
+		for idv = range guessed {
+			if ancestry != pgs.GetIndividualAncestry(idv, ancestries) {
+				continue
+			}
+			individuals = append(individuals, idv)
+			for pos = range guessed[idv][chr] {
+				positionMap[pos] = struct{}{}
+			}
+		}
+		positions[chrId] = make([]int, 0, len(positionMap))
+		alleles[chr] = make(map[string][]string)
+		for pos = range positionMap {
+			posInt, _ := strconv.Atoi(pos)
+			positions[chrId] = append(positions[chrId], posInt)
+			ref, alt = retrievePositionAlleles(chr, pos)
+			alleles[chr][pos] = []string{ref, alt}
+		}
+		sort.Ints(positions[chrId])
+		strPos := make([]string, len(positions[chrId]))
+		for i, pos := range positions[chrId] {
+			strPos[i] = strconv.Itoa(pos)
+		}
+		retrieved := getIndividualPositionStrings(chr, strPos, individuals, tools.RL)
+		for idv = range retrieved {
+			if _, ok := trueSNPs[idv]; !ok {
+				trueSNPs[idv] = make(map[string]map[string]string)
+			}
+			trueSNPs[idv][chr] = retrieved[idv]
+		}
+		fmt.Printf("Loaded true SNPs\n")
+	}
+
+	// Construct VCF
+	formatHeader := "##fileformat=VCFv4.1\n" +
+		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+	for _, idv = range individuals {
+		samplesHeader += fmt.Sprintf("\t%s", idv)
+		// Adding the entries for the true SNPs
+		samplesHeader += fmt.Sprintf("\t%s", "T-"+idv)
+	}
+	samplesHeader += "\n"
+	vcfFile, err := os.OpenFile("ibd.vcf", os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Cannot create ibd file: %v", err)
+	}
+	defer vcfFile.Close()
+	_, err = vcfFile.WriteString(formatHeader)
+	if err != nil {
+		log.Fatalf("Cannot write format header to ibd file: %v", err)
+	}
+	_, err = vcfFile.WriteString(samplesHeader)
+	if err != nil {
+		log.Fatalf("Cannot write samples header to ibd file: %v", err)
+	}
+	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
+	var ok bool
+	var posStr string
+	//for chrId := 1; chrId <= 22; chrId++ {
+	for chrId := 1; chrId <= 1; chrId++ {
+		chr = strconv.Itoa(chrId)
+	positionLoop:
+		for _, pos := range positions[chrId] {
+			posStr = strconv.Itoa(pos)
+			if _, ok = alleles[chr][posStr]; !ok {
+				continue
+			}
+			line := fmt.Sprintf(lineTemplate, chr, posStr, alleles[chr][posStr][0], alleles[chr][posStr][1])
+			for _, idv = range individuals {
+				if snp, ok = guessed[idv][chr][posStr]; ok {
+					switch snp {
+					case 0:
+						line += "\t0/0"
+					case 1:
+						line += "\t1/0"
+					case 2:
+						line += "\t1/1"
+					default:
+						log.Fatalf("Invalid SNP value: %d", snp)
+					}
+				} else {
+					continue positionLoop
+					//line += "\t.|."
+				}
+				if _, ok = trueSNPs[idv][chr][posStr]; ok {
+					line += fmt.Sprintf("\t%s", trueSNPs[idv][chr][posStr])
+				} else {
+					continue positionLoop
+					//line += "\t.|."
 				}
 			}
 			_, err = vcfFile.WriteString(line + "\n")
@@ -550,18 +664,25 @@ func guessAccuracy() {
 }
 
 type Relation struct {
-	Target      string
-	Count       []int
-	King        []int
-	Information []float32
+	//Target   string
+	//Ancestry string
+	Count []int
+	King  []int
 }
 
-func newRelation(target string, imputed, compared map[string]uint8, freqs map[string][]float32) *Relation {
+func newEmptyRelation() *Relation {
 	return &Relation{
-		Target:      target,
-		Count:       matchCount(imputed, compared),
-		King:        kingRobustPair(imputed, compared),
-		Information: mutualInformation(imputed, compared, freqs),
+		Count: make([]int, 2),
+		King:  make([]int, 2),
+	}
+}
+
+func newRelation(imputed, compared map[string]uint8) *Relation {
+	return &Relation{
+		//Target:   target,
+		//Ancestry: ancestry,
+		Count: matchCount(imputed, compared),
+		King:  kingRobustPair(imputed, compared),
 	}
 }
 
@@ -592,9 +713,9 @@ func linkingWithImputation() {
 		individuals = append(individuals, idv)
 	}
 	db := solver.All1000GenomesSamples()
-	relations := make(map[string][]*Relation)
+	relations := make(map[string]map[string]*Relation)
 	for idv := range imputedSNPs {
-		relations[idv] = make([]*Relation, 0)
+		relations[idv] = make(map[string]*Relation)
 	}
 
 	// Read all the imputed positions, sort them and divide them into regions
@@ -602,7 +723,7 @@ func linkingWithImputation() {
 	imputedRegions := dividePositionsIntoRegions(imputedPositions, imputationChunkSize)
 	fmt.Printf("Number of imputed SNPs: %d\n", len(imputedPositions))
 	fmt.Printf("Imputation regions: %v\n", imputedRegions)
-	gtpFrequencies := loadGenotypeFrequencies(chrId)
+	ancestries := tools.LoadAncestry()
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -621,9 +742,9 @@ func linkingWithImputation() {
 		go func() {
 			defer wg.Done()
 			for t := range taskChan {
-				rel := newRelation(t.other, imputedSNPs[t.idv], t.snps[t.other], gtpFrequencies)
+				rel := newRelation(imputedSNPs[t.idv], t.snps[t.other])
 				mu.Lock()
-				relations[t.idv] = append(relations[t.idv], rel)
+				relations[t.idv][t.other] = rel
 				mu.Unlock()
 				taskWg.Done()
 			}
@@ -653,7 +774,6 @@ func linkingWithImputation() {
 		stringedImputedPositions[i] = strconv.Itoa(pos)
 	}
 	chrStr := strconv.Itoa(chrId)
-	ancestries := tools.LoadAncestry()
 	references := positionsMajorAlleleSamples(chrStr, imputedRegions, pgs.POPULATIONS)
 
 	relatives := solver.AllRelativeSamples()
@@ -661,10 +781,9 @@ func linkingWithImputation() {
 		imputedPositions, imputedRegions, numWorkers)
 	for idv := range imputedSNPs {
 		for other := range relativeSnps {
-			relations[idv] = append(relations[idv], newRelation(other, imputedSNPs[idv], relativeSnps[other], gtpFrequencies))
+			relations[idv][other] = newRelation(imputedSNPs[idv], relativeSnps[other])
 		}
-		relations[idv] = append(relations[idv], newRelation("reference", imputedSNPs[idv],
-			references[pgs.GetIndividualAncestry(idv, ancestries)], gtpFrequencies))
+		relations[idv]["reference"] = newRelation(imputedSNPs[idv], references[pgs.GetIndividualAncestry(idv, ancestries)])
 	}
 	resultFolder := "results/linking"
 	filepath := path.Join(resultFolder, fmt.Sprintf("imputed%d.json", chrId))
@@ -694,10 +813,9 @@ func linkingWithGuessed() {
 	var positionMap map[string]struct{}
 	var positions []string
 	var regions [][]string
-	var relations map[string][]*Relation
-	var gtpFrequencies map[string][]float32
 	var references map[string]map[string]uint8
 	var otherSnps map[string]map[string]uint8
+	var relations map[string]map[string]*Relation
 	for chr := 1; chr <= 22; chr++ {
 		fmt.Printf("---- %d ----\n", chr)
 		chrStr = strconv.Itoa(chr)
@@ -711,17 +829,15 @@ func linkingWithGuessed() {
 		for pos = range positionMap {
 			positions = append(positions, pos)
 		}
-		relations = make(map[string][]*Relation)
+		relations = make(map[string]map[string]*Relation)
 		for idv := range guessed {
-			relations[idv] = make([]*Relation, 0)
+			relations[idv] = make(map[string]*Relation)
 		}
-		gtpFrequencies = loadGenotypeFrequencies(chr)
-		fmt.Println("Frequencies loaded")
 		otherSnps = getIndividualPositionSNPs(chrStr, positions, mainSamples, tools.GG)
 		fmt.Println("Main samples' alleles loaded")
 		for _, other := range mainSamples {
 			for idv := range guessed {
-				relations[idv] = append(relations[idv], newRelation(other, guessed[idv][chrStr], otherSnps[other], gtpFrequencies))
+				relations[idv][other] = newRelation(guessed[idv][chrStr], otherSnps[other])
 			}
 		}
 		fmt.Println("Main samples' relations calculated")
@@ -729,7 +845,7 @@ func linkingWithGuessed() {
 		otherSnps = getIndividualPositionSNPs(chrStr, positions, relatives, tools.RL)
 		for _, relative := range relatives {
 			for idv := range guessed {
-				relations[idv] = append(relations[idv], newRelation(relative, guessed[idv][chrStr], otherSnps[relative], gtpFrequencies))
+				relations[idv][relative] = newRelation(guessed[idv][chrStr], otherSnps[relative])
 			}
 		}
 		fmt.Println("Relatives' relations calculated")
@@ -740,8 +856,8 @@ func linkingWithGuessed() {
 		}
 		references = positionsMajorAlleleSamples(chrStr, regions, pgs.POPULATIONS)
 		for idv := range guessed {
-			relations[idv] = append(relations[idv], newRelation("reference", guessed[idv][chrStr],
-				references[pgs.GetIndividualAncestry(idv, ancestries)], gtpFrequencies))
+			relations[idv]["reference"] = newRelation(guessed[idv][chrStr],
+				references[pgs.GetIndividualAncestry(idv, ancestries)])
 		}
 		fmt.Println("References' relations calculated")
 
@@ -755,6 +871,133 @@ func linkingWithGuessed() {
 			log.Fatal("Cannot encode json", err)
 		}
 		resFile.Close()
+	}
+	fmt.Println("Completed")
+}
+
+func processChromosomeForLinking(chr string, guessed map[string]map[string]map[string]uint8, mainIndividuals,
+	relatedIndividuals []string, ancestries map[string]string,
+	gtpFrequencies map[string]map[string]map[string][]float32) map[string]map[string]*Relation {
+	fmt.Printf("---- %s ----\n", chr)
+	var references map[string]map[string]uint8
+	var otherSnps map[string]map[string]uint8
+	var idv, pos string
+	positionMap := make(map[string]struct{})
+	for idv = range guessed {
+		for pos = range guessed[idv][chr] {
+			positionMap[pos] = struct{}{}
+		}
+	}
+	positions := make([]string, 0, len(positionMap))
+	for pos = range positionMap {
+		positions = append(positions, pos)
+	}
+	relations := make(map[string]map[string]*Relation)
+	for idv := range guessed {
+		relations[idv] = make(map[string]*Relation)
+	}
+	otherSnps = getIndividualPositionSNPs(chr, positions, mainIndividuals, tools.GG)
+	fmt.Printf("Chr %s: main samples' SNPs loaded\n", chr)
+	for _, other := range mainIndividuals {
+		for idv := range guessed {
+			relations[idv][other] = newRelation(guessed[idv][chr], otherSnps[other])
+		}
+	}
+	fmt.Printf("Chr %s: main samples' relations calculated\n", chr)
+
+	otherSnps = getIndividualPositionSNPs(chr, positions, relatedIndividuals, tools.RL)
+	for _, relative := range relatedIndividuals {
+		for idv := range guessed {
+			relations[idv][relative] = newRelation(guessed[idv][chr], otherSnps[relative])
+		}
+	}
+	fmt.Printf("Chr %s: Relatives' relations calculated\n", chr)
+
+	references = majorGenotypeSamples(chr, pgs.POPULATIONS, gtpFrequencies)
+	for idv := range guessed {
+		relations[idv]["reference"] = newRelation(guessed[idv][chr], references[pgs.GetIndividualAncestry(idv, ancestries)])
+	}
+	fmt.Printf("Chr %s: References' relations calculated\n", chr)
+	return relations
+
+	//resultFolder := "results/king"
+	//filepath := path.Join(resultFolder, fmt.Sprintf("unimputed%s.json", chr))
+	//resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	//if err != nil {
+	//	log.Fatalf("Error opening result file: %v", err)
+	//}
+	//defer resFile.Close()
+	//encoder := json.NewEncoder(resFile)
+	//if err = encoder.Encode(relations); err != nil {
+	//	log.Fatal("Cannot encode json", err)
+	//}
+}
+
+func linkingWithKing() {
+	guessed := loadGuessedGenotypes()
+	ancestries := tools.LoadAncestry()
+	mainSamples := solver.All1000GenomesSamples()
+	relatedSamples := solver.AllRelativeSamples()
+	genotypeFrequencies := loadGenotypeFrequenciesForGuessed()
+	numWorkers := 7
+	tasks := make(chan int, 1)
+	type Entry struct {
+		Ancestry  string
+		Relations map[string]*Relation
+	}
+	output := make(map[string]*Entry)
+	for idv := range guessed {
+		output[idv] = &Entry{Ancestry: ancestries[idv], Relations: make(map[string]*Relation)}
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chrId := range tasks {
+				chr := strconv.Itoa(chrId)
+				results := processChromosomeForLinking(chr, guessed, mainSamples, relatedSamples, ancestries, genotypeFrequencies)
+				mu.Lock()
+				for idv := range results {
+					for other := range results[idv] {
+						if _, ok := output[idv]; !ok {
+							output[idv] = &Entry{Ancestry: ancestries[idv], Relations: make(map[string]*Relation)}
+						}
+						if _, ok := output[idv].Relations[other]; ok {
+							for j := 0; j < len(results[idv][other].Count); j++ {
+								output[idv].Relations[other].Count[j] += results[idv][other].Count[j]
+							}
+							for j := 0; j < len(results[idv][other].King); j++ {
+								output[idv].Relations[other].King[j] += results[idv][other].King[j]
+							}
+						} else {
+							output[idv].Relations[other] = results[idv][other]
+							//output[idv].Relations[other] = newEmptyRelation()
+							//copy(output[idv].Relations[other].Count, results[idv][other].Count)
+							//copy(output[idv].Relations[other].King, results[idv][other].King)
+						}
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for chr := 1; chr <= 22; chr++ {
+		tasks <- chr
+	}
+	close(tasks)
+	wg.Wait()
+	resultFolder := "results/king"
+	filepath := path.Join(resultFolder, "relations.json")
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(output); err != nil {
+		log.Fatal("Cannot encode json", err)
 	}
 	fmt.Println("Completed")
 }
@@ -1013,7 +1256,14 @@ func loadGuessedGenotypes() map[string]map[string]map[string]uint8 {
 	}
 	guessed := make(map[string]map[string]map[string]uint8)
 	for _, object := range dir {
+		// TODO: revert
 		if !object.IsDir() && strings.HasPrefix(object.Name(), "guesses") && strings.HasSuffix(object.Name(), ".json") {
+			//if !object.IsDir() && (strings.HasPrefix(object.Name(), "guesses600") ||
+			//	strings.HasPrefix(object.Name(), "guesses601") ||
+			//	strings.HasPrefix(object.Name(), "guesses602") ||
+			//	strings.HasPrefix(object.Name(), "guesses603") ||
+			//	strings.HasPrefix(object.Name(), "guesses604") ||
+			//	strings.HasPrefix(object.Name(), "guesses605")) {
 			guesses := make([]*Guess, 0)
 			file, err = os.Open(filepath.Join(folder, object.Name()))
 			if err != nil {
@@ -1773,14 +2023,14 @@ func getRegionIndividualSNPsAsStrings(chr, filepath string, individuals []string
 	var mu sync.Mutex
 	var regArg string
 	fmt.Printf("Receiving bcftools output: \n")
-	for r, region := range imputedRegions {
+	for _, region := range imputedRegions {
 		regArg = fmt.Sprintf("%s:%s-%s", chr, region[0], region[1])
 		args[len(args)-1] = regArg
 		output, err := exec.Command(prg, args...).Output()
 		if err != nil {
 			log.Fatalf("Error executing bcftools command: %v", err)
 		}
-		fmt.Printf("%d/%d\t", r+1, len(imputedRegions))
+		//fmt.Printf("%d/%d\t", r+1, len(imputedRegions))
 		lines := strings.Split(string(output), "\n")
 		lines = lines[:len(lines)-1]
 
@@ -2056,6 +2306,46 @@ func getAllIndividualSnpStrings(filepath string, numThreads int) map[string]map[
 	return alleles
 }
 
+func getAllIndividualSnpStringsSeq(filepath string) map[string]map[string]string {
+	alleles := make(map[string]map[string]string)
+	prg := "bcftools"
+	args := []string{
+		"query",
+		"-f", "%POS-[%SAMPLE=%GT\t]\n",
+		filepath,
+	}
+	output, err := exec.Command(prg, args...).Output()
+	if err != nil {
+		log.Fatalf("Error executing bcftools command: %v", err)
+	}
+	fmt.Printf("Bcftools output received\n")
+	lines := strings.Split(string(output), "\n")
+	lines = lines[:len(lines)-1]
+
+	var pos, idv string
+	var ok bool
+	var samples []string
+	for _, line := range lines {
+		fields := strings.Split(line, "-")
+		if len(fields) < 2 {
+			log.Printf("not enough fields in line: %s", line)
+		}
+		pos = fields[0]
+		samples = strings.Split(fields[1], "\t")
+		samples = samples[:len(samples)-1]
+		for _, sample := range samples {
+			fields = strings.Split(sample, "=")
+			idv = fields[0]
+			if _, ok = alleles[idv]; !ok {
+				alleles[idv] = make(map[string]string)
+			}
+			alleles[idv][pos] = fields[1]
+		}
+	}
+
+	return alleles
+}
+
 func allMajorAlleleSample(chrId int, ancestry string) map[string]uint8 {
 	af := getChromosomeAF(strconv.Itoa(chrId), ancestry)
 	alleles := make(map[string]uint8)
@@ -2083,6 +2373,27 @@ func positionsMajorAlleleSamples(chr string, regions [][]string, ancestries []st
 		}
 	}
 	return alleles
+}
+
+func majorGenotypeSamples(chr string, ancestries []string,
+	gtpFrequencies map[string]map[string]map[string][]float32) map[string]map[string]uint8 {
+	references := make(map[string]map[string]uint8)
+	var gtp uint8
+	var pos string
+	for _, anc := range ancestries {
+		references[anc] = make(map[string]uint8)
+		for pos = range gtpFrequencies[anc][chr] {
+			gtp = 0
+			for j := 1; j <= 2; j++ {
+				if gtpFrequencies[anc][chr][pos][j] > gtpFrequencies[anc][chr][pos][gtp] {
+					gtp = uint8(j)
+				}
+			}
+			references[anc][pos] = gtp
+		}
+	}
+
+	return references
 }
 
 func samplePredicate(input string) bool {
