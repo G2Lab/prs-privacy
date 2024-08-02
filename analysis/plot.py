@@ -1222,7 +1222,6 @@ def king_accuracy():
     print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
     print(f"EveryKingRatio: {np.median(parsed['EveryKingRatio'])}, {np.mean(parsed['EveryKingRatio'])}")
 
-
     palette = {}
     for key in parsed:
         if key.startswith("Self"):

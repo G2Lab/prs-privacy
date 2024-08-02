@@ -69,7 +69,7 @@ func main() {
 	case "king":
 		linkingWithKing()
 	case "ibd":
-		linkingWithIBD()
+		prepareIBD()
 	}
 	//kinshipExperiment()
 	//kingTest()

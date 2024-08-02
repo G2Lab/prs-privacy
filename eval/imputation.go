@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -396,130 +397,170 @@ func constructIBDVCFs() {
 	}
 }
 
-func linkingWithIBD() {
-	ancestry := "AMR"
-	var chr, idv, pos, ref, alt string
-	var snp uint8
-	var individuals []string
-	var positionMap map[string]struct{}
-	positions := make(map[int][]int)
-	trueSNPs := make(map[string]map[string]map[string]string)
-	alleles := make(map[string]map[string][]string)
-	guessed := loadGuessedGenotypes()
-	ancestries := tools.LoadAncestry()
-	for chrId := 1; chrId <= 1; chrId++ {
-		//for chrId := 1; chrId <= 22; chrId++ {
-		fmt.Printf("Reading SNPs chr %d\n", chrId)
-		chr = strconv.Itoa(chrId)
-		// Read true SNPs
-		positionMap = make(map[string]struct{})
-		individuals = make([]string, 0)
-		for idv = range guessed {
-			if ancestry != pgs.GetIndividualAncestry(idv, ancestries) {
-				continue
-			}
-			individuals = append(individuals, idv)
-			for pos = range guessed[idv][chr] {
-				positionMap[pos] = struct{}{}
-			}
-		}
-		positions[chrId] = make([]int, 0, len(positionMap))
-		alleles[chr] = make(map[string][]string)
-		for pos = range positionMap {
-			posInt, _ := strconv.Atoi(pos)
-			positions[chrId] = append(positions[chrId], posInt)
-			ref, alt = retrievePositionAlleles(chr, pos)
-			alleles[chr][pos] = []string{ref, alt}
-		}
-		sort.Ints(positions[chrId])
-		strPos := make([]string, len(positions[chrId]))
-		for i, pos := range positions[chrId] {
-			strPos[i] = strconv.Itoa(pos)
-		}
-		retrieved := getIndividualPositionStrings(chr, strPos, individuals, tools.RL)
-		for idv = range retrieved {
-			if _, ok := trueSNPs[idv]; !ok {
-				trueSNPs[idv] = make(map[string]map[string]string)
-			}
-			trueSNPs[idv][chr] = retrieved[idv]
-		}
-		fmt.Printf("Loaded true SNPs\n")
-	}
+func prepareIBD() {
+	//guessed := loadGuessedGenotypes()
+	//ancestries := tools.LoadAncestry()
+	//preparePhasingInputFiles(guessed, ancestries)
+	phasing()
+	//trueSNPs := make(map[string]map[string]map[string]string)
+	//strPos := make([]string, len(positions[chrId]))
+	//for i, pos := range positions[chrId] {
+	//	strPos[i] = strconv.Itoa(pos)
+	//}
+	//retrieved := getIndividualPositionStrings(chr, strPos, individuals, tools.RL)
+	//for idv = range retrieved {
+	//	if _, ok := trueSNPs[idv]; !ok {
+	//		trueSNPs[idv] = make(map[string]map[string]string)
+	//	}
+	//	trueSNPs[idv][chr] = retrieved[idv]
+	//}
+	//fmt.Printf("%s: Loaded true SNPs chr %s\n", ancestry, chr)
+}
 
-	// Construct VCF
-	formatHeader := "##fileformat=VCFv4.1\n" +
-		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
-	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
-	for _, idv = range individuals {
-		samplesHeader += fmt.Sprintf("\t%s", idv)
-		// Adding the entries for the true SNPs
-		samplesHeader += fmt.Sprintf("\t%s", "T-"+idv)
-	}
-	samplesHeader += "\n"
-	vcfFile, err := os.OpenFile("ibd.vcf", os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Cannot create ibd file: %v", err)
-	}
-	defer vcfFile.Close()
-	_, err = vcfFile.WriteString(formatHeader)
-	if err != nil {
-		log.Fatalf("Cannot write format header to ibd file: %v", err)
-	}
-	_, err = vcfFile.WriteString(samplesHeader)
-	if err != nil {
-		log.Fatalf("Cannot write samples header to ibd file: %v", err)
-	}
-	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
-	var ok bool
-	var posStr string
+func phasing() {
+	prg := "../jdk/bin/java"
+	var args []string
+	//-Xmx8g -jar beagle/beagle.27May24.118.jar gt=prs/ibd.vcf ref=beagle/b37.bref3/chr1.1kg.phase3.v5a.b37.bref3 out=phased map=GRCh37_map/plink.chr1.GRCh37.map impute=false nthreads=4
 	//for chrId := 1; chrId <= 22; chrId++ {
 	for chrId := 1; chrId <= 1; chrId++ {
-		chr = strconv.Itoa(chrId)
-	positionLoop:
-		for _, pos := range positions[chrId] {
-			posStr = strconv.Itoa(pos)
-			if _, ok = alleles[chr][posStr]; !ok {
-				continue
-			}
-			line := fmt.Sprintf(lineTemplate, chr, posStr, alleles[chr][posStr][0], alleles[chr][posStr][1])
-			for _, idv = range individuals {
-				if snp, ok = guessed[idv][chr][posStr]; ok {
-					switch snp {
-					case 0:
-						line += "\t0/0"
-					case 1:
-						line += "\t1/0"
-					case 2:
-						line += "\t1/1"
-					default:
-						log.Fatalf("Invalid SNP value: %d", snp)
-					}
-				} else {
-					continue positionLoop
-					//line += "\t.|."
-				}
-				if _, ok = trueSNPs[idv][chr][posStr]; ok {
-					line += fmt.Sprintf("\t%s", trueSNPs[idv][chr][posStr])
-				} else {
-					continue positionLoop
-					//line += "\t.|."
-				}
-			}
-			_, err = vcfFile.WriteString(line + "\n")
+		args = []string{"-Xmx8g",
+			"-jar",
+			"../beagle/beagle.27May24.118.jar",
+			"impute=false",
+			"nthreads=4",
+			fmt.Sprintf("ref=../beagle/b37.bref3/chr%d.1kg.phase3.v5a.b37.bref3", chrId),
+			fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
+			"",
+			"",
+		}
+		for _, ancestry := range pgs.POPULATIONS {
+			args[len(args)-2] = fmt.Sprintf("gt=ibd/chr%d-%s.vcf", chrId, ancestry)
+			args[len(args)-1] = fmt.Sprintf("out=ibd/phased-chr%d-%s", chrId, ancestry)
+			cmd := exec.Command(prg, args...)
+			var out bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &stderr
+			err := cmd.Run()
 			if err != nil {
-				log.Fatalf("Cannot write to ibd file %s: %v", line, err)
+				fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
+				log.Fatalf("Error executing command: %v", err)
 			}
 		}
 	}
 }
 
+func preparePhasingInputFiles(guessed map[string]map[string]map[string]uint8, ancestries map[string]string) {
+	formatHeader := "##fileformat=VCFv4.1\n" +
+		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
+	var wg sync.WaitGroup
+	for _, anc := range pgs.POPULATIONS {
+		wg.Add(1)
+		go func(ancestry string) {
+			defer wg.Done()
+			var chr, idv, pos, ref, alt string
+			var snp uint8
+			var ok bool
+			var individuals []string
+			var positionMap map[string]struct{}
+			positions := make([]int, 0)
+			alleles := make(map[string][]string)
+			for idv = range guessed {
+				if ancestry != pgs.GetIndividualAncestry(idv, ancestries) {
+					continue
+				}
+				individuals = append(individuals, idv)
+			}
+			for chrId := 1; chrId <= 1; chrId++ {
+				//for chrId := 1; chrId <= 22; chrId++ {
+				fmt.Printf("%s: Reading SNPs chr %d\n", ancestry, chrId)
+				chr = strconv.Itoa(chrId)
+				positionMap = make(map[string]struct{})
+				for _, idv = range individuals {
+					for pos = range guessed[idv][chr] {
+						positionMap[pos] = struct{}{}
+					}
+				}
+				positions = make([]int, 0, len(positionMap))
+				alleles = make(map[string][]string)
+				for pos = range positionMap {
+					posInt, _ := strconv.Atoi(pos)
+					positions = append(positions, posInt)
+					ref, alt = retrievePositionAlleles(chr, pos)
+					alleles[pos] = []string{ref, alt}
+				}
+				sort.Ints(positions)
+
+				// Construct VCF
+				samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+				for _, idv = range individuals {
+					samplesHeader += fmt.Sprintf("\t%s", "G-"+idv)
+				}
+				samplesHeader += "\n"
+				vcfFile, err := os.OpenFile(fmt.Sprintf("ibd/chr%s-%s.vcf", chr, ancestry), os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					log.Fatalf("Cannot create ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(formatHeader)
+				if err != nil {
+					log.Fatalf("Cannot write format header to ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(samplesHeader)
+				if err != nil {
+					log.Fatalf("Cannot write samples header to ibd file: %v", err)
+				}
+				//positionLoop:
+				for _, posId := range positions {
+					pos = strconv.Itoa(posId)
+					if _, ok = alleles[pos]; !ok || alleles[pos][0] == "." || alleles[pos][1] == "." {
+						continue
+					}
+					line := fmt.Sprintf(lineTemplate, chr, pos, alleles[pos][0], alleles[pos][1])
+					for _, idv = range individuals {
+						if snp, ok = guessed[idv][chr][pos]; ok {
+							switch snp {
+							case 0:
+								line += "\t0/0"
+							case 1:
+								line += "\t1/0"
+							case 2:
+								line += "\t1/1"
+							default:
+								log.Fatalf("Invalid SNP value: %d", snp)
+							}
+						} else {
+							//continue positionLoop
+							line += "\t.|."
+						}
+					}
+					_, err = vcfFile.WriteString(line + "\n")
+					if err != nil {
+						log.Fatalf("Cannot write to ibd file %s: %v", line, err)
+					}
+				}
+				vcfFile.Close()
+			}
+		}(anc)
+	}
+	wg.Wait()
+}
+
 func retrievePositionAlleles(chr, pos string) (string, string) {
+	ref, alt := retrievePositionAllelesDataset(chr, pos, tools.GG)
+	if ref == "." || alt == "." {
+		ref, alt = retrievePositionAllelesDataset(chr, pos, tools.RL)
+	}
+	return ref, alt
+}
+
+func retrievePositionAllelesDataset(chr, pos, dataset string) (string, string) {
 	prg := "bcftools"
 	args := []string{
 		"query",
 		"-f", "%POS\t%REF\t%ALT\n",
 		"-r", fmt.Sprintf("%s:%s-%s", chr, pos, pos),
-		tools.GetChromosomeFilepath(chr, tools.GG),
+		tools.GetChromosomeFilepath(chr, dataset),
 	}
 	output, err := exec.Command(prg, args...).Output()
 	if err != nil {
@@ -1256,7 +1297,6 @@ func loadGuessedGenotypes() map[string]map[string]map[string]uint8 {
 	}
 	guessed := make(map[string]map[string]map[string]uint8)
 	for _, object := range dir {
-		// TODO: revert
 		if !object.IsDir() && strings.HasPrefix(object.Name(), "guesses") && strings.HasSuffix(object.Name(), ".json") {
 			//if !object.IsDir() && (strings.HasPrefix(object.Name(), "guesses600") ||
 			//	strings.HasPrefix(object.Name(), "guesses601") ||
