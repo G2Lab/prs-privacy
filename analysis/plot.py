@@ -1449,6 +1449,30 @@ def plot_normal_distribution_with_fill(mu=0, sigma=1):
     # plt.show()
 
 
+def ibd_accuracy():
+    indf = pd.read_csv("ibd/kinship.all", sep='\t', index_col=0)
+    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
+    results = []
+    for idv in pruned_df.index:
+        target = idv[1:]
+        if target not in pruned_df.columns:
+            continue
+        kinship = pruned_df.at[idv, target]
+        all_kinship_values = pruned_df[target]
+        rank = all_kinship_values.rank(ascending=False).loc[idv]
+        results.append({'ID': target, 'Kinship': kinship, 'Rank': rank})
+        print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
+
+    df = pd.DataFrame(results)
+    df['Self'] = 'Self'
+    plt.figure(figsize=(4, 3))
+    print(f'Median rank: {df['Rank'].median()}')
+    sns.barplot(x='Self', y='Rank', data=df)
+    # plt.xticks(rotation=90)  # Rotate x labels for better readability
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     # pairwise("data/prior/PGS000040.pairwise")
     # score_distribution("PGS000040.scores")
@@ -1495,4 +1519,5 @@ if __name__ == "__main__":
     # sequential_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
-    king_accuracy()
+    # king_accuracy()
+    ibd_accuracy()

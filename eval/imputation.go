@@ -398,17 +398,21 @@ func constructIBDVCFs() {
 }
 
 func prepareIBD() {
-	guessed := loadGuessedGenotypes()
-	ancestries := tools.LoadAncestry()
-	positions, alleles := preparePhasingInputFiles(guessed, ancestries)
-	phasing()
-	combineAndAddGroundTruth(guessed, positions, alleles)
+	//guessedSnps := loadGuessedGenotypes()
+	//ancestries := tools.LoadAncestry()
+	//guessedIndividuals := make([]string, 0)
+	//for idv := range guessedSnps {
+	//	guessedIndividuals = append(guessedIndividuals, idv)
+	//}
+	//positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
+	//phasing()
+	//combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
 	refinedIBD()
 	mergeIBDForAllChromosomes()
 	convertIBDToKinship()
 }
 
-func preparePhasingInputFiles(guessed map[string]map[string]map[string]uint8,
+func preparePhasingInputFiles(individuals []string, guessed map[string]map[string]map[string]uint8,
 	ancestries map[string]string) (map[string][]int, map[string]map[string][]string) {
 	alleles := make(map[string]map[string][]string)
 	positions := make(map[string][]int)
@@ -442,19 +446,19 @@ func preparePhasingInputFiles(guessed map[string]map[string]map[string]uint8,
 			defer wg.Done()
 			var snp uint8
 			var ok bool
-			var individuals []string
-			for idv := range guessed {
+			var ppl []string
+			for _, idv := range individuals {
 				if ancestry != pgs.GetIndividualAncestry(idv, ancestries) {
 					continue
 				}
-				individuals = append(individuals, idv)
+				ppl = append(ppl, idv)
 			}
 			for chrId := 1; chrId <= 22; chrId++ {
 				fmt.Printf("%s: Reading SNPs chr %d\n", ancestry, chrId)
 				chr := strconv.Itoa(chrId)
 				// Construct VCF
 				samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
-				for _, idv := range individuals {
+				for _, idv := range ppl {
 					samplesHeader += fmt.Sprintf("\t%s", "$"+idv)
 				}
 				samplesHeader += "\n"
@@ -477,7 +481,7 @@ func preparePhasingInputFiles(guessed map[string]map[string]map[string]uint8,
 						continue
 					}
 					line := fmt.Sprintf(lineTemplate, chr, pos, alleles[chr][pos][0], alleles[chr][pos][1])
-					for _, idv := range individuals {
+					for _, idv := range ppl {
 						if snp, ok = guessed[idv][chr][pos]; ok {
 							switch snp {
 							case 0:
@@ -508,40 +512,53 @@ func preparePhasingInputFiles(guessed map[string]map[string]map[string]uint8,
 }
 
 func phasing() {
-	prg := "../jdk/bin/java"
-	var args []string
 	//-Xmx8g -jar beagle/beagle.27May24.118.jar gt=prs/ibd.vcf ref=beagle/b37.bref3/chr1.1kg.phase3.v5a.b37.bref3 out=phased map=GRCh37_map/plink.chr1.GRCh37.map impute=false nthreads=4
-	for chrId := 1; chrId <= 22; chrId++ {
-		args = []string{"-Xmx8g",
-			"-jar",
-			"../beagle/beagle.27May24.118.jar",
-			"impute=false",
-			"nthreads=4",
-			fmt.Sprintf("ref=../beagle/b37.bref3/chr%d.1kg.phase3.v5a.b37.bref3", chrId),
-			fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
-			"",
-			"",
-		}
-		for _, ancestry := range pgs.POPULATIONS {
-			args[len(args)-2] = fmt.Sprintf("gt=ibd/chr%d-%s.vcf", chrId, ancestry)
-			args[len(args)-1] = fmt.Sprintf("out=ibd/phased-chr%d-%s", chrId, ancestry)
-			cmd := exec.Command(prg, args...)
-			var out bytes.Buffer
-			var stderr bytes.Buffer
-			cmd.Stdout = &out
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			if err != nil {
-				fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
-				log.Fatalf("Error executing command: %v", err)
+	numWorkers := 5
+	prg := "../jdk/bin/java"
+	tasks := make(chan int, 1)
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			wg.Done()
+			for chrId := range tasks {
+				args := []string{"-Xmx8g",
+					"-jar",
+					"../beagle/beagle.27May24.118.jar",
+					"impute=false",
+					"nthreads=3",
+					fmt.Sprintf("ref=../beagle/b37.bref3/chr%d.1kg.phase3.v5a.b37.bref3", chrId),
+					fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
+					"",
+					"",
+				}
+				for _, ancestry := range pgs.POPULATIONS {
+					args[len(args)-2] = fmt.Sprintf("gt=ibd/chr%d-%s.vcf", chrId, ancestry)
+					args[len(args)-1] = fmt.Sprintf("out=ibd/phased-chr%d-%s", chrId, ancestry)
+					cmd := exec.Command(prg, args...)
+					var out bytes.Buffer
+					var stderr bytes.Buffer
+					cmd.Stdout = &out
+					cmd.Stderr = &stderr
+					err := cmd.Run()
+					if err != nil {
+						fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
+						log.Fatalf("Error executing command: %v", err)
+					}
+				}
+				fmt.Printf("Chr %d: phased\n", chrId)
 			}
-		}
+		}()
 	}
+	for chr := 1; chr <= 22; chr++ {
+		tasks <- chr
+	}
+	close(tasks)
+	wg.Wait()
 }
 
-func combineAndAddGroundTruth(guessed map[string]map[string]map[string]uint8, positions map[string][]int,
-	alleles map[string]map[string][]string) {
-	numWorkers := 12
+func combineAndAddGroundTruth(guessedIndividuals []string, guessedSnps map[string]map[string]map[string]uint8,
+	positions map[string][]int, alleles map[string]map[string][]string) {
 	formatHeader := "##fileformat=VCFv4.1\n" +
 		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
 	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
@@ -549,83 +566,104 @@ func combineAndAddGroundTruth(guessed map[string]map[string]map[string]uint8, po
 	mainIndividuals, relativeIndividuals := make([]string, 0), make([]string, 0)
 	var ok bool
 	for _, idv := range solver.All1000GenomesSamples() {
-		if _, ok = guessed[idv]; ok {
+		if _, ok = guessedSnps[idv]; ok {
 			mainIndividuals = append(mainIndividuals, idv)
 		}
 	}
 	for _, idv := range solver.AllRelativeSamples() {
-		if _, ok = guessed[idv]; ok {
+		if _, ok = guessedSnps[idv]; ok {
 			relativeIndividuals = append(relativeIndividuals, idv)
 		}
 	}
-	var chr, posStr, idv string
-	var retrieved map[string]map[string]string
-	for chrId := 1; chrId <= 22; chrId++ {
-		chr = strconv.Itoa(chrId)
-		SNPs := make(map[string]map[string]string)
-		for _, ancestry := range pgs.POPULATIONS {
-			retrieved = getAllIndividualSnpStrings(fmt.Sprintf("ibd/phased-chr%s-%s.vcf.gz", chr, ancestry), numWorkers)
-			transferRetrievedSnps(SNPs, retrieved)
-		}
-		fmt.Printf("Chr %s: loaded phased guesses\n", chr)
-		//
-		// Retrieve the true genotype values
-		strPos := make([]string, len(positions[chr]))
-		for i, pos := range positions[chr] {
-			strPos[i] = strconv.Itoa(pos)
-		}
-		retrieved = getIndividualPositionStrings(chr, strPos, mainIndividuals, tools.GG)
-		transferRetrievedSnps(SNPs, retrieved)
-		retrieved = getIndividualPositionStrings(chr, strPos, relativeIndividuals, tools.RL)
-		transferRetrievedSnps(SNPs, retrieved)
-		fmt.Printf("Chr %s: loaded true SNPs\n", chr)
-		//
-		// Construct VCF
-		individuals := make([]string, 0)
-		samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
-		for idv = range SNPs {
-			individuals = append(individuals, idv)
-			samplesHeader += fmt.Sprintf("\t%s", idv)
-		}
-		samplesHeader += "\n"
-		vcfFile, err := os.OpenFile(fmt.Sprintf("ibd/chr%s.vcf", chr), os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatalf("Cannot create ibd file: %v", err)
-		}
-		_, err = vcfFile.WriteString(formatHeader)
-		if err != nil {
-			log.Fatalf("Cannot write format header to ibd file: %v", err)
-		}
-		_, err = vcfFile.WriteString(samplesHeader)
-		if err != nil {
-			log.Fatalf("Cannot write samples header to ibd file: %v", err)
-		}
-	positionLoop:
-		for _, pos := range positions[chr] {
-			posStr = strconv.Itoa(pos)
-			if _, ok = alleles[chr][posStr]; !ok {
-				continue
-			}
-			line := fmt.Sprintf(lineTemplate, chr, posStr, alleles[chr][posStr][0], alleles[chr][posStr][1])
-			for _, idv = range individuals {
-				if _, ok = SNPs[idv][posStr]; ok {
-					line += fmt.Sprintf("\t%s", SNPs[idv][posStr])
-				} else {
-					if !strings.HasPrefix(idv, "$") {
-						line += "\t0|0"
-					} else {
-						continue positionLoop
-						//line += "\t.|."
+	allIndividuals := make([]string, 0)
+	for _, idv := range guessedIndividuals {
+		allIndividuals = append(allIndividuals, "$"+idv)
+	}
+	allIndividuals = append(allIndividuals, mainIndividuals...)
+	allIndividuals = append(allIndividuals, relativeIndividuals...)
+	//
+	numWorkers := 5
+	numThreads := 3
+	tasks := make(chan int, 1)
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			wg.Done()
+			var chr, posStr, idv string
+			var retrieved map[string]map[string]string
+			for chrId := range tasks {
+				chr = strconv.Itoa(chrId)
+				SNPs := make(map[string]map[string]string)
+				for _, ancestry := range pgs.POPULATIONS {
+					retrieved = getAllIndividualSnpStrings(fmt.Sprintf("ibd/phased-chr%s-%s.vcf.gz", chr, ancestry), numThreads)
+					transferRetrievedSnps(SNPs, retrieved)
+				}
+				fmt.Printf("Chr %s: loaded phased guesses\n", chr)
+				//
+				// Retrieve the true genotype values
+				strPos := make([]string, len(positions[chr]))
+				for i, pos := range positions[chr] {
+					strPos[i] = strconv.Itoa(pos)
+				}
+				retrieved = getIndividualPositionStrings(chr, strPos, mainIndividuals, tools.GG)
+				transferRetrievedSnps(SNPs, retrieved)
+				retrieved = getIndividualPositionStrings(chr, strPos, relativeIndividuals, tools.RL)
+				transferRetrievedSnps(SNPs, retrieved)
+				fmt.Printf("Chr %s: loaded true SNPs\n", chr)
+				//
+				// Construct VCF
+				samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+				for _, idv = range allIndividuals {
+					samplesHeader += fmt.Sprintf("\t%s", idv)
+				}
+				samplesHeader += "\n"
+				vcfFile, err := os.OpenFile(fmt.Sprintf("ibd/chr%s.vcf", chr), os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					log.Fatalf("Cannot create ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(formatHeader)
+				if err != nil {
+					log.Fatalf("Cannot write format header to ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(samplesHeader)
+				if err != nil {
+					log.Fatalf("Cannot write samples header to ibd file: %v", err)
+				}
+			positionLoop:
+				for _, pos := range positions[chr] {
+					posStr = strconv.Itoa(pos)
+					if _, ok = alleles[chr][posStr]; !ok {
+						continue
+					}
+					line := fmt.Sprintf(lineTemplate, chr, posStr, alleles[chr][posStr][0], alleles[chr][posStr][1])
+					for _, idv = range allIndividuals {
+						if _, ok = SNPs[idv][posStr]; ok {
+							line += fmt.Sprintf("\t%s", SNPs[idv][posStr])
+						} else {
+							if !strings.HasPrefix(idv, "$") {
+								line += "\t0|0"
+							} else {
+								continue positionLoop
+								//line += "\t.|."
+							}
+						}
+					}
+					_, err = vcfFile.WriteString(line + "\n")
+					if err != nil {
+						log.Fatalf("Cannot write to ibd file %s: %v", line, err)
 					}
 				}
+				vcfFile.Close()
+				fmt.Printf("Chr %s: constructed joint VCF\n", chr)
 			}
-			_, err = vcfFile.WriteString(line + "\n")
-			if err != nil {
-				log.Fatalf("Cannot write to ibd file %s: %v", line, err)
-			}
-		}
-		vcfFile.Close()
+		}()
 	}
+	for chr := 1; chr <= 22; chr++ {
+		tasks <- chr
+	}
+	close(tasks)
+	wg.Wait()
 }
 
 func transferRetrievedSnps(to, from map[string]map[string]string) {
@@ -639,57 +677,84 @@ func transferRetrievedSnps(to, from map[string]map[string]string) {
 
 func refinedIBD() {
 	prg := "../jdk/bin/java"
-	var args []string
-	for chrId := 1; chrId <= 22; chrId++ {
-		args = []string{
-			"-Xss5m",
-			"-Xmx8g",
-			"-jar",
-			"../refinedibd/refined-ibd.17Jan20.102.jar",
-			"nthreads=16",
-			"window=0.00003",
-			"lod=0.0000001",
-			"length=0.00001",
-			"trim=0.000001",
-			fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
-			fmt.Sprintf("gt=ibd/chr%d.vcf", chrId),
-			fmt.Sprintf("out=ibd/chr%d", chrId),
-		}
-		cmd := exec.Command(prg, args...)
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err != nil {
-			fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
-			log.Fatalf("Error executing command: %v", err)
-		}
+	numWorkers := 5
+	numThreads := 3
+	tasks := make(chan int, 1)
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			wg.Done()
+			for chrId := range tasks {
+				args := []string{
+					"-Xss5m",
+					"-Xmx7g",
+					"-jar",
+					"../refinedibd/refined-ibd.17Jan20.102.jar",
+					fmt.Sprintf("nthreads=%d", numThreads),
+					"window=0.00003",
+					"lod=0.0000001",
+					"length=0.00001",
+					"trim=0.000001",
+					fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
+					fmt.Sprintf("gt=ibd/chr%d.vcf", chrId),
+					fmt.Sprintf("out=ibd/chr%d", chrId),
+				}
+				cmd := exec.Command(prg, args...)
+				var out bytes.Buffer
+				var stderr bytes.Buffer
+				cmd.Stdout = &out
+				cmd.Stderr = &stderr
+				err := cmd.Run()
+				if err != nil {
+					fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
+					log.Fatalf("Error executing command: %v", err)
+				}
+				fmt.Printf("Chr %d: Refined IBD complete\n", chrId)
+			}
+		}()
 	}
+	for chrId := 1; chrId <= 22; chrId++ {
+		tasks <- chrId
+	}
+	close(tasks)
+	wg.Wait()
 }
 
 func mergeIBDForAllChromosomes() {
 	prg := "sh"
 	args := []string{"-c", "zcat "}
 	for chrId := 1; chrId <= 22; chrId++ {
-		args = append(args, fmt.Sprintf("ibd/chr%d.ibd.gz ", chrId))
+		args[len(args)-1] += fmt.Sprintf("ibd/chr%d.ibd.gz ", chrId)
 	}
-	args = append(args, "| gzip > ibd/all-chr.ibd.gz")
+	args[len(args)-1] += "| gzip > ibd/all-chr.ibd.gz"
 	cmd := exec.Command(prg, args...)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
+		fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
 		log.Fatalf("Error executing command: %v", err)
 	}
+	fmt.Println("IBD files merged")
 }
 
 func convertIBDToKinship() {
-	cmd := exec.Command("sh", "-c", "zcat", "ibd/all-chr.ibd.gz", "|", "python",
-		"../refinedibd/IBD_relatedness/relatedness_v1.py", "../refinedibd/IBD_relatedness/constrecomb.map", "0",
-		"kinship", ">", "ibd/kinship.all")
+	cmd := exec.Command("sh", "-c", "zcat ibd/all-chr.ibd.gz | python "+
+		"../refinedibd/IBD_relatedness/relatedness_v1.py ../refinedibd/IBD_relatedness/constrecomb.map 0 "+
+		"kinship > ibd/kinship.all")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
+		fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
 		log.Fatalf("Error executing command: %v", err)
 	}
+	fmt.Println("Kinship calculated")
 }
 
 func retrievePositionAlleles(chr, pos string) (string, string) {
@@ -2439,10 +2504,9 @@ func getAllIndividualSnpStrings(filepath string, numThreads int) map[string]map[
 	if err != nil {
 		log.Fatalf("Error executing bcftools command: %v", err)
 	}
-	fmt.Printf("Bcftools output received\n")
+	//fmt.Printf("Bcftools output received\n")
 	lines := strings.Split(string(output), "\n")
 	lines = lines[:len(lines)-1]
-
 	lineChan := make(chan string, numThreads)
 	for i := 0; i < numThreads; i++ {
 		wg.Add(1)
