@@ -398,15 +398,19 @@ func constructIBDVCFs() {
 }
 
 func prepareIBD() {
-	//guessedSnps := loadGuessedGenotypes()
-	//ancestries := tools.LoadAncestry()
-	//guessedIndividuals := make([]string, 0)
-	//for idv := range guessedSnps {
-	//	guessedIndividuals = append(guessedIndividuals, idv)
-	//}
-	//positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
-	//phasing()
-	//combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
+	guessedSnps := loadGuessedGenotypes()
+	ancestries := tools.LoadAncestry()
+	guessedIndividuals := make([]string, 0)
+	for idv := range guessedSnps {
+		guessedIndividuals = append(guessedIndividuals, idv)
+	}
+	positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
+	phasing()
+	combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
+	compressChromosomes()
+	concatenateChromosomes()
+	plinkIBD()
+	plinkKing()
 	refinedIBD()
 	mergeIBDForAllChromosomes()
 	convertIBDToKinship()
@@ -535,16 +539,7 @@ func phasing() {
 				for _, ancestry := range pgs.POPULATIONS {
 					args[len(args)-2] = fmt.Sprintf("gt=ibd/chr%d-%s.vcf", chrId, ancestry)
 					args[len(args)-1] = fmt.Sprintf("out=ibd/phased-chr%d-%s", chrId, ancestry)
-					cmd := exec.Command(prg, args...)
-					var out bytes.Buffer
-					var stderr bytes.Buffer
-					cmd.Stdout = &out
-					cmd.Stderr = &stderr
-					err := cmd.Run()
-					if err != nil {
-						fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
-						log.Fatalf("Error executing command: %v", err)
-					}
+					runCommand(prg, args)
 				}
 				fmt.Printf("Chr %d: phased\n", chrId)
 			}
@@ -677,7 +672,7 @@ func transferRetrievedSnps(to, from map[string]map[string]string) {
 
 func refinedIBD() {
 	prg := "../jdk/bin/java"
-	numWorkers := 5
+	numWorkers := 4
 	numThreads := 3
 	tasks := make(chan int, 1)
 	var wg sync.WaitGroup
@@ -686,9 +681,10 @@ func refinedIBD() {
 		go func() {
 			wg.Done()
 			for chrId := range tasks {
+				fmt.Printf("Chr %d: Running Refined IBD\n", chrId)
 				args := []string{
 					"-Xss5m",
-					"-Xmx7g",
+					"-Xmx8g",
 					"-jar",
 					"../refinedibd/refined-ibd.17Jan20.102.jar",
 					fmt.Sprintf("nthreads=%d", numThreads),
@@ -700,16 +696,7 @@ func refinedIBD() {
 					fmt.Sprintf("gt=ibd/chr%d.vcf", chrId),
 					fmt.Sprintf("out=ibd/chr%d", chrId),
 				}
-				cmd := exec.Command(prg, args...)
-				var out bytes.Buffer
-				var stderr bytes.Buffer
-				cmd.Stdout = &out
-				cmd.Stderr = &stderr
-				err := cmd.Run()
-				if err != nil {
-					fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
-					log.Fatalf("Error executing command: %v", err)
-				}
+				runCommand(prg, args)
 				fmt.Printf("Chr %d: Refined IBD complete\n", chrId)
 			}
 		}()
@@ -721,13 +708,7 @@ func refinedIBD() {
 	wg.Wait()
 }
 
-func mergeIBDForAllChromosomes() {
-	prg := "sh"
-	args := []string{"-c", "zcat "}
-	for chrId := 1; chrId <= 22; chrId++ {
-		args[len(args)-1] += fmt.Sprintf("ibd/chr%d.ibd.gz ", chrId)
-	}
-	args[len(args)-1] += "| gzip > ibd/all-chr.ibd.gz"
+func runCommand(prg string, args []string) {
 	cmd := exec.Command(prg, args...)
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -738,13 +719,28 @@ func mergeIBDForAllChromosomes() {
 		fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
 		log.Fatalf("Error executing command: %v", err)
 	}
-	fmt.Println("IBD files merged")
 }
 
-func convertIBDToKinship() {
-	cmd := exec.Command("sh", "-c", "zcat ibd/all-chr.ibd.gz | python "+
-		"../refinedibd/IBD_relatedness/relatedness_v1.py ../refinedibd/IBD_relatedness/constrecomb.map 0 "+
-		"kinship > ibd/kinship.all")
+func compressChromosomes() {
+	bgzip := "bgzip"
+	bcftools := "bcftools"
+	for chrId := 1; chrId <= 22; chrId++ {
+		args := []string{"-c", fmt.Sprintf("ibd/chr%d.vcf", chrId), ">", fmt.Sprintf("ibd/chr%d.vcf.gz", chrId)}
+		runCommand(bgzip, args)
+	}
+	for chrId := 1; chrId <= 22; chrId++ {
+		args := []string{"index", fmt.Sprintf("ibd/chr%d.vcf.gz", chrId)}
+		runCommand(bcftools, args)
+	}
+}
+
+func concatenateChromosomes() {
+	prg := "bcftools"
+	args := []string{"concat", "-Oz", "-o", "ibd/merged.vcf.gz"}
+	for chrId := 1; chrId <= 22; chrId++ {
+		args = append(args, fmt.Sprintf("ibd/chr%d.vcf.gz", chrId))
+	}
+	cmd := exec.Command(prg, args...)
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -754,6 +750,32 @@ func convertIBDToKinship() {
 		fmt.Printf("Output: %s\n Error: %s\n", out.String(), stderr.String())
 		log.Fatalf("Error executing command: %v", err)
 	}
+}
+
+func plinkIBD() {
+	runCommand("plink", []string{"--vcf", "ibd/merged.vcf.gz", "--make-rel", "--out", "ibd/plink"})
+}
+
+func plinkKing() {
+	runCommand("plink", []string{"--vcf", "ibd/merged.vcf.gz", "--make-king", "--out", "ibd/plink"})
+}
+
+func mergeIBDForAllChromosomes() {
+	prg := "sh"
+	args := []string{"-c", "zcat "}
+	for chrId := 1; chrId <= 22; chrId++ {
+		args[len(args)-1] += fmt.Sprintf("ibd/chr%d.ibd.gz ", chrId)
+	}
+	args[len(args)-1] += "| gzip > ibd/all-chr.ibd.gz"
+	runCommand(prg, args)
+	fmt.Println("IBD files merged")
+}
+
+func convertIBDToKinship() {
+	args := []string{"-c", "zcat ibd/all-chr.ibd.gz | python " +
+		"../refinedibd/IBD_relatedness/relatedness_v1.py ../refinedibd/IBD_relatedness/constrecomb.map 0 " +
+		"kinship > ibd/kinship.all"}
+	runCommand("sh", args)
 	fmt.Println("Kinship calculated")
 }
 

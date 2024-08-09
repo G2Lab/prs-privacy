@@ -1323,8 +1323,14 @@ def read_related_individuals():
 
             for record in reader:
                 if len(record) > relatives_column:
-                    split = record[relatives_column].split(":")
-                    related[record[sample_column]] = split[-1].split(",")
+                    relation, relatives = record[relatives_column].split(":")
+                    if relation == "Parent" or relation == "Sibling" or relation == "trio":
+                        relation = "1"
+                    elif relation == "Second Order":
+                        relation = "2"
+                    for relative in relatives.split(","):
+                        related[relative] = (record[sample_column], relation)
+                    # related[record[sample_column]] = relatives[-1].split(",")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -1467,10 +1473,101 @@ def ibd_accuracy():
     df['Self'] = 'Self'
     plt.figure(figsize=(4, 3))
     print(f'Median rank: {df['Rank'].median()}')
-    sns.barplot(x='Self', y='Rank', data=df)
+    # sns.boxplot(x='Self', y='Rank', data=df)
+    sns.boxplot(x='Self', y='Kinship', data=df)
     # plt.xticks(rotation=90)  # Rotate x labels for better readability
     plt.tight_layout()
     plt.show()
+
+
+def plink_accuracy():
+    # Load IDs from a separate file
+    # with open("ibd/plink.rel.id", "r") as f:
+    with open("ibd/plink.king.id", "r") as f:
+        ids = [line.strip() for line in f]
+    ids = ids[1:]  # Remove the first line
+
+    # Load the kinship matrix
+    # indf = pd.read_csv("ibd/plink.rel", sep='\t', header=None)
+    indf = pd.read_csv("ibd/plink.king", sep='\t', header=None)
+    print(len(ids), indf.shape)
+
+    # Use the IDs to rename columns and index of the DataFrame
+    indf.columns = ids
+    indf.index = ids
+
+    # Prune the DataFrame to include only rows starting with '$' and columns not starting with '$'
+    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
+
+    results = []
+    for idv in pruned_df.index:
+        target = idv[1:]  # Remove the '$' symbol
+        if target not in pruned_df.columns:
+            continue
+        kinship = pruned_df.at[idv, target]
+        all_kinship_values = pruned_df[target]
+        rank = all_kinship_values.rank(ascending=False).loc[idv]
+        results.append({'ID': target, 'Kinship': kinship, 'Rank': rank})
+        print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
+
+    df = pd.DataFrame(results)
+    df['Self'] = 'Self'
+    plt.figure(figsize=(4, 3))
+    print(f'Median rank: {df["Rank"].median()}, Median kinship: {df["Kinship"].median()}')
+    print(f'Max rank: {df["Rank"].max()}, Max kinship: {df["Kinship"].max()}')
+    print(f'Min rank: {df["Rank"].min()}, Min kinship: {df["Kinship"].min()}')
+    # plt.ylim(0, df['Kinship'].max() + 0.1)
+    sns.boxplot(x='Self', y='Rank', data=df)
+    # sns.boxplot(x='Self', y='Kinship', data=df)
+    # plt.xticks(rotation=90)  # Rotate x labels for better readability
+    plt.tight_layout()
+    plt.show()
+
+
+def load_results(id_file, data_file):
+    with open(id_file, "r") as f:
+        ids = [line.strip() for line in f]
+    ids = ids[1:]
+    indf = pd.read_csv(data_file, sep='\t', header=None)
+    print(len(ids), indf.shape)
+
+    # Use the IDs to rename columns and index of the DataFrame
+    indf.columns = ids
+    indf.index = ids
+
+    # Prune the DataFrame to include only rows starting with '$' and columns not starting with '$'
+    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
+
+    related = read_related_individuals()
+    print(len(related), related)
+
+    results = []
+    for idv in pruned_df.index:
+        target = idv[1:]  # Remove the '$' symbol
+        if target not in pruned_df.columns:
+            continue
+        kinship = pruned_df.at[idv, target]
+        all_kinship_values = pruned_df[target]
+        self_rank = all_kinship_values.rank(ascending=False).loc[idv]
+        if idv in related:
+            relative_kinship = pruned_df.at[idv, related[idv][0]]
+            relative_rank = all_kinship_values.rank(ascending=False).loc[related[idv][0]]
+            results.append({'ID': target, 'SelfKinship': kinship, 'SelfRank': self_rank,
+                            'RelativeKinship': relative_kinship, 'RelativeRank': relative_rank})
+        results.append({'ID': target, 'SelfKinship': kinship, 'SelfRank': self_rank})
+        # print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
+
+    return pd.DataFrame(results)
+
+
+def deanonymization_accuracy():
+    king_df = load_results("ibd/plink.king.id", "ibd/plink.king")
+    king_df['Method'] = 'KING'
+    rel_df = load_results("ibd/plink.rel.id", "ibd/plink.rel")
+    rel_df['Method'] = 'Plink IBD'
+    # Relatedness -> Kinship
+    rel_df['SelfKinship'] = rel_df['SelfKinship'] / 2
+    rel_df['RelativeKinship'] = rel_df['RelativeKinship'] / 2
 
 
 if __name__ == "__main__":
@@ -1520,4 +1617,6 @@ if __name__ == "__main__":
     # af_hist()
     # plot_normal_distribution_with_fill()
     # king_accuracy()
-    ibd_accuracy()
+    # ibd_accuracy()
+    # plink_accuracy()
+    load_results("ibd/plink.rel.id", "ibd/plink.rel")
