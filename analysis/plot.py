@@ -1328,9 +1328,9 @@ def read_related_individuals():
                         relation = "1"
                     elif relation == "Second Order":
                         relation = "2"
+                    related[record[sample_column]] = [(relative, relation) for relative in relatives.split(",")]
                     for relative in relatives.split(","):
-                        related[relative] = (record[sample_column], relation)
-                    # related[record[sample_column]] = relatives[-1].split(",")
+                        related[relative] = [(record[sample_column], relation)]
 
     except Exception as e:
         print(f"Error: {e}")
@@ -1456,7 +1456,7 @@ def plot_normal_distribution_with_fill(mu=0, sigma=1):
 
 
 def ibd_accuracy():
-    indf = pd.read_csv("ibd/kinship.all", sep='\t', index_col=0)
+    indf = pd.read_csv("ibd/refined.ibd", sep='\t', index_col=0)
     pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
     results = []
     for idv in pruned_df.index:
@@ -1524,22 +1524,20 @@ def plink_accuracy():
     plt.show()
 
 
-def load_results(id_file, data_file):
-    with open(id_file, "r") as f:
-        ids = [line.strip() for line in f]
-    ids = ids[1:]
-    indf = pd.read_csv(data_file, sep='\t', header=None)
-    print(len(ids), indf.shape)
-
-    # Use the IDs to rename columns and index of the DataFrame
-    indf.columns = ids
-    indf.index = ids
+def load_results(id_file, data_file, method):
+    if id_file is not None:
+        with open(id_file, "r") as f:
+            ids = [line.strip() for line in f]
+        ids = ids[1:]
+        indf = pd.read_csv(data_file, sep='\t', header=None)
+        indf.columns = ids
+        indf.index = ids
+    else:
+        indf = pd.read_csv("ibd/refined.ibd", sep='\t', index_col=0)
 
     # Prune the DataFrame to include only rows starting with '$' and columns not starting with '$'
     pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
-
     related = read_related_individuals()
-    print(len(related), related)
 
     results = []
     for idv in pruned_df.index:
@@ -1547,27 +1545,116 @@ def load_results(id_file, data_file):
         if target not in pruned_df.columns:
             continue
         kinship = pruned_df.at[idv, target]
-        all_kinship_values = pruned_df[target]
-        self_rank = all_kinship_values.rank(ascending=False).loc[idv]
-        if idv in related:
-            relative_kinship = pruned_df.at[idv, related[idv][0]]
-            relative_rank = all_kinship_values.rank(ascending=False).loc[related[idv][0]]
-            results.append({'ID': target, 'SelfKinship': kinship, 'SelfRank': self_rank,
-                            'RelativeKinship': relative_kinship, 'RelativeRank': relative_rank})
-        results.append({'ID': target, 'SelfKinship': kinship, 'SelfRank': self_rank})
-        # print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
+        self_rank = pruned_df.loc[idv].rank(ascending=False)[target]
+        results.append({'Category': 'Self', 'Kinship': kinship, 'Rank': self_rank, 'Method': method})
+        relatives = []
+        if target in related:
+            relatives = []
+            for relative in related[target]:
+                if relative[0] not in pruned_df.columns:
+                    continue
+                relative_kinship = pruned_df.at[idv, relative[0]]
+                relative_rank = pruned_df.loc[idv].rank(ascending=False)[relative[0]]
+                category = ''
+                if relative[1] == '1':
+                    category = '1st degree'
+                elif relative[1] == '2':
+                    category = '2nd degree'
+                results.append({'Category': category, 'Kinship': relative_kinship, 'Rank': relative_rank, 'Method': method})
+                relatives.append(relative[0])
+        other_columns = pruned_df.columns[~pruned_df.columns.isin([target] + relatives)]
+        kinships = pruned_df.loc[idv, other_columns]
+        ranks = pruned_df.loc[idv].rank(ascending=False)[other_columns]
+        # high_kinship_positions = kinships[kinships > 0.22]
+        # for col in high_kinship_positions.index:
+        #     print(f"{method}: {target}->{col} {high_kinship_positions[col]}, rank: {ranks[col]}")
+        temp_df = pd.DataFrame({
+            'Category': 'Everyone else',
+            'Kinship': kinships.values,
+            'Rank': ranks.values,
+            'Method': method
+        })
+        results.extend(temp_df.to_dict('records'))
 
     return pd.DataFrame(results)
 
 
+def plot_rank_cdf(df, category, ax):
+    colors = sns.color_palette("deep")
+    # Filter the dataframe for the given category
+    category_df = df[df['Category'] == category]
+    for i, method in enumerate(category_df['Method'].unique()):
+        method_df = category_df[category_df['Method'] == method]
+        # Sort the ranks for the cumulative distribution
+        sorted_ranks = np.sort(method_df['Rank'])
+        # Calculate the cumulative distribution
+        cdf = np.arange(1, len(sorted_ranks) + 1) / len(sorted_ranks) * 100
+        ax.plot(sorted_ranks, cdf, label=f'{method}', color=colors[i], linewidth=2)
+    ax.set_title(f'{category}')
+    ax.set_xlim(-5, 300)
+
+
 def deanonymization_accuracy():
-    king_df = load_results("ibd/plink.king.id", "ibd/plink.king")
-    king_df['Method'] = 'KING'
-    rel_df = load_results("ibd/plink.rel.id", "ibd/plink.rel")
-    rel_df['Method'] = 'Plink IBD'
-    # Relatedness -> Kinship
-    rel_df['SelfKinship'] = rel_df['SelfKinship'] / 2
-    rel_df['RelativeKinship'] = rel_df['RelativeKinship'] / 2
+    king_df = load_results("ibd/plink.king.id", "ibd/plink.king", 'KING')
+    rel_df = load_results("ibd/plink.rel.id", "ibd/plink.rel", 'Plink IBD')
+    rel_df['Kinship'] = rel_df['Kinship'] / 2 # Relatedness -> Kinship
+    rel_df['Kinship'] = [0.5 if k > 0.5 else k for k in rel_df['Kinship']]
+    refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
+    print(f'Median KING rank: {king_df["Rank"].median()}, Median KING kinship: {king_df["Kinship"].median()}')
+    print(f'Median Plink IBD rank: {rel_df["Rank"].median()}, Median Plink IBD kinship: {rel_df["Kinship"].median()}')
+    print(f'Median Refined IBD rank: {refined_df["Rank"].median()}, Median Refined IBD kinship: {refined_df["Kinship"].median()}')
+    df = pd.concat([king_df, rel_df, refined_df])
+    # print(df[df['Category'] == '2nd degree'])
+
+    params = {
+        'font.size': 13,
+        'axes.labelsize': 13,
+        'xtick.labelsize': 13,
+        'ytick.labelsize': 13,
+        'legend.fontsize': 12,
+        'legend.title_fontsize': 12,
+        'text.usetex': True,
+        'font.family': 'serif'
+    }
+    mpl.rcParams.update(params)
+    self_cutoff = 0.3535
+    first_degree_cutoff = 0.1768
+    second_degree_cutoff = 0.089
+    fig1, ax1 = plt.subplots(figsize=(7, 3))
+    sns.boxplot(x='Category', y='Kinship', data=df, hue='Method', palette='pastel', ax=ax1,
+                order=['Self', '1st degree', '2nd degree', 'Everyone else'])
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=0.5, s='Criteria', va='center', ha='left', color='black')
+    ax1.axhline(y=self_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=self_cutoff, s='Self', va='center', ha='left', color='black')
+    ax1.axhline(y=first_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=first_degree_cutoff, s='1st', va='center', ha='left', color='black')
+    ax1.axhline(y=second_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=second_degree_cutoff, s='2nd', va='center', ha='left', color='black')
+    ax1.set_ylabel('Kinship')
+    ax1.set_xlabel('')
+    ax1.legend(title="")
+
+    fig2, ax2 = plt.subplots(figsize=(5, 3))
+    categories = ['Self', '1st degree', '2nd degree']
+    sns.boxplot(x='Category', y='Rank', data=df[df['Category'].isin(categories)], hue='Method', palette='pastel',
+                ax=ax2, order=categories)
+    ax2.invert_yaxis()
+    ax2.set_ylabel('Rank (/2535)')
+    ax2.set_xlabel('')
+    ax2.legend(title="")
+
+    fig3, axes3 = plt.subplots(1, 3, figsize=(6, 3), sharey=True)
+    # Plot CDFs for each category
+    categories = ['Self', '1st degree', '2nd degree']
+    for i, category in enumerate(categories):
+        plot_rank_cdf(df, category, axes3[i])
+    axes3[0].set_ylabel('Percentage')
+    axes3[1].set_xlabel('Rank (/2535)')
+    handles, labels = axes3[0].get_legend_handles_labels()
+    fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.05), title='', ncol=len(labels), frameon=False)
+    # plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -1619,4 +1706,5 @@ if __name__ == "__main__":
     # king_accuracy()
     # ibd_accuracy()
     # plink_accuracy()
-    load_results("ibd/plink.rel.id", "ibd/plink.rel")
+    # load_results("ibd/plink.rel.id", "ibd/plink.rel")
+    deanonymization_accuracy()

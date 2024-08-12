@@ -412,7 +412,7 @@ func prepareIBD() {
 	plinkIBD()
 	plinkKing()
 	refinedIBD()
-	mergeIBDForAllChromosomes()
+	mergeRefinedIBDForAllChromosomes()
 	convertIBDToKinship()
 }
 
@@ -693,7 +693,7 @@ func refinedIBD() {
 					"length=0.00001",
 					"trim=0.000001",
 					fmt.Sprintf("map=../maps/plink.chr%d.GRCh37.map", chrId),
-					fmt.Sprintf("gt=ibd/chr%d.vcf", chrId),
+					fmt.Sprintf("gt=ibd/chr%d.vcf.gz", chrId),
 					fmt.Sprintf("out=ibd/chr%d", chrId),
 				}
 				runCommand(prg, args)
@@ -760,7 +760,7 @@ func plinkKing() {
 	runCommand("plink", []string{"--vcf", "ibd/merged.vcf.gz", "--make-king", "--out", "ibd/plink"})
 }
 
-func mergeIBDForAllChromosomes() {
+func mergeRefinedIBDForAllChromosomes() {
 	prg := "sh"
 	args := []string{"-c", "zcat "}
 	for chrId := 1; chrId <= 22; chrId++ {
@@ -774,7 +774,7 @@ func mergeIBDForAllChromosomes() {
 func convertIBDToKinship() {
 	args := []string{"-c", "zcat ibd/all-chr.ibd.gz | python " +
 		"../refinedibd/IBD_relatedness/relatedness_v1.py ../refinedibd/IBD_relatedness/constrecomb.map 0 " +
-		"kinship > ibd/kinship.all"}
+		"kinship > ibd/refined.ibd"}
 	runCommand("sh", args)
 	fmt.Println("Kinship calculated")
 }
