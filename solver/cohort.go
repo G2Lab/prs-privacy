@@ -131,8 +131,7 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 				case tools.GG:
 					allSamples = All1000GenomesSamples()
 				case tools.RL:
-					//allSamples = AllRelativeSamples()
-					allSamples = AllRelativeAndExtraSamples()
+					allSamples = AllRelativeSamples()
 				default:
 					log.Fatalln("Unknown dataset:", dataset)
 				}

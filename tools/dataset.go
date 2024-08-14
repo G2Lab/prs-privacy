@@ -11,7 +11,6 @@ import (
 const (
 	GG = "1000Genomes"
 	RL = "Relatives"
-	//UKBB = "UKBB"
 )
 
 func GetChromosomeFilepath(chr, dataset string) string {
@@ -89,17 +88,6 @@ func AllChrPositionsQuery(c, dataset string) (string, []string) {
 		GetChromosomeFilepath(c, dataset),
 	}
 }
-
-//func GetSnpsAtPosition(c string, p string) ([]string, error) {
-//	query, args := RangeSnpValuesQuery(c, p, p)
-//	cmd := exec.Command(query, args...)
-//	output, err := cmd.Output()
-//	if err != nil {
-//		return nil, err
-//	}
-//	samples := strings.Split(string(output), "\t")
-//	return samples[:len(samples)-1], nil
-//}
 
 func NormalizeAllele(allele string) (string, error) {
 	switch allele {

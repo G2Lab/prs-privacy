@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/nikirill/prs/params"
 	"log"
 	"math"
 	"os"
@@ -843,6 +844,30 @@ func getRegionAlleles(chr, filepath string, imputedRegions [][]string) map[strin
 	return alleles
 }
 
+type IdvResult struct {
+	Individual        string
+	Ancestry          string
+	SNPs              int
+	GuessAccuracy     float32
+	ReferenceAccuracy float32
+}
+
+type LocusResult struct {
+	CorrectGuesses map[string]int
+	TotalGuesses   map[string]int
+	EAF            map[string]float32
+	SmallestPGS    int
+	Density        float32
+}
+
+func newLocusResult() *LocusResult {
+	return &LocusResult{
+		CorrectGuesses: make(map[string]int),
+		TotalGuesses:   make(map[string]int),
+		EAF:            make(map[string]float32),
+	}
+}
+
 func guessAccuracy() {
 	guessed := loadGuessedGenotypes()
 	relatives := solver.AllRelativeSamples()
@@ -896,19 +921,15 @@ func guessAccuracy() {
 		}
 	}
 	ancestries := tools.LoadAncestry()
-	type Result struct {
-		Individual        string
-		Ancestry          string
-		SNPs              int
-		GuessAccuracy     float32
-		ReferenceAccuracy float32
-	}
-	results := make([]Result, 0)
+	idvResults := make([]*IdvResult, 0)
+	locusResults := make(map[string]*LocusResult)
+	var locus string
 	for idv = range guessed {
-		res := Result{Individual: idv, Ancestry: pgs.GetIndividualAncestry(idv, ancestries),
+		res := IdvResult{Individual: idv, Ancestry: pgs.GetIndividualAncestry(idv, ancestries),
 			SNPs: 0, GuessAccuracy: 0, ReferenceAccuracy: 0}
 		for chr = range guessed[idv] {
 			for pos = range guessed[idv][chr] {
+				// Individual accuracy
 				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
 					res.GuessAccuracy++
 				}
@@ -916,22 +937,88 @@ func guessAccuracy() {
 					res.ReferenceAccuracy++
 				}
 				res.SNPs++
+				// Locus accuracy
+				locus = tools.MergeLocus(chr, pos)
+				if _, ok := locusResults[locus]; !ok {
+					locusResults[locus] = newLocusResult()
+				}
+				locusResults[locus].TotalGuesses[res.Ancestry]++
+				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
+					locusResults[locus].CorrectGuesses[res.Ancestry]++
+				}
 			}
 		}
 		res.GuessAccuracy /= float32(res.SNPs)
 		res.ReferenceAccuracy /= float32(res.SNPs)
-		results = append(results, res)
+		idvResults = append(idvResults, &res)
 	}
-
 	resultFolder := "results/guessAccuracy"
-	filepath = path.Join(resultFolder, "accuracy.json")
+	filepath = path.Join(resultFolder, "individuals.json")
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening result file: %v", err)
 	}
 	defer resFile.Close()
 	encoder := json.NewEncoder(resFile)
-	if err = encoder.Encode(results); err != nil {
+	if err = encoder.Encode(idvResults); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Println("Saved accuracy results")
+	//
+	pgsFile, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer pgsFile.Close()
+	decoder := json.NewDecoder(pgsFile)
+	var pgsToNumVariants map[string]int
+	err = decoder.Decode(&pgsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	allPgs := make([]string, 0)
+	for pgsID := range pgsToNumVariants {
+		allPgs = append(allPgs, pgsID)
+	}
+	sort.Slice(allPgs, func(i, j int) bool {
+		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
+	})
+	observedLoci := make(map[string]struct{})
+	var ok bool
+	for _, pgsID := range allPgs {
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		err = p.LoadStats()
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return
+		}
+		for i, locus := range p.Loci {
+			if _, ok = observedLoci[locus]; ok {
+				continue
+			}
+			observedLoci[locus] = struct{}{}
+			for ppl := range p.PopulationStats {
+				locusResults[locus].EAF[ppl] = p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]]
+			}
+			locusResults[locus].SmallestPGS = pgsToNumVariants[pgsID]
+			locusResults[locus].Density = float32(p.NumVariants) / float32(tools.Log3(p.FindMaxAbsoluteWeight()))
+		}
+	}
+	eafFile, err := os.OpenFile(path.Join(resultFolder, "loci.json"), os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("Error opening eaf file:", err)
+		return
+	}
+	defer eafFile.Close()
+	encoder = json.NewEncoder(eafFile)
+	if err = encoder.Encode(locusResults); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
 	fmt.Println("Completed")

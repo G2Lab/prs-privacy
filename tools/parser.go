@@ -27,3 +27,7 @@ func SplitLocus(locus string) (string, string) {
 	parts := strings.Split(locus, ":")
 	return parts[0], parts[1]
 }
+
+func MergeLocus(chr, pos string) string {
+	return chr + ":" + pos
+}

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/tools"
 )
@@ -225,32 +224,6 @@ func ArrayToString(array []uint8) string {
 	return strings.Join(str, "")
 }
 
-func SortByAccuracy(solutions map[string][]uint8, target []uint8) [][]uint8 {
-	i := 0
-	flattened := make([][]uint8, len(solutions))
-	accuracies := make([]float32, len(solutions))
-	for _, solution := range solutions {
-		flattened[i] = solution
-		accuracies[i] = Accuracy(solution, target)
-		i++
-	}
-	sortBy(flattened, accuracies, true)
-	return flattened
-}
-
-func SortByLikelihood(solutions map[string][]uint8, af map[int][]float32, efal []uint8) [][]uint8 {
-	i := 0
-	flattened := make([][]uint8, len(solutions))
-	likelihoods := make([]float32, len(solutions))
-	for _, solution := range solutions {
-		flattened[i] = solution
-		likelihoods[i] = CalculateFullSequenceLikelihood(solution, af, efal)
-		i++
-	}
-	sortBy(flattened, likelihoods, false)
-	return flattened
-}
-
 func CalculateSequenceEASpectrum(sequence []uint8, af map[int][]float32, bins []float32, effectAlleles []uint8) []float32 {
 	spectrum := make([]float32, len(bins))
 	var binIdx int
@@ -296,7 +269,7 @@ func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Stati
 	return flattened
 }
 
-func sortBy[T, P params.Ordered](items [][]T, properties []P, reverse bool) {
+func sortBy(items [][]uint8, properties []float32, reverse bool) {
 	for i := 0; i < len(items)-1; i++ {
 		for j := i + 1; j < len(items); j++ {
 			switch reverse {

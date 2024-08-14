@@ -817,7 +817,7 @@ func consensusSolving() {
 		Individual string
 		Accuracies map[int]float32
 	}
-	//results := make([]*Result, 0)
+	//results := make([]*IdvResult, 0)
 	var individual string
 	var ok bool
 	var guessedGtp uint8
@@ -920,7 +920,7 @@ func consensusSolving() {
 			//	}
 			//}
 		}
-		//results = append(results, &Result{Individual: individual, Accuracies: accuracies})
+		//results = append(results, &IdvResult{Individual: individual, Accuracies: accuracies})
 		confirmedSnps := make(map[string]uint8)
 		for locus, options := range guessedSnps {
 			var winGtp uint8
@@ -1107,8 +1107,7 @@ func sequenceSolving() {
 		return
 	}
 
-	//individuals := solver.AllRelativeSamples()
-	individuals := solver.All1000GenomesSamples()
+	individuals := solver.All1000GenomesAndRelativeSamples()
 	sort.Strings(individuals)
 
 	chunkNum, chunkSize := getChunkInfo(len(individuals))
@@ -1951,9 +1950,9 @@ func accuracyLikelihood() {
 //		slv := solver.NewDP(cohort[samples[i]].Score, p, indPop, make(map[int]uint8))
 //		solmap := slv.SolveFromSavedProbabilistic(solver.UseLikelihood)
 //		solutions := solver.SortByAccuracy(solmap, cohort[samples[i]].Genotype)
-//		if len(solutions) == 0 || solver.Accuracy(solutions[0], cohort[samples[i]].Genotype) != 1.0 {
+//		if len(solutions) == 0 || solver.CorrectGuesses(solutions[0], cohort[samples[i]].Genotype) != 1.0 {
 //			fmt.Printf("No solution for %s: %s, %.3f\n", samples[i], solver.ArrayToString(solutions[0]),
-//				solver.Accuracy(solutions[0], cohort[samples[i]].Genotype))
+//				solver.CorrectGuesses(solutions[0], cohort[samples[i]].Genotype))
 //			continue
 //		}
 //		for _, solution := range solutions {

@@ -703,10 +703,10 @@ def sequential():
 #     fig.savefig('sequential-repaired.png', dpi=300, bbox_inches='tight')
 
 
-def sequential_accuracy():
+def sequential_idv_accuracy():
     directory = "results/guessAccuracy/"
     data = []
-    filepath = os.path.join(directory, "accuracy.json")
+    filepath = os.path.join(directory, "individuals.json")
     with open(filepath, 'r') as f:
         content = json.load(f)
     for result in content:
@@ -738,11 +738,49 @@ def sequential_accuracy():
         if i == 2:
             ax.text(i, median - 4, 'Baseline', ha='center', va='bottom', fontsize=10, color='black')
 
+    overall_median_accuracy = df['GuessAccuracy'].median()
+    ax.axhline(overall_median_accuracy, color='gray', linestyle='-', linewidth=1, label='Overall Median')
+    # ax.text(-0.1, overall_median_accuracy, overall_median_accuracy, ha='right', va='bottom', fontsize=10, color='red')
+
+    print("Overall median accuracy:", overall_median_accuracy)
+    print("Median accuracy per ancestry:", df.groupby('Ancestry')['GuessAccuracy'].median())
+    print("Total samples:", df['Ancestry'].value_counts())
+
     plt.xlabel('Ancestry')
     plt.ylabel('Genotype recovery accuracy, %')
     plt.tight_layout()
     # plt.ylim(64, 100)
     # fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def sequential_loci_accuracy():
+    directory = "results/guessAccuracy/"
+    eaf_data = []
+    filepath = os.path.join(directory, "loci.json")
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for locus, result in content.items():
+        for ancestry, eaf in result['EAF'].items():
+            eaf_data.append({'EAF': float(eaf), 'Ancestry': ancestry, 'PGS': int(result['SmallestPGS']),
+                             'Accuracy': 100*float(result['CorrectGuesses'][ancestry])/float(result['TotalGuesses'][ancestry])})
+
+    df = pd.DataFrame(eaf_data)
+    df['EAF_bin'] = pd.cut(df['EAF'], bins=35)
+    mean_accuracy_per_bin = df.groupby(['EAF_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
+    mean_accuracy_per_bin['EAF_mid'] = mean_accuracy_per_bin['EAF_bin'].apply(lambda x: x.mid)
+    fig1, ax1 = plt.subplots(figsize=(4, 3))
+    sns.lineplot(data=mean_accuracy_per_bin, x='EAF_mid', y='Accuracy', ax=ax1, color='teal')
+    ax1.set_ylim(80, 100)
+    plt.xlabel('Effect Allele Frequency')
+    plt.ylabel('Guess accuracy, %')
+    plt.tight_layout()
+
+    fig2, ax2 = plt.subplots(figsize=(4, 3))
+    sns.lineplot(x='PGS', y='Accuracy', data=df, ax=ax2, color='coral')
+    plt.xlabel('Size of the smallest PGS with the locus')
+    plt.ylabel('Guess accuracy, %')
+    plt.tight_layout()
     plt.show()
 
 
@@ -1700,11 +1738,12 @@ if __name__ == "__main__":
     # random_bars()
     # score_uniqueness()
     # sequential()
-    # sequential_accuracy()
+    # sequential_idv_accuracy()
+    sequential_loci_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
     # king_accuracy()
     # ibd_accuracy()
     # plink_accuracy()
     # load_results("ibd/plink.rel.id", "ibd/plink.rel")
-    deanonymization_accuracy()
+    # deanonymization_accuracy()

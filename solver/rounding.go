@@ -78,31 +78,6 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 	return weights, intTarget, roundingError
 }
 
-//func getTargetAndWeightsAsFloats(p *pgs.PGS, target *apd.Decimal, rdr *Rounder) ([]float64, float64, float64) {
-//	var err error
-//	var roundingError float64 = 0
-//	precision := int(p.WeightPrecision)
-//	if p.WeightPrecision > dp.rounder.PrecisionLimit {
-//		precision = params.PrecisionsLimit
-//		roundingError = math.Pow10(-precision) * float64(p.NumVariants)
-//		multiplier := apd.New(1, int32(p.WeightPrecision))
-//		rdr.RoundedMode = true
-//		rdr.ScaledWeights = scaleWeights(p.Context, p.Weights, multiplier)
-//		sct := new(apd.Decimal)
-//		p.Context.Mul(sct, target, multiplier)
-//		rdr.ScaledTarget.SetString(sct.String(), 10)
-//		multiplier.SetFinite(1, params.PrecisionsLimit)
-//	}
-//	scale := math.Pow10(precision)
-//	weights := DecimalsToFloats(p.Weights, scale)
-//	tf, err := target.Float64()
-//	if err != nil {
-//		log.Fatalf("Failed to convert ogTarget decimal to float64: %s", target.String())
-//	}
-//	tf = float64(int64(tf*scale)) / scale
-//	return weights, tf, roundingError
-//}
-
 func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.Decimal) []int64 {
 	ints := make([]int64, len(decimals))
 	tmp := new(apd.Decimal)

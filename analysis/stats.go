@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/montanaflynn/stats"
 	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 	"io"
 	"log"
 	"math"
@@ -120,10 +121,10 @@ idLoop:
 				continue idLoop
 			}
 		}
-		maxw := findMaxAbsoluteWeight(p)
-		if float64(p.NumVariants)/log3(maxw) > 2.5 {
+		maxw := p.FindMaxAbsoluteWeight()
+		if float64(p.NumVariants)/tools.Log3(maxw) > 2.5 {
 			highDensity = append(highDensity, id)
-			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/log3(maxw))
+			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/tools.Log3(maxw))
 			continue idLoop
 		}
 		if p.WeightPrecision-p.MinPrecision > 5 && p.MinPrecision > 2 && p.MinPrecision < 10 {
@@ -221,29 +222,6 @@ func findMaxAbsoluteWeight(p *pgs.PGS) float64 {
 		}
 	}
 	return maxWeight * math.Pow(10, float64(p.WeightPrecision))
-}
-
-func findMinAbsoluteWeight(p *pgs.PGS) float64 {
-	weights := make([]float64, 0)
-	for _, weight := range p.Weights {
-		w, err := weight.Float64()
-		if err != nil {
-			log.Println("Error converting weight to float64:", err)
-		}
-		weights = append(weights, w)
-	}
-	sort.Slice(weights, func(i, j int) bool {
-		return math.Abs(weights[i]) < math.Abs(weights[j])
-	})
-	minw := weights[0]
-	if minw == 0 {
-		minw = weights[1]
-	}
-	return minw * math.Pow(10, float64(p.WeightPrecision))
-}
-
-func log3(x float64) float64 {
-	return math.Log2(x) / math.Log2(3)
 }
 
 func copyFilteredPGSFiles() {

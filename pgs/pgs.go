@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"sort"
@@ -214,13 +215,6 @@ scannerLoop:
 			fields[p.Fieldnames[i]] = value
 		}
 		precisions = append(precisions, getPrecision(fields["effect_weight"].(string)))
-		//precision = getPrecision(fields["effect_weight"].(string))
-		//if maxPrecision < precision {
-		//	maxPrecision = precision
-		//}
-		//if minPrecision > precision && precision != 1 {
-		//	minPrecision = precision
-		//}
 		variant := NewVariant(fields)
 		p.Variants[variant.GetLocus()] = variant
 	}
@@ -747,4 +741,18 @@ func GetIndividualAncestry(idv string, ancestry map[string]string) string {
 		idvAnc = strings.Split(idvAnc, ",")[0]
 	}
 	return idvAnc
+}
+
+func (p *PGS) FindMaxAbsoluteWeight() float64 {
+	maxWeight := 0.0
+	for _, weight := range p.Weights {
+		w, err := weight.Float64()
+		if err != nil {
+			log.Println("Error converting weight to float64:", err)
+		}
+		if math.Abs(w) > maxWeight {
+			maxWeight = math.Abs(w)
+		}
+	}
+	return maxWeight * math.Pow(10, float64(p.WeightPrecision))
 }
