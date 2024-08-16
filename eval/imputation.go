@@ -177,11 +177,11 @@ func fillPreImputeVCF(chrId int, ancestry string) {
 			if snp, ok = guessed[idv][chr][fmt.Sprintf("%d", chrPositions[i])]; ok {
 				switch snp {
 				case 0:
-					line += "\t0/0"
+					line += "\t0|0"
 				case 1:
 					line += "\t1/0"
 				case 2:
-					line += "\t1/1"
+					line += "\t1|1"
 				default:
 					log.Fatalf("Invalid SNP value: %d", snp)
 				}
@@ -270,11 +270,11 @@ func fillTruthVCF(chrId int, ancestry string) {
 			if snp, ok = trueGtp[idv][stringedPositions[i]]; ok {
 				switch snp {
 				case 0:
-					line += "\t0/0"
+					line += "\t0|0"
 				case 1:
 					line += "\t1/0"
 				case 2:
-					line += "\t1/1"
+					line += "\t1|1"
 				default:
 					log.Fatalf("Invalid SNP value: %d", snp)
 				}
@@ -400,21 +400,266 @@ func constructIBDVCFs() {
 
 func prepareIBD() {
 	guessedSnps := loadGuessedGenotypes()
-	ancestries := tools.LoadAncestry()
 	guessedIndividuals := make([]string, 0)
 	for idv := range guessedSnps {
 		guessedIndividuals = append(guessedIndividuals, idv)
 	}
-	positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
-	phasing()
-	combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
-	compressChromosomes()
-	concatenateChromosomes()
-	plinkIBD()
-	plinkKing()
+	sort.Strings(guessedIndividuals)
+	preparePlinkInput(guessedIndividuals, guessedSnps)
+	compressVcfFile("ibd/plink.vcf", "ibd/plink.vcf.gz")
+	indexVcfFile("ibd/plink.vcf.gz")
+	plinkIBD("ibd/plink.vcf.gz")
+	plinkKing("ibd/plink.vcf.gz")
+	//
+	positions, alleles := prepareEagleInput(guessedIndividuals, guessedSnps)
+	prepareReferences(positions, alleles)
+	//ancestries := tools.LoadAncestry()
+	//positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
+	//beaglePhasing()
+	//combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
 	refinedIBD()
 	mergeRefinedIBDForAllChromosomes()
 	convertIBDToKinship()
+}
+
+func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[string]map[string]uint8) {
+	alleles := make(map[string]map[string][]string)
+	positions := make(map[string][]int)
+	var ref, alt, chr string
+	var ok bool
+	// Get all the guessed positions and corresponding alleles
+	for chrId := 1; chrId <= 22; chrId++ {
+		positionsMap := make(map[string]struct{})
+		chr = strconv.Itoa(chrId)
+		for idv := range guessed {
+			for pos := range guessed[idv][chr] {
+				positionsMap[pos] = struct{}{}
+			}
+		}
+		positions[chr] = make([]int, 0)
+		alleles[chr] = make(map[string][]string)
+		for pos := range positionsMap {
+			posInt, _ := strconv.Atoi(pos)
+			positions[chr] = append(positions[chr], posInt)
+			ref, alt = retrievePositionAlleles(chr, pos)
+			alleles[chr][pos] = []string{ref, alt}
+		}
+		sort.Ints(positions[chr])
+	}
+	// Retrieve the true genotypes for all the guessed guessedIndividuals
+	mainIndividuals, relativeIndividuals := make([]string, 0), make([]string, 0)
+	for _, idv := range solver.All1000GenomesSamples() {
+		if _, ok = guessed[idv]; ok {
+			mainIndividuals = append(mainIndividuals, idv)
+		}
+	}
+	for _, idv := range solver.AllRelativeSamples() {
+		if _, ok = guessed[idv]; ok {
+			relativeIndividuals = append(relativeIndividuals, idv)
+		}
+	}
+	truthIndividuals := append(mainIndividuals, relativeIndividuals...)
+	trueSNPs := make(map[string]map[string]map[string]string)
+	var retrieved map[string]map[string]string
+	for chrId := 1; chrId <= 22; chrId++ {
+		chr = strconv.Itoa(chrId)
+		strPos := make([]string, len(positions[chr]))
+		for i, pos := range positions[chr] {
+			strPos[i] = strconv.Itoa(pos)
+		}
+		retrieved = getIndividualPositionStrings(chr, strPos, mainIndividuals, tools.GG)
+		transferSnps(trueSNPs, retrieved, chr)
+		retrieved = getIndividualPositionStrings(chr, strPos, relativeIndividuals, tools.RL)
+		transferSnps(trueSNPs, retrieved, chr)
+		fmt.Printf("Chr %s: loaded true trueSNPs\n", chr)
+	}
+
+	formatHeader := "##fileformat=VCFv4.1\n" +
+		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
+	// Construct VCF
+	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+	for _, idv := range guessedIndividuals {
+		samplesHeader += fmt.Sprintf("\t%s", "$"+idv)
+	}
+	for _, idv := range truthIndividuals {
+		samplesHeader += fmt.Sprintf("\t%s", idv)
+	}
+	samplesHeader += "\n"
+	vcfFile, err := os.OpenFile("ibd/plink.vcf", os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Cannot create plink ibd file: %v", err)
+	}
+	defer vcfFile.Close()
+	_, err = vcfFile.WriteString(formatHeader)
+	if err != nil {
+		log.Fatalf("Cannot write format header to plink ibd file: %v", err)
+	}
+	_, err = vcfFile.WriteString(samplesHeader)
+	if err != nil {
+		log.Fatalf("Cannot write samples header to plink ibd file: %v", err)
+	}
+	var snp uint8
+	for chrId := 1; chrId <= 22; chrId++ {
+		chr = strconv.Itoa(chrId)
+	positionLoop:
+		for _, posId := range positions[chr] {
+			pos := strconv.Itoa(posId)
+			if _, ok = alleles[chr]; !ok || alleles[chr][pos][0] == "." || alleles[chr][pos][1] == "." {
+				//if _, ok = alleles[chr]; !ok {
+				continue
+			}
+			if _, ok = alleles[chr][pos]; !ok {
+				alleles[chr][pos] = []string{".", "."}
+			}
+			line := fmt.Sprintf(lineTemplate, chr, pos, alleles[chr][pos][0], alleles[chr][pos][1])
+			for _, idv := range guessedIndividuals {
+				if snp, ok = guessed[idv][chr][pos]; ok {
+					switch snp {
+					case 0:
+						line += "\t0|0"
+					case 1:
+						line += "\t1/0"
+					case 2:
+						line += "\t1|1"
+					default:
+						log.Fatalf("Invalid SNP value: %d", snp)
+					}
+				} else {
+					continue positionLoop
+					//line += "\t.|."
+				}
+			}
+			for _, idv := range truthIndividuals {
+				if _, ok = trueSNPs[idv][chr][pos]; ok {
+					line += fmt.Sprintf("\t%s", trueSNPs[idv][chr][pos])
+				} else {
+					line += "\t0|0"
+				}
+			}
+			_, err = vcfFile.WriteString(line + "\n")
+			if err != nil {
+				log.Fatalf("Cannot write to plink ibd file %s: %v", line, err)
+			}
+		}
+	}
+}
+
+func compressVcfFile(pathIn, pathOut string) {
+	prg := "bgzip"
+	cmd := exec.Command(prg, "-c", pathIn)
+	outputFile, err := os.OpenFile(pathOut, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error creating output file: %v", err)
+	}
+	defer outputFile.Close()
+	cmd.Stdout = outputFile
+	err = cmd.Run()
+	if err != nil {
+		log.Fatalf("Error executing command: %v", err)
+	}
+}
+
+func indexVcfFile(path string) {
+	runCommand("bcftools", []string{"index", path})
+}
+
+func prepareEagleInput(individuals []string, guessed map[string]map[string]map[string]uint8) (map[string][]int, map[string]map[string][]string) {
+	alleles := make(map[string]map[string][]string)
+	positions := make(map[string][]int)
+	var ref, alt string
+	for chrId := 1; chrId <= 22; chrId++ {
+		positionsMap := make(map[string]struct{})
+		chr := strconv.Itoa(chrId)
+		for idv := range guessed {
+			for pos := range guessed[idv][chr] {
+				positionsMap[pos] = struct{}{}
+			}
+		}
+		positions[chr] = make([]int, 0)
+		alleles[chr] = make(map[string][]string)
+		for pos := range positionsMap {
+			posInt, _ := strconv.Atoi(pos)
+			positions[chr] = append(positions[chr], posInt)
+			ref, alt = retrievePositionAlleles(chr, pos)
+			alleles[chr][pos] = []string{ref, alt}
+		}
+		sort.Ints(positions[chr])
+	}
+	//
+	formatHeader := "##fileformat=VCFv4.1\n" +
+		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
+	numWorkers := 15
+	tasks := make(chan string, 1)
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var snp uint8
+			var ok bool
+			for idv := range tasks {
+				fmt.Printf("%s\n", idv)
+				// Construct VCF
+				samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+				samplesHeader += fmt.Sprintf("\t%s\n", "$"+idv)
+				vcfFile, err := os.OpenFile(fmt.Sprintf("ibd/prephase/%s.vcf", idv), os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					log.Fatalf("Cannot create ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(formatHeader)
+				if err != nil {
+					log.Fatalf("Cannot write format header to ibd file: %v", err)
+				}
+				_, err = vcfFile.WriteString(samplesHeader)
+				if err != nil {
+					log.Fatalf("Cannot write samples header to ibd file: %v", err)
+				}
+				//positionLoop:
+				for chrId := 1; chrId <= 22; chrId++ {
+					chr := strconv.Itoa(chrId)
+					for _, posId := range positions[chr] {
+						pos := strconv.Itoa(posId)
+						if _, ok = alleles[chr]; !ok || alleles[chr][pos][0] == "." || alleles[chr][pos][1] == "." {
+							continue
+						}
+						line := fmt.Sprintf(lineTemplate, chr, pos, alleles[chr][pos][0], alleles[chr][pos][1])
+						if snp, ok = guessed[idv][chr][pos]; ok {
+							switch snp {
+							case 0:
+								line += "\t0|0"
+							case 1:
+								line += "\t1/0"
+							case 2:
+								line += "\t1|1"
+							default:
+								log.Fatalf("Invalid SNP value: %d", snp)
+							}
+						} else {
+							//continue positionLoop
+							line += "\t.|."
+						}
+						_, err = vcfFile.WriteString(line + "\n")
+						if err != nil {
+							log.Fatalf("Cannot write to ibd file %s: %v", line, err)
+						}
+					}
+				}
+				vcfFile.Close()
+			}
+		}()
+	}
+	for _, idv := range individuals {
+		tasks <- idv
+	}
+	close(tasks)
+	wg.Wait()
+	return positions, alleles
+}
+
+func prepareReferences(positions map[string][]int, alleles map[string]map[string][]string) {
+
 }
 
 func preparePhasingInputFiles(individuals []string, guessed map[string]map[string]map[string]uint8,
@@ -490,11 +735,11 @@ func preparePhasingInputFiles(individuals []string, guessed map[string]map[strin
 						if snp, ok = guessed[idv][chr][pos]; ok {
 							switch snp {
 							case 0:
-								line += "\t0/0"
+								line += "\t0|0"
 							case 1:
 								line += "\t1/0"
 							case 2:
-								line += "\t1/1"
+								line += "\t1|1"
 							default:
 								log.Fatalf("Invalid SNP value: %d", snp)
 							}
@@ -516,7 +761,7 @@ func preparePhasingInputFiles(individuals []string, guessed map[string]map[strin
 	return positions, alleles
 }
 
-func phasing() {
+func beaglePhasing() {
 	//-Xmx8g -jar beagle/beagle.27May24.118.jar gt=prs/ibd.vcf ref=beagle/b37.bref3/chr1.1kg.phase3.v5a.b37.bref3 out=phased map=GRCh37_map/plink.chr1.GRCh37.map impute=false nthreads=4
 	numWorkers := 5
 	prg := "../jdk/bin/java"
@@ -662,6 +907,15 @@ func combineAndAddGroundTruth(guessedIndividuals []string, guessedSnps map[strin
 	wg.Wait()
 }
 
+func transferSnps(to map[string]map[string]map[string]string, from map[string]map[string]string, chr string) {
+	for idv := range from {
+		if _, ok := to[idv]; !ok {
+			to[idv] = make(map[string]map[string]string)
+		}
+		to[idv][chr] = from[idv]
+	}
+}
+
 func transferRetrievedSnps(to, from map[string]map[string]string) {
 	for idv := range from {
 		if _, ok := to[idv]; !ok {
@@ -753,12 +1007,12 @@ func concatenateChromosomes() {
 	}
 }
 
-func plinkIBD() {
-	runCommand("plink", []string{"--vcf", "ibd/merged.vcf.gz", "--make-rel", "--out", "ibd/plink"})
+func plinkIBD(path string) {
+	runCommand("plink", []string{"--vcf", path, "--make-rel", "square", "--out", "ibd/plink"})
 }
 
-func plinkKing() {
-	runCommand("plink", []string{"--vcf", "ibd/merged.vcf.gz", "--make-king", "--out", "ibd/plink"})
+func plinkKing(path string) {
+	runCommand("plink", []string{"--vcf", path, "--make-king", "square", "--out", "ibd/plink"})
 }
 
 func mergeRefinedIBDForAllChromosomes() {

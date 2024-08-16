@@ -763,24 +763,45 @@ def sequential_loci_accuracy():
     for locus, result in content.items():
         for ancestry, eaf in result['EAF'].items():
             eaf_data.append({'EAF': float(eaf), 'Ancestry': ancestry, 'PGS': int(result['SmallestPGS']),
-                             'Accuracy': 100*float(result['CorrectGuesses'][ancestry])/float(result['TotalGuesses'][ancestry])})
+                             'Density': float(result['Density']), 'Accuracy':
+                                 100*float(result['CorrectGuesses'][ancestry])/float(result['TotalGuesses'][ancestry])})
 
     df = pd.DataFrame(eaf_data)
     df['EAF_bin'] = pd.cut(df['EAF'], bins=35)
-    mean_accuracy_per_bin = df.groupby(['EAF_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
-    mean_accuracy_per_bin['EAF_mid'] = mean_accuracy_per_bin['EAF_bin'].apply(lambda x: x.mid)
+    eaf_df = df.groupby(['EAF_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
+    eaf_df['EAF_mid'] = eaf_df['EAF_bin'].apply(lambda x: x.mid)
     fig1, ax1 = plt.subplots(figsize=(4, 3))
-    sns.lineplot(data=mean_accuracy_per_bin, x='EAF_mid', y='Accuracy', ax=ax1, color='teal')
+    sns.lineplot(data=eaf_df, x='EAF_mid', y='Accuracy', ax=ax1, color='teal')
     ax1.set_ylim(80, 100)
     plt.xlabel('Effect Allele Frequency')
     plt.ylabel('Guess accuracy, %')
     plt.tight_layout()
 
     fig2, ax2 = plt.subplots(figsize=(4, 3))
+    # df['PGS_bin'] = pd.cut(df['PGS'], bins=20)
+    # pgs_df = df.groupby(['PGS_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
+    # pgs_df['PGS_mid'] = pgs_df['PGS_bin'].apply(lambda x: x.mid)
     sns.lineplot(x='PGS', y='Accuracy', data=df, ax=ax2, color='coral')
     plt.xlabel('Size of the smallest PGS with the locus')
     plt.ylabel('Guess accuracy, %')
     plt.tight_layout()
+
+    fig3, ax3 = plt.subplots(figsize=(4, 3))
+    df['Density_bin'] = pd.cut(df['Density'], bins=30)
+    density_df = df.groupby(['Density_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
+    density_df['Density_mid'] = density_df['Density_bin'].apply(lambda x: x.mid)
+    sns.lineplot(x='Density_mid', y='Accuracy', data=density_df, ax=ax3, color='#79ff50')
+    plt.xlabel('PGS density of the first locus appearance')
+    plt.ylabel('Guess accuracy, %')
+    plt.tight_layout()
+
+    fig4, ax4 = plt.subplots(figsize=(4, 3))
+    sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax4)
+    plt.xlabel('EAF')
+    plt.ylabel('Density')
+    plt.xlim(0, 1)
+    plt.tight_layout()
+
     plt.show()
 
 
@@ -1184,143 +1205,176 @@ def king_accuracy():
     # filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
     #              fnmatch.fnmatch(filename, f"unimputed*.json")]
 
-    data = {}
-    ancestries = {}
+    data = []
+    related = read_related_individuals()
     with open(filepath, 'r') as f:
         content = json.load(f)
     for idv, entry in content.items():
-        if idv not in data:
-            data[idv] = {}
-        ancestries[idv] = entry["Ancestry"]
+        # if idv not in data:
+        #     data[idv] = {}
+        # ancestries[idv] = entry["Ancestry"]
         for target, relation in entry["Relations"].items():
-            if target not in data[idv]:
-                data[idv][target] = {}
-                data[idv][target]["Count"] = [float(c) for c in relation["Count"]]
-                data[idv][target]["King"] = [float(c) for c in relation["King"]]
-            else:
-                for i, c in enumerate(relation["Count"]):
-                    data[idv][target]["Count"][i] += float(c)
-                for i, c in enumerate(relation["King"]):
-                    data[idv][target]["King"][i] += float(c)
+            if target == idv:
+                data.append({'Category': 'Self', 'Ancestry': entry["Ancestry"], 'Method': 'King',
+                            'Kinship': float(relation["King"][0])/float(relation["King"][1])})
+                data.append({'Category': 'Self', 'Ancestry': entry["Ancestry"], 'Method': 'Count',
+                            'Kinship': float(relation["Count"][0])/float(relation["Count"][1])})
+                continue
+            if idv in related:
+                for relative in related[idv]:
+                    if target == relative[0]:
+                        category = ''
+                        if relative[1] == '1':
+                            category = '1st degree'
+                        elif relative[1] == '2':
+                            category = '2nd degree'
+                        data.append({'Category': category, 'Ancestry': entry["Ancestry"], 'Method': 'King',
+                                     'Kinship': float(relation["King"][0])/float(relation["King"][1])})
+                        data.append({'Category': category, 'Ancestry': entry["Ancestry"], 'Method': 'Count',
+                                    'Kinship': float(relation["Count"][0])/float(relation["Count"][1])})
+                continue
+            data.append({'Category': 'Everyone else', 'Ancestry': entry["Ancestry"], 'Method': 'King',
+                        'Kinship': float(relation["King"][0])/float(relation["King"][1])})
+            data.append({'Category': 'Everyone else', 'Ancestry': entry["Ancestry"], 'Method': 'Count',
+                        'Kinship': float(relation["Count"][0])/float(relation["Count"][1])})
 
-    divided = {}
-    for idv in data:
-        divided[idv] = {"Count": [], "King": []}
-        for target in data[idv]:
-            divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
-            divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
-        # sort by the match count and king score
-        divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
-        divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
-        # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
+    df = pd.DataFrame(data)
+    self_cutoff = 0.3535
+    first_degree_cutoff = 0.1768
+    second_degree_cutoff = 0.089
+    fig1, ax1 = plt.subplots(figsize=(7, 3))
+    sns.boxplot(x='Category', y='Kinship', data=df, hue='Method', palette='pastel', ax=ax1,
+                order=['Self', '1st degree', '2nd degree', 'Everyone else'])
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=0.5, s='Criteria', va='center', ha='left', color='black')
+    ax1.axhline(y=self_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=self_cutoff, s='Self', va='center', ha='left', color='black')
+    ax1.axhline(y=first_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=first_degree_cutoff, s='1st', va='center', ha='left', color='black')
+    ax1.axhline(y=second_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=second_degree_cutoff, s='2nd', va='center', ha='left', color='black')
+    ax1.set_ylabel('Kinship')
+    ax1.set_xlabel('')
+    ax1.legend(title="")
 
-    parsed = {"SelfCountPos": [], "SelfKingPos": [],
-              "RelativeCountPos": [], "RelativeKingPos": [],
-              "ReferenceCountPos": [], "ReferenceKingPos": [],
-              "SelfCountAcc": [], "SelfKingAcc": [],
-              "RelativeCountAcc": [], "RelativeKingAcc": [],
-              "ReferenceCountAcc": [], "ReferenceKingAcc": [],
-              "EveryCountRatio": [], "EveryKingRatio": []}
-    related = read_related_individuals()
-    for idv in divided:
-        relative_found = False
-        for i, tpl in enumerate(divided[idv]["Count"]):
-            if tpl[0] == idv:
-                parsed["SelfCountPos"].append(i)
-                parsed["SelfCountAcc"].append(tpl[1])
-            if tpl[0] == "reference":
-                parsed["ReferenceCountPos"].append(i)
-                parsed["ReferenceCountAcc"].append(tpl[1])
-            if not relative_found and idv in related and tpl[0] in related[idv]:
-                parsed["RelativeCountPos"].append(i)
-                parsed["RelativeCountAcc"].append(tpl[1])
-                relative_found = True
-            parsed["EveryCountRatio"].append(tpl[1])
-    for idv in divided:
-        relative_found = False
-        for i, tpl in enumerate(divided[idv]["King"]):
-            if tpl[0] == idv:
-                parsed["SelfKingPos"].append(i)
-                parsed["SelfKingAcc"].append(tpl[1])
-            if tpl[0] == "reference":
-                parsed["ReferenceKingPos"].append(i)
-                parsed["ReferenceKingAcc"].append(tpl[1])
-            if not relative_found and idv in related and tpl[0] in related[idv]:
-                parsed["RelativeKingPos"].append(i)
-                parsed["RelativeKingAcc"].append(tpl[1])
-                relative_found = True
-            parsed["EveryKingRatio"].append(tpl[1])
 
-    print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
-    print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
-    print(f"ReferenceCountAcc: {np.median(parsed['ReferenceCountAcc'])}, {np.mean(parsed['ReferenceCountAcc'])}")
-    print(f"EveryCountRatio: {np.median(parsed['EveryCountRatio'])}, {np.mean(parsed['EveryCountRatio'])}")
-    print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
-    print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
-    print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
-    print(f"EveryKingRatio: {np.median(parsed['EveryKingRatio'])}, {np.mean(parsed['EveryKingRatio'])}")
-
-    palette = {}
-    for key in parsed:
-        if key.startswith("Self"):
-            palette[key] = sns.color_palette("pastel")[0]
-        elif key.startswith("Relative"):
-            palette[key] = sns.color_palette("pastel")[1]
-        elif key.startswith("Reference"):
-            palette[key] = sns.color_palette("pastel")[2]
-        else:
-            palette[key] = sns.color_palette("pastel")[3]
-
-    keys = [["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"],
-            ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"],
-            ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"],
-            ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"]]
-    df = []
-    for key in keys:
-        df.append(prepare_data(parsed, key))
-    fig1, axes1 = plt.subplots(1, 2, figsize=(12, 5))
-    for i, ax1 in enumerate(axes1):
-        ax1.invert_yaxis()
-        ax1.set_ylabel('Rank')
-        ax1.set_xlabel('')
-        ax1.set_xticklabels(["Self", "Relative", "Reference"])
-        sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
-        medians = df[i].groupby(['Versus'])['Value'].median()
-        print(f"Medians for df[{i}]:", medians)  # Debug print
-        # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
-        #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
-        #                  xy=(tick, medians[label.get_text()]),
-        #                  xytext=(0, 5),  # 5 points vertical offset
-        #                  textcoords='offset points',
-        #                  ha='center', va='center',
-        #                  color='red', fontsize=10, fontweight='bold')
-    axes1[0].set_title('Match Count Based')
-    axes1[0].set_ylim(2550, -50)
-    axes1[1].set_title('KING Based')
-    axes1[1].set_ylim(2550, -50)
-    # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
-    # fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
-
-    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
-    for i, ax2 in enumerate(axes2):
-        ax2.set_xlabel('')
-        ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
-        sns.boxplot(x='Versus', y='Value', data=df[i + int(len(df)/2)], hue='Versus', palette=palette, ax=axes2[i])
-        medians = df[i + int(len(df)/2)].groupby(['Versus'])['Value'].median()
-        print(f"Medians for df[{i}]:", medians)  # Debug print
-        # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
-        #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
-        #                  xy=(tick, medians[label.get_text()]),
-        #                  xytext=(0, 5),  # 5 points vertical offset
-        #                  textcoords='offset points',
-        #                  ha='center', va='center',
-        #                  color='red', fontsize=10, fontweight='bold')
-    axes2[0].set_title('Match Count Based')
-    axes2[0].set_ylabel('Match ratio')
-    axes2[1].set_ylabel('KING score')
-    axes2[1].set_title('KING Based')
-    # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
-    # fig2.savefig('imputed-acc.png', dpi=300, bbox_inches='tight')
+    # divided = {}
+    # for idv in data:
+    #     divided[idv] = {"Count": [], "King": []}
+    #     for target in data[idv]:
+    #         divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
+    #         divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
+    #     # sort by the match count and king score
+    #     divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
+    #     divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
+    #     # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
+    #
+    # parsed = {"SelfCountPos": [], "SelfKingPos": [],
+    #           "RelativeCountPos": [], "RelativeKingPos": [],
+    #           "ReferenceCountPos": [], "ReferenceKingPos": [],
+    #           "SelfCountAcc": [], "SelfKingAcc": [],
+    #           "RelativeCountAcc": [], "RelativeKingAcc": [],
+    #           "ReferenceCountAcc": [], "ReferenceKingAcc": [],
+    #           "EveryCountRatio": [], "EveryKingRatio": []}
+    #
+    # for idv in divided:
+    #     relative_found = False
+    #     for i, tpl in enumerate(divided[idv]["Count"]):
+    #         if tpl[0] == idv:
+    #             parsed["SelfCountPos"].append(i)
+    #             parsed["SelfCountAcc"].append(tpl[1])
+    #         if tpl[0] == "reference":
+    #             parsed["ReferenceCountPos"].append(i)
+    #             parsed["ReferenceCountAcc"].append(tpl[1])
+    #         if not relative_found and idv in related and tpl[0] in related[idv]:
+    #             parsed["RelativeCountPos"].append(i)
+    #             parsed["RelativeCountAcc"].append(tpl[1])
+    #             relative_found = True
+    #         parsed["EveryCountRatio"].append(tpl[1])
+    # for idv in divided:
+    #     relative_found = False
+    #     for i, tpl in enumerate(divided[idv]["King"]):
+    #         if tpl[0] == idv:
+    #             parsed["SelfKingPos"].append(i)
+    #             parsed["SelfKingAcc"].append(tpl[1])
+    #         if tpl[0] == "reference":
+    #             parsed["ReferenceKingPos"].append(i)
+    #             parsed["ReferenceKingAcc"].append(tpl[1])
+    #         if not relative_found and idv in related and tpl[0] in related[idv]:
+    #             parsed["RelativeKingPos"].append(i)
+    #             parsed["RelativeKingAcc"].append(tpl[1])
+    #             relative_found = True
+    #         parsed["EveryKingRatio"].append(tpl[1])
+    #
+    # print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
+    # print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
+    # print(f"ReferenceCountAcc: {np.median(parsed['ReferenceCountAcc'])}, {np.mean(parsed['ReferenceCountAcc'])}")
+    # print(f"EveryCountRatio: {np.median(parsed['EveryCountRatio'])}, {np.mean(parsed['EveryCountRatio'])}")
+    # print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
+    # print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
+    # print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
+    # print(f"EveryKingRatio: {np.median(parsed['EveryKingRatio'])}, {np.mean(parsed['EveryKingRatio'])}")
+    #
+    # palette = {}
+    # for key in parsed:
+    #     if key.startswith("Self"):
+    #         palette[key] = sns.color_palette("pastel")[0]
+    #     elif key.startswith("Relative"):
+    #         palette[key] = sns.color_palette("pastel")[1]
+    #     elif key.startswith("Reference"):
+    #         palette[key] = sns.color_palette("pastel")[2]
+    #     else:
+    #         palette[key] = sns.color_palette("pastel")[3]
+    #
+    # keys = [["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"],
+    #         ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"],
+    #         ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"],
+    #         ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"]]
+    # df = []
+    # for key in keys:
+    #     df.append(prepare_data(parsed, key))
+    # fig1, axes1 = plt.subplots(1, 2, figsize=(12, 5))
+    # for i, ax1 in enumerate(axes1):
+    #     ax1.invert_yaxis()
+    #     ax1.set_ylabel('Rank')
+    #     ax1.set_xlabel('')
+    #     ax1.set_xticklabels(["Self", "Relative", "Reference"])
+    #     sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
+    #     medians = df[i].groupby(['Versus'])['Value'].median()
+    #     print(f"Medians for df[{i}]:", medians)  # Debug print
+    #     # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
+    #     #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
+    #     #                  xy=(tick, medians[label.get_text()]),
+    #     #                  xytext=(0, 5),  # 5 points vertical offset
+    #     #                  textcoords='offset points',
+    #     #                  ha='center', va='center',
+    #     #                  color='red', fontsize=10, fontweight='bold')
+    # axes1[0].set_title('Match Count Based')
+    # axes1[0].set_ylim(2550, -50)
+    # axes1[1].set_title('KING Based')
+    # axes1[1].set_ylim(2550, -50)
+    # # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
+    # # fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
+    #
+    # fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
+    # for i, ax2 in enumerate(axes2):
+    #     ax2.set_xlabel('')
+    #     ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
+    #     sns.boxplot(x='Versus', y='Value', data=df[i + int(len(df)/2)], hue='Versus', palette=palette, ax=axes2[i])
+    #     medians = df[i + int(len(df)/2)].groupby(['Versus'])['Value'].median()
+    #     print(f"Medians for df[{i}]:", medians)  # Debug print
+    #     # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
+    #     #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
+    #     #                  xy=(tick, medians[label.get_text()]),
+    #     #                  xytext=(0, 5),  # 5 points vertical offset
+    #     #                  textcoords='offset points',
+    #     #                  ha='center', va='center',
+    #     #                  color='red', fontsize=10, fontweight='bold')
+    # axes2[0].set_title('Match Count Based')
+    # axes2[0].set_ylabel('Match ratio')
+    # axes2[1].set_ylabel('KING score')
+    # axes2[1].set_title('KING Based')
+    # # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
+    # # fig2.savefig('imputed-acc.png', dpi=300, bbox_inches='tight')
 
     plt.tight_layout()
     plt.show()
@@ -1571,10 +1625,11 @@ def load_results(id_file, data_file, method):
         indf.columns = ids
         indf.index = ids
     else:
-        indf = pd.read_csv("ibd/refined.ibd", sep='\t', index_col=0)
+        indf = pd.read_csv(data_file, sep='\t', index_col=0)
 
     # Prune the DataFrame to include only rows starting with '$' and columns not starting with '$'
     pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
+    truth_df = indf.loc[~indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
     related = read_related_individuals()
 
     results = []
@@ -1585,6 +1640,8 @@ def load_results(id_file, data_file, method):
         kinship = pruned_df.at[idv, target]
         self_rank = pruned_df.loc[idv].rank(ascending=False)[target]
         results.append({'Category': 'Self', 'Kinship': kinship, 'Rank': self_rank, 'Method': method})
+        results.append({'Category': 'Self', 'Kinship': truth_df.at[target, target],
+                        'Rank': truth_df.loc[target].rank(ascending=False)[target], 'Method': 'True'+method})
         relatives = []
         if target in related:
             relatives = []
@@ -1599,13 +1656,12 @@ def load_results(id_file, data_file, method):
                 elif relative[1] == '2':
                     category = '2nd degree'
                 results.append({'Category': category, 'Kinship': relative_kinship, 'Rank': relative_rank, 'Method': method})
+                results.append({'Category': category, 'Kinship': truth_df.at[target, relative[0]],
+                                'Rank': truth_df.loc[target].rank(ascending=False)[relative[0]], 'Method': 'True'+method})
                 relatives.append(relative[0])
         other_columns = pruned_df.columns[~pruned_df.columns.isin([target] + relatives)]
         kinships = pruned_df.loc[idv, other_columns]
         ranks = pruned_df.loc[idv].rank(ascending=False)[other_columns]
-        # high_kinship_positions = kinships[kinships > 0.22]
-        # for col in high_kinship_positions.index:
-        #     print(f"{method}: {target}->{col} {high_kinship_positions[col]}, rank: {ranks[col]}")
         temp_df = pd.DataFrame({
             'Category': 'Everyone else',
             'Kinship': kinships.values,
@@ -1613,6 +1669,17 @@ def load_results(id_file, data_file, method):
             'Method': method
         })
         results.extend(temp_df.to_dict('records'))
+        #
+        other_columns = truth_df.columns[~truth_df.columns.isin([target] + relatives)]
+        kinships = truth_df.loc[target, other_columns]
+        ranks = truth_df.loc[target].rank(ascending=False)[other_columns]
+        temp_df = pd.DataFrame({
+            'Category': 'Everyone else',
+            'Kinship': kinships.values,
+            'Rank': ranks.values,
+            'Method': 'True'+method
+        })
+    results.extend(temp_df.to_dict('records'))
 
     return pd.DataFrame(results)
 
@@ -1621,7 +1688,10 @@ def plot_rank_cdf(df, category, ax):
     colors = sns.color_palette("deep")
     # Filter the dataframe for the given category
     category_df = df[df['Category'] == category]
+    methods = ['KING', 'Plink IBD']
     for i, method in enumerate(category_df['Method'].unique()):
+        if method not in methods:
+            continue
         method_df = category_df[category_df['Method'] == method]
         # Sort the ranks for the cumulative distribution
         sorted_ranks = np.sort(method_df['Rank'])
@@ -1629,21 +1699,10 @@ def plot_rank_cdf(df, category, ax):
         cdf = np.arange(1, len(sorted_ranks) + 1) / len(sorted_ranks) * 100
         ax.plot(sorted_ranks, cdf, label=f'{method}', color=colors[i], linewidth=2)
     ax.set_title(f'{category}')
-    ax.set_xlim(-5, 300)
+    ax.set_xlim(-5, 100)
 
 
 def deanonymization_accuracy():
-    king_df = load_results("ibd/plink.king.id", "ibd/plink.king", 'KING')
-    rel_df = load_results("ibd/plink.rel.id", "ibd/plink.rel", 'Plink IBD')
-    rel_df['Kinship'] = rel_df['Kinship'] / 2 # Relatedness -> Kinship
-    rel_df['Kinship'] = [0.5 if k > 0.5 else k for k in rel_df['Kinship']]
-    refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
-    print(f'Median KING rank: {king_df["Rank"].median()}, Median KING kinship: {king_df["Kinship"].median()}')
-    print(f'Median Plink IBD rank: {rel_df["Rank"].median()}, Median Plink IBD kinship: {rel_df["Kinship"].median()}')
-    print(f'Median Refined IBD rank: {refined_df["Rank"].median()}, Median Refined IBD kinship: {refined_df["Kinship"].median()}')
-    df = pd.concat([king_df, rel_df, refined_df])
-    # print(df[df['Category'] == '2nd degree'])
-
     params = {
         'font.size': 13,
         'axes.labelsize': 13,
@@ -1655,12 +1714,48 @@ def deanonymization_accuracy():
         'font.family': 'serif'
     }
     mpl.rcParams.update(params)
+
+    king_df = load_results("ibd/nophase/plink.king.id", "ibd/nophase/plink.king", 'KING')
+    rel_df = load_results("ibd/nophase/plink.rel.id", "ibd/nophase/plink.rel", 'Plink IBD')
+    rel_df['Kinship'] = rel_df['Kinship'] / 2 # Relatedness -> Kinship
+    rel_df['Kinship'] = [0.5 if k > 0.5 else k for k in rel_df['Kinship']]
+    # refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
+    # df = pd.concat([king_df, rel_df, refined_df])
+    df = pd.concat([king_df, rel_df])
+
+    palette = sns.color_palette("pastel")
+    for category in df['Category'].unique():
+        print(f'==== {category} ====')
+        for method in df['Method'].unique():
+            category_df = df[(df['Category'] == category) & (df['Method'] == method)]
+            print(f'{method} kinship: {category_df["Kinship"].median()}, '
+                  f'rank: {category_df["Rank"].median()}')
     self_cutoff = 0.3535
     first_degree_cutoff = 0.1768
     second_degree_cutoff = 0.089
     fig1, ax1 = plt.subplots(figsize=(7, 3))
-    sns.boxplot(x='Category', y='Kinship', data=df, hue='Method', palette='pastel', ax=ax1,
+    guess_methods = ['KING', 'Plink IBD']
+    ground_truth_methods = ['TrueKING', 'TruePlink IBD']
+    method_df = df[df['Method'].isin(guess_methods)]
+    sns.boxplot(x='Category', y='Kinship', data=method_df, hue='Method', palette='pastel', ax=ax1,
                 order=['Self', '1st degree', '2nd degree', 'Everyone else'])
+
+    box_width = 0.8 / len(ground_truth_methods)
+    for method in ground_truth_methods:
+        for category in ['Self', '1st degree', '2nd degree', 'Everyone else']:
+            category_data = df[(df['Method'] == method) & (df['Category'] == category)]
+            median_value = category_data['Kinship'].median()
+            # Find the position of the category on the X axis
+            category_pos = ['Self', '1st degree', '2nd degree', 'Everyone else'].index(category)
+            method_position_offset = ground_truth_methods.index(method) * box_width
+            x_position = category_pos - 0.4 + method_position_offset + box_width / 2
+            print(f'{method} median: {median_value}, position: {category_pos}')
+            ax1.plot([x_position - box_width / 2, x_position + box_width / 2], [median_value, median_value],
+                     color=palette[3], linestyle='--')
+
+    # Adding the legend for the red lines
+    ax1.plot([], [], color=palette[3], linestyle='--', label='Max accuracy')
+
     ax1.text(x=ax1.get_xlim()[1] + 0.03, y=0.5, s='Criteria', va='center', ha='left', color='black')
     ax1.axhline(y=self_cutoff, color='lightgray', linestyle='--', linewidth=1)
     ax1.text(x=ax1.get_xlim()[1] + 0.03, y=self_cutoff, s='Self', va='center', ha='left', color='black')
@@ -1674,7 +1769,7 @@ def deanonymization_accuracy():
 
     fig2, ax2 = plt.subplots(figsize=(5, 3))
     categories = ['Self', '1st degree', '2nd degree']
-    sns.boxplot(x='Category', y='Rank', data=df[df['Category'].isin(categories)], hue='Method', palette='pastel',
+    sns.boxplot(x='Category', y='Rank', data=method_df[method_df['Category'].isin(categories)], hue='Method', palette='pastel',
                 ax=ax2, order=categories)
     ax2.invert_yaxis()
     ax2.set_ylabel('Rank (/2535)')
@@ -1685,7 +1780,7 @@ def deanonymization_accuracy():
     # Plot CDFs for each category
     categories = ['Self', '1st degree', '2nd degree']
     for i, category in enumerate(categories):
-        plot_rank_cdf(df, category, axes3[i])
+        plot_rank_cdf(method_df, category, axes3[i])
     axes3[0].set_ylabel('Percentage')
     axes3[1].set_xlabel('Rank (/2535)')
     handles, labels = axes3[0].get_legend_handles_labels()
@@ -1739,11 +1834,10 @@ if __name__ == "__main__":
     # score_uniqueness()
     # sequential()
     # sequential_idv_accuracy()
-    sequential_loci_accuracy()
+    # sequential_loci_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
     # king_accuracy()
     # ibd_accuracy()
     # plink_accuracy()
-    # load_results("ibd/plink.rel.id", "ibd/plink.rel")
-    # deanonymization_accuracy()
+    deanonymization_accuracy()
