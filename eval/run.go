@@ -70,6 +70,10 @@ func main() {
 		linkingWithKing()
 	case "ibd":
 		prepareIBD()
+	case "findprs":
+		findUnsolvablePRSWithOverlap()
+	case "uniqueness":
+		uniquenessExperiment()
 	}
 	//kinshipExperiment()
 	//kingTest()
@@ -79,31 +83,27 @@ func main() {
 	//linkingWithImputation()
 	//linkingWithGuessed()
 	//evaluateImputation()
-	//findUnsolvablePRSWithOverlap()
-	//predictPRS()
-	//uniquenessExperiment()
 }
 
 func predictPRS() {
 	type Result struct {
 		Known     int
 		Total     int
-		Predicted []float64
-		Real      []float64
+		Predicted []string
+		Real      []string
 	}
 	results := make(map[string]*Result)
 	guessed := loadGuessedGenotypes()
-	//catalogFile := "PGS000055_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000031_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000515_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000148_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000077_hmPOS_GRCh37.txt"
-	//catalogFile := "PGS000788_hmPOS_GRCh37.txt"
-	catalogFiles := []string{"PGS000055_hmPOS_GRCh37.txt", "PGS000031_hmPOS_GRCh37.txt", "PGS000515_hmPOS_GRCh37.txt",
-		"PGS000148_hmPOS_GRCh37.txt", "PGS000720_hmPOS_GRCh37.txt"}
-	for _, catalogFile := range catalogFiles {
+	individuals := solver.All1000GenomesAndRelativeSamples()
+	populations := tools.LoadAncestry()
+
+	pgsIDs := findUnsolvablePRSWithOverlap()
+	//pgsIDs := []string{"PGS000055_hmPOS_GRCh37.txt", "PGS000148_hmPOS_GRCh37.txt",
+	//	"PGS000591_hmPOS_GRCh37.txt", "PGS000515_hmPOS_GRCh37.txt",
+	//	"PGS000031_hmPOS_GRCh37.txt", "PGS000720_hmPOS_GRCh37.txt"}
+	for _, pgsID := range pgsIDs {
 		p := pgs.NewPGS()
-		err := p.LoadCatalogFile(path.Join(params.DataFolder, catalogFile))
+		err := p.LoadCatalogFile(path.Join("catalog", pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
@@ -113,52 +113,23 @@ func predictPRS() {
 		results[p.PgsID] = &Result{
 			Known:     0,
 			Total:     len(p.Loci),
-			Predicted: make([]float64, 0),
-			Real:      make([]float64, 0),
+			Predicted: make([]string, 0),
+			Real:      make([]string, 0),
 		}
 		cohort := solver.NewCohort(p)
-		scores := make([]float64, 0)
-		var scf float64
-		for idv := range cohort {
-			scf, err = cohort[idv].Score.Float64()
-			if err != nil {
-				log.Printf("Error converting predictedScore to float64: %v\n", err)
-				return
-			}
-			scores = append(scores, scf)
-		}
-		sort.Slice(scores, func(i, j int) bool {
-			return scores[i] < scores[j]
-		})
-		weights := make([]float64, len(p.Weights))
-		for i, w := range p.Weights {
-			weights[i], err = w.Float64()
-			if err != nil {
-				log.Printf("Error converting weight to float64: %v\n", err)
-				return
-			}
-		}
-		minScore, maxScore := scores[0], scores[len(scores)-1]
-		populations := tools.LoadAncestry()
-		individuals := solver.AllRelativeSamples()
-		var predictedScore, trueScore float64
 		var majorFreq float32
 		var guess, majorGtp uint8
 		var ok bool
+		divisor := new(apd.Decimal).SetInt64(int64(len(p.Weights) * pgs.Ploidy))
 		for k, idv := range individuals {
-			predictedScore = 0
-			trueScore, err = cohort[idv].Score.Float64()
-			if err != nil {
-				log.Printf("Error converting trueScore to float64: %v\n", err)
-				return
-			}
+			predictedScore := apd.New(0, 0)
 			for i, locus := range p.Loci {
 				chr, pos := tools.SplitLocus(locus)
 				guess, ok = guessed[idv][chr][pos]
 				if !ok {
 					// we do not have a guess for the locus, so we assume the most common genotype
 					majorGtp = 0
-					majorFreq = p.PopulationStats[pgs.GetIndividualAncestry(idv, populations)].GF[i][0]
+					majorFreq = p.PopulationStats[pgs.GetIndividualAncestry(idv, populations)].GF[i][majorGtp]
 					for j, freq := range p.PopulationStats[pgs.GetIndividualAncestry(idv, populations)].GF[i] {
 						if freq > majorFreq {
 							majorGtp = uint8(j)
@@ -170,54 +141,40 @@ func predictPRS() {
 				}
 				switch {
 				case (guess == 0 && p.EffectAlleles[i] == 0) || (guess == 2 && p.EffectAlleles[i] == 1):
-					predictedScore += 2 * weights[i]
+					p.Context.Add(predictedScore, predictedScore, p.Weights[i])
+					p.Context.Add(predictedScore, predictedScore, p.Weights[i])
 				case guess == 1:
-					predictedScore += weights[i]
+					p.Context.Add(predictedScore, predictedScore, p.Weights[i])
 				default:
-					if guess != 0 && guess != 1 && guess != 2 {
+					if guess != 0 && guess != 2 {
 						log.Printf("Unknown guess genotype at %s: %d\n", locus, guess)
 					}
 				}
 			}
-			results[p.PgsID].Predicted = append(results[p.PgsID].Predicted, percentile(predictedScore, minScore, maxScore))
-			results[p.PgsID].Real = append(results[p.PgsID].Real, percentile(trueScore, minScore, maxScore))
-			fmt.Printf("%s: %.3f%% -> %.3f%%\n", idv, percentile(trueScore, minScore, maxScore),
-				percentile(predictedScore, minScore, maxScore))
-		}
-		guessedSumPos, guessedSumNeg := 0.0, 0.0
-		restSumPos, restSumNeg := 0.0, 0.0
-		for _, idv := range individuals {
-			for i, locus := range p.Loci {
-				chr, pos := tools.SplitLocus(locus)
-				if _, ok = guessed[idv][chr][pos]; ok {
-					if weights[i] > 0 {
-						guessedSumPos += weights[i]
-					} else {
-						guessedSumNeg += weights[i]
-					}
-				} else {
-					if weights[i] > 0 {
-						restSumPos += weights[i]
-					} else {
-						restSumNeg += weights[i]
-					}
-				}
+			_, err := p.Context.Quo(predictedScore, predictedScore, divisor)
+			if err != nil {
+				log.Println("Error normalizing the score:", err)
+				return
 			}
-			break
+			results[p.PgsID].Predicted = append(results[p.PgsID].Predicted, predictedScore.String())
+			results[p.PgsID].Real = append(results[p.PgsID].Real, cohort[idv].Score.String())
+			//fmt.Printf("%s: %.6f -> %.6f\n", idv, trueScore, predictedScore)
+			//results[p.PgsID].Predicted = append(results[p.PgsID].Predicted, percentile(predictedScore, minScore, maxScore))
+			//results[p.PgsID].Real = append(results[p.PgsID].Real, percentile(trueScore, minScore, maxScore))
+			//fmt.Printf("%s: %.3f%% -> %.3f%%\n", idv, percentile(trueScore, minScore, maxScore),
+			//	percentile(predictedScore, minScore, maxScore))
 		}
-		fmt.Printf("Guessed: %.3f, %.3f\n", guessedSumPos, guessedSumNeg)
-		fmt.Printf("Rest: %.3f, %.3f\n", restSumPos, restSumNeg)
 	}
-	//filePath := path.Join("results/predict", "prediction.json")
-	//resFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
-	//if err != nil {
-	//	log.Fatalf("Error opening result file: %v", err)
-	//}
-	//defer resFile.Close()
-	//encoder := json.NewEncoder(resFile)
-	//if err = encoder.Encode(results); err != nil {
-	//	log.Fatal("Cannot encode json", err)
-	//}
+	filePath := path.Join("results/predict", "prediction.json")
+	resFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
 }
 
 func percentile(num, lower, upper float64) float64 {
@@ -230,7 +187,7 @@ func percentile(num, lower, upper float64) float64 {
 	return (num - lower) / (upper - lower)
 }
 
-func findUnsolvablePRSWithOverlap() {
+func findUnsolvablePRSWithOverlap() []string {
 	guessedPerIndividual := loadGuessedGenotypes()
 	guessedLoci := make(map[string]struct{})
 	for idv := range guessedPerIndividual {
@@ -240,15 +197,15 @@ func findUnsolvablePRSWithOverlap() {
 			}
 		}
 	}
-	ids, err := fewerVariantsPGS(50, 100)
+	ids, err := fewerVariantsPGS(50, 200)
 	if err != nil {
 		log.Println("Error:", err)
-		return
+		return nil
 	}
 	catalogFolder := "catalog"
 	unknownPgs := make(map[string][]int)
 	for _, id := range ids {
-		fmt.Printf("==== %s ====\n", id)
+		//fmt.Printf("==== %s ====\n", id)
 		p := pgs.NewPGS()
 		err = p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh37.txt"))
 		if err != nil {
@@ -256,7 +213,7 @@ func findUnsolvablePRSWithOverlap() {
 			continue
 		}
 		for _, locus := range p.Loci {
-			if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") {
+			if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") || strings.HasPrefix(locus, "XY:") {
 				continue
 			}
 			if !isNumber(strings.Split(locus, ":")[1]) || !isNumberInRange(strings.Split(locus, ":")[0], 1, 22) {
@@ -271,19 +228,27 @@ func findUnsolvablePRSWithOverlap() {
 			unknownPgs[id][1]++
 		}
 	}
-	pgs := make([]string, 0)
+	results := make([]string, 0)
 	for id, counts := range unknownPgs {
-		if counts[0] > 0 {
-			pgs = append(pgs, id)
+		if counts[0] > 0 && float64(counts[0])/float64(counts[1]) > 0.1 {
+			p := pgs.NewPGS()
+			p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh37.txt"))
+			err = p.LoadStats()
+			if err != nil {
+				continue
+			}
+			results = append(results, id)
 		}
 	}
-	sort.Slice(pgs, func(i, j int) bool {
-		return float64(unknownPgs[pgs[i]][0])/float64(unknownPgs[pgs[i]][1]) >
-			float64(unknownPgs[pgs[j]][0])/float64(unknownPgs[pgs[j]][1])
+	sort.Slice(results, func(i, j int) bool {
+		return float64(unknownPgs[results[i]][0])/float64(unknownPgs[results[i]][1]) >
+			float64(unknownPgs[results[j]][0])/float64(unknownPgs[results[j]][1])
 	})
-	for _, id := range pgs {
+	for _, id := range results {
 		fmt.Printf("%s: %d/%d\n", id, unknownPgs[id][0], unknownPgs[id][1])
 	}
+	fmt.Printf("%d PRSs tound\n", len(results))
+	return results
 }
 
 // isNumber checks if a string represents a valid number using a regular expression
@@ -1017,6 +982,20 @@ func uniquenessExperiment() {
 			return
 		}
 		fmt.Printf("======== %s ========\n", p.PgsID)
+		fmt.Printf("%d loci\n", len(p.Loci))
+		maxSum, minSum := float64(0), float64(0)
+		for _, weight := range p.Weights {
+			w, _ := weight.Float64()
+			if w > 0 {
+				maxSum += 2 * w
+			} else {
+				minSum += 2 * w
+			}
+		}
+		fmt.Printf("Max: %.17f, min: %.17f\n", maxSum, minSum)
+		if len(p.Loci) > 21 {
+			return
+		}
 		err = p.LoadStats()
 		if err != nil {
 			log.Printf("Error loading stats: %v\n", err)
@@ -1069,12 +1048,6 @@ func uniquenessExperiment() {
 	if err = encoder.Encode(results); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
-}
-
-type Contender struct {
-	id         string
-	solution   []uint8
-	likelihood float32
 }
 
 func sequenceSolving() {

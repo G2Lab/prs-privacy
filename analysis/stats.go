@@ -121,7 +121,7 @@ idLoop:
 				continue idLoop
 			}
 		}
-		maxw := p.FindMaxAbsoluteWeight()
+		maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(p.WeightPrecision))
 		if float64(p.NumVariants)/tools.Log3(maxw) > 2.5 {
 			highDensity = append(highDensity, id)
 			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/tools.Log3(maxw))
@@ -660,6 +660,124 @@ func fewerVariantsPGS(lowerLimit, upperLimit int) ([]string, error) {
 	return ids, nil
 }
 
+func ancestryTrainingDistribution() {
+	pgsFile, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids pgsFile:", err)
+		return
+	}
+	defer pgsFile.Close()
+	decoder := json.NewDecoder(pgsFile)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+
+	metafile, err := os.Open("catalog/pgs_all_metadata_scores.csv")
+	if err != nil {
+		log.Println("Error opening catalog metadata metafile:", err)
+		return
+	}
+	defer metafile.Close()
+
+	reader := csv.NewReader(metafile)
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return
+	}
+	ancestryColumn, pgsIdColumn := -1, -1
+	for i, field := range header {
+		if field == "Ancestry Distribution (%) - Source of Variant Associations (GWAS)" {
+			ancestryColumn = i
+		}
+		if field == "Polygenic Score (PGS) ID" {
+			pgsIdColumn = i
+		}
+	}
+	ancestryData := make(map[string]float64)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return
+		}
+		pgsId := record[pgsIdColumn]
+		if _, ok := idsToNumVariants[pgsId]; !ok {
+			continue
+		}
+		portions := strings.Split(record[ancestryColumn], "|")
+		for _, portion := range portions {
+			ancestryAndPercentage := strings.Split(portion, ":")
+			if len(ancestryAndPercentage) != 2 {
+				continue
+			}
+			percentage, err := strconv.ParseFloat(ancestryAndPercentage[1], 64)
+			if err != nil {
+				log.Println("Error converting percentage to int:", err)
+				continue
+			}
+			ancestryData[ancestryAndPercentage[0]] += percentage
+		}
+	}
+	var totalPercentage float64 = 0
+	for _, percentage := range ancestryData {
+		totalPercentage += percentage
+	}
+	for ancestry, percentage := range ancestryData {
+		fmt.Printf("%s: %.1f\n", ancestry, percentage*100/totalPercentage)
+	}
+}
+
+func weightPrecisionDistribution() {
+	pgsFile, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids pgsFile:", err)
+		return
+	}
+	defer pgsFile.Close()
+	decoder := json.NewDecoder(pgsFile)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+
+	precisions := make(map[uint32]int)
+	for id := range idsToNumVariants {
+		fmt.Printf("==== %s ====\n", id)
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(filepath.Join("inputs", id+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			return
+		}
+		precisions[p.WeightPrecision]++
+		err = p.LoadStats()
+		if err != nil {
+			log.Printf("%s: Error loading stats: %v\n", p.PgsID, err)
+		}
+	}
+	// Sort and print the distribution of weight precisions
+	var keys []uint32
+	total := 0
+	for k := range precisions {
+		keys = append(keys, k)
+		total += precisions[k]
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return precisions[keys[i]] > precisions[keys[j]]
+	})
+	for _, k := range keys {
+		fmt.Printf("%d: %.0f\n", k, float64(precisions[k])*100/float64(total))
+	}
+}
+
 func removeFiles() {
 	file, err := os.Open("results/validated_pgs.json")
 	if err != nil {
@@ -710,5 +828,9 @@ func main() {
 		validateBases()
 	case "index":
 		makeLociIndex()
+	case "ancestry":
+		ancestryTrainingDistribution()
+	case "precision":
+		weightPrecisionDistribution()
 	}
 }

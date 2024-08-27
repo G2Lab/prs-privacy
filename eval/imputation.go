@@ -1110,8 +1110,10 @@ type LocusResult struct {
 	CorrectGuesses map[string]int
 	TotalGuesses   map[string]int
 	EAF            map[string]float32
+	GWASEAF        float32
 	SmallestPGS    int
 	Density        float32
+	EffectWeight   float32
 }
 
 func newLocusResult() *LocusResult {
@@ -1253,6 +1255,8 @@ func guessAccuracy() {
 			log.Printf("Error loading stats: %v\n", err)
 			return
 		}
+		maxw := p.FindMaxAbsoluteWeight()
+		minw := p.FindMinAbsoluteWeight()
 		for i, locus := range p.Loci {
 			if _, ok = observedLoci[locus]; ok {
 				continue
@@ -1261,8 +1265,16 @@ func guessAccuracy() {
 			for ppl := range p.PopulationStats {
 				locusResults[locus].EAF[ppl] = p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]]
 			}
+			locusResults[locus].GWASEAF = float32(p.StudyEAF[i])
 			locusResults[locus].SmallestPGS = pgsToNumVariants[pgsID]
-			locusResults[locus].Density = float32(p.NumVariants) / float32(tools.Log3(p.FindMaxAbsoluteWeight()))
+			locusResults[locus].Density = float32(p.NumVariants) /
+				float32(tools.Log3(p.FindMaxAbsoluteWeight()*math.Pow(10, float64(p.WeightPrecision))))
+			weight, err := p.Weights[i].Float64()
+			if err != nil {
+				log.Printf("Error converting weight %s to float64: %v\n", p.Weights[i].String(), err)
+				continue
+			}
+			locusResults[locus].EffectWeight = float32((math.Abs(weight) - minw) / (maxw - minw))
 		}
 	}
 	eafFile, err := os.OpenFile(path.Join(resultFolder, "loci.json"), os.O_CREATE|os.O_WRONLY, 0644)

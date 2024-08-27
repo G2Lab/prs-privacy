@@ -2,15 +2,18 @@ import csv
 import fnmatch
 import json
 import random
+from cProfile import label
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import os
 import pandas as pd
 import seaborn as sns
 import statistics
 from scipy.stats import norm
+from scipy.stats import rankdata
 
 
 def pairwise(filepath):
@@ -750,23 +753,24 @@ def sequential_idv_accuracy():
     plt.ylabel('Genotype recovery accuracy, %')
     plt.tight_layout()
     # plt.ylim(64, 100)
-    # fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
-    plt.show()
+    fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
 
 def sequential_loci_accuracy():
     directory = "results/guessAccuracy/"
-    eaf_data = []
+    data = []
     filepath = os.path.join(directory, "loci.json")
     with open(filepath, 'r') as f:
         content = json.load(f)
     for locus, result in content.items():
         for ancestry, eaf in result['EAF'].items():
-            eaf_data.append({'EAF': float(eaf), 'Ancestry': ancestry, 'PGS': int(result['SmallestPGS']),
-                             'Density': float(result['Density']), 'Accuracy':
-                                 100*float(result['CorrectGuesses'][ancestry])/float(result['TotalGuesses'][ancestry])})
+            data.append({'EAF': float(eaf), 'Ancestry': ancestry, 'PGS': int(result['SmallestPGS']),
+                         'Density': float(result['Density']), 'Weight': float(result['EffectWeight']), 'Accuracy':
+                             100*float(result['CorrectGuesses'][ancestry])/float(result['TotalGuesses'][ancestry]),
+                         'GWAS': float(result['GWASEAF'])})
 
-    df = pd.DataFrame(eaf_data)
+    df = pd.DataFrame(data)
     df['EAF_bin'] = pd.cut(df['EAF'], bins=35)
     eaf_df = df.groupby(['EAF_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
     eaf_df['EAF_mid'] = eaf_df['EAF_bin'].apply(lambda x: x.mid)
@@ -776,6 +780,7 @@ def sequential_loci_accuracy():
     plt.xlabel('Effect Allele Frequency')
     plt.ylabel('Guess accuracy, %')
     plt.tight_layout()
+    fig1.savefig('accuracy_eaf.pdf', dpi=300, bbox_inches='tight')
 
     fig2, ax2 = plt.subplots(figsize=(4, 3))
     # df['PGS_bin'] = pd.cut(df['PGS'], bins=20)
@@ -785,24 +790,48 @@ def sequential_loci_accuracy():
     plt.xlabel('Size of the smallest PGS with the locus')
     plt.ylabel('Guess accuracy, %')
     plt.tight_layout()
+    fig2.savefig('accuracy_pgs.pdf', dpi=300, bbox_inches='tight')
 
     fig3, ax3 = plt.subplots(figsize=(4, 3))
     df['Density_bin'] = pd.cut(df['Density'], bins=30)
     density_df = df.groupby(['Density_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
     density_df['Density_mid'] = density_df['Density_bin'].apply(lambda x: x.mid)
     sns.lineplot(x='Density_mid', y='Accuracy', data=density_df, ax=ax3, color='#79ff50')
-    plt.xlabel('PGS density of the first locus appearance')
+    plt.xlabel('Density of the PGS with the locus')
     plt.ylabel('Guess accuracy, %')
     plt.tight_layout()
+    fig3.savefig('accuracy_density.pdf', dpi=300, bbox_inches='tight')
 
     fig4, ax4 = plt.subplots(figsize=(4, 3))
-    sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax4)
+    gwas_df = df[df['GWAS'] != 0]
+    sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax4, common_norm=False)
+    sns.kdeplot(data=gwas_df, x='GWAS', ax=ax4, linestyle='--', color='black', common_norm=False, label='GWAS')
     plt.xlabel('EAF')
     plt.ylabel('Density')
     plt.xlim(0, 1)
+    ancestries = df['Ancestry'].unique()
+    legend_labels = [*ancestries, "GWAS"]
+    legend_colors = sns.color_palette()[:len(ancestries)] + ['black']
+    handles = [Line2D([0, 1], [0, 1], color=color) for color in legend_colors[:-1]]
+    gwas_handle = Line2D([0, 1], [0, 1], color='black', linestyle='--')
+    handles.append(gwas_handle)
+    ax4.legend(handles, legend_labels, ncol=2, loc="lower left", columnspacing=0.5)
+    # ax4.legend(ncol=2, loc="lower left")
     plt.tight_layout()
+    fig4.savefig('accuracy_ancestry.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
-    plt.show()
+    fig5, ax5 = plt.subplots(figsize=(4, 3))
+    df['Weight_bin'] = pd.cut(df['Weight'], bins=40)
+    weight_df = df.groupby(['Weight_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
+    weight_df['Weight_mid'] = weight_df['Weight_bin'].apply(lambda x: x.mid)
+    sns.lineplot(data=weight_df, x='Weight_mid', y='Accuracy', ax=ax5)
+    ax5.set_ylim(70, 100)
+    plt.xlabel('Effect Weight')
+    plt.ylabel('Accuracy')
+    plt.tight_layout()
+    # fig5.savefig('accuracy_weight.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
 
 def king_test():
@@ -1688,7 +1717,7 @@ def plot_rank_cdf(df, category, ax):
     colors = sns.color_palette("deep")
     # Filter the dataframe for the given category
     category_df = df[df['Category'] == category]
-    methods = ['KING', 'Plink IBD']
+    methods = ['KING', 'GCTA']
     for i, method in enumerate(category_df['Method'].unique()):
         if method not in methods:
             continue
@@ -1716,7 +1745,7 @@ def deanonymization_accuracy():
     mpl.rcParams.update(params)
 
     king_df = load_results("ibd/nophase/plink.king.id", "ibd/nophase/plink.king", 'KING')
-    rel_df = load_results("ibd/nophase/plink.rel.id", "ibd/nophase/plink.rel", 'Plink IBD')
+    rel_df = load_results("ibd/nophase/plink.rel.id", "ibd/nophase/plink.rel", 'GCTA')
     rel_df['Kinship'] = rel_df['Kinship'] / 2 # Relatedness -> Kinship
     rel_df['Kinship'] = [0.5 if k > 0.5 else k for k in rel_df['Kinship']]
     # refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
@@ -1734,8 +1763,8 @@ def deanonymization_accuracy():
     first_degree_cutoff = 0.1768
     second_degree_cutoff = 0.089
     fig1, ax1 = plt.subplots(figsize=(7, 3))
-    guess_methods = ['KING', 'Plink IBD']
-    ground_truth_methods = ['TrueKING', 'TruePlink IBD']
+    guess_methods = ['KING', 'GCTA']
+    ground_truth_methods = ['TrueKING', 'TrueGCTA']
     method_df = df[df['Method'].isin(guess_methods)]
     sns.boxplot(x='Category', y='Kinship', data=method_df, hue='Method', palette='pastel', ax=ax1,
                 order=['Self', '1st degree', '2nd degree', 'Everyone else'])
@@ -1751,10 +1780,10 @@ def deanonymization_accuracy():
             x_position = category_pos - 0.4 + method_position_offset + box_width / 2
             print(f'{method} median: {median_value}, position: {category_pos}')
             ax1.plot([x_position - box_width / 2, x_position + box_width / 2], [median_value, median_value],
-                     color=palette[3], linestyle='--')
+                     color=palette[3], linestyle='-')
 
     # Adding the legend for the red lines
-    ax1.plot([], [], color=palette[3], linestyle='--', label='Max accuracy')
+    ax1.plot([], [], color=palette[3], linestyle='-', label='Max accuracy')
 
     ax1.text(x=ax1.get_xlim()[1] + 0.03, y=0.5, s='Criteria', va='center', ha='left', color='black')
     ax1.axhline(y=self_cutoff, color='lightgray', linestyle='--', linewidth=1)
@@ -1766,6 +1795,7 @@ def deanonymization_accuracy():
     ax1.set_ylabel('Kinship')
     ax1.set_xlabel('')
     ax1.legend(title="")
+    fig1.savefig('kinship_score.pdf', dpi=300, bbox_inches='tight')
 
     fig2, ax2 = plt.subplots(figsize=(5, 3))
     categories = ['Self', '1st degree', '2nd degree']
@@ -1775,6 +1805,7 @@ def deanonymization_accuracy():
     ax2.set_ylabel('Rank (/2535)')
     ax2.set_xlabel('')
     ax2.legend(title="")
+    fig2.savefig('kinship_rank.pdf', dpi=300, bbox_inches='tight')
 
     fig3, axes3 = plt.subplots(1, 3, figsize=(6, 3), sharey=True)
     # Plot CDFs for each category
@@ -1787,7 +1818,166 @@ def deanonymization_accuracy():
     fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.05), title='', ncol=len(labels), frameon=False)
     # plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.tight_layout()
-    plt.show()
+    fig3.savefig('kinship_cdf.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
+
+    results = pd.DataFrame()
+    pd.set_option('display.max_columns', None)  # Show all columns
+    total_count = df.groupby(['Category', 'Method']).size().reset_index(name='Total_Count')
+    for rank_value in range(1, 9):
+        rank_df = df[df['Rank'] <= rank_value].groupby(['Category', 'Method']).size().reset_index(name=f'Rank_<={rank_value}_Count')
+        merged_df = pd.merge(rank_df, total_count, on=['Category', 'Method'], how='right')
+        merged_df[f'Rank_<={rank_value}_Count'].fillna(0, inplace=True)
+        merged_df[f'Percentage_Rank_<={rank_value}'] = (merged_df[f'Rank_<={rank_value}_Count'] / merged_df['Total_Count']) * 100
+        if results.empty:
+            results = merged_df[['Category', 'Method', f'Percentage_Rank_<={rank_value}']]
+        else:
+            results = pd.merge(results, merged_df[['Category', 'Method', f'Percentage_Rank_<={rank_value}']],
+                               on=['Category', 'Method'], how='outer')
+    print(results)
+
+    fig4, ax4 = plt.subplots(figsize=(4, 3))
+    df_king = df[df['Method'] == 'KING']
+    categories = ['Self', '1st degree', '2nd degree', 'Everyone else']
+    colors = {'Self': 'black', '1st degree': 'coral', '2nd degree': 'green', 'Everyone else': 'purple'}
+    patterns = {'Self': '-', '1st degree': 'dotted', '2nd degree': '--', 'Everyone else': '-.'}
+    for category in categories:
+        sns.kdeplot(df_king[df_king['Category'] == category]['Kinship'], label=category, common_norm=False,
+                    ax=ax4, color=colors[category], linestyle=patterns[category])
+    ax4.set_xlabel('Kinship coefficient')
+    ax4.set_ylabel('Density')
+    ax4.set_xlim(-0.4, 0.5)
+    ax4.legend(title='', loc="upper left")
+    plt.tight_layout()
+    fig4.savefig('kinship_original.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
+
+
+def prs_prediction():
+    filepath = "results/predict/prediction.json"
+    data = []
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    for prs_id, results in content.items():
+        for i, prd in enumerate(results['Predicted']):
+            data.append({'PRS': prs_id, 'Known': float(results["Known"]), 'Total': float(results["Total"]),
+                         'Predicted': float(results['Predicted'][i]), 'Real': float(results['Real'][i])})
+
+    df = pd.DataFrame(data)
+    results = []
+    # for prs_id, group in df.groupby('PRS'):
+    #     print(f"=== {prs_id} ===")
+    #     min_real = group['Real'].min()
+    #     max_real = group['Real'].max()
+    #
+    #     # Define uniform bin edges
+    #     bin_edges = [min_real + (max_real - min_real) * i / 10 for i in range(11)]
+    #     group['Real_decile'] = pd.cut(group['Real'], bins=bin_edges, labels=False, include_lowest=True)
+    #     # group['Real_decile'], bin_edges = pd.qcut(group['Real'], 10, labels=False, retbins=True, duplicates='drop')
+    #     group['Predicted_decile'] = pd.cut(group['Predicted'], bins=bin_edges, labels=False, include_lowest=True)
+    #     true_positive = np.sum(group['Predicted_decile'] == group['Real_decile'])
+    #     total_predictions = len(group)
+    #     precision = true_positive / total_predictions if total_predictions > 0 else 0
+    #     recall = precision  # In this context, precision and recall are equivalent
+    #
+    #     results.append({'PRS': prs_id, 'Precision': precision, 'Recall': recall,
+    #                     'Ratio': group['Known'].iloc[0] / group['Total'].iloc[0]})
+    #
+    #     # for v in group['Real_decile'].unique():
+    #     #     print(f"Real decile: {v}, count: {len(group[group['Real_decile'] == v])}")
+    #
+    # # Convert results to DataFrame
+    # results_df = pd.DataFrame(results)
+    # results_df = results_df.sort_values(by='Ratio', ascending=False)
+    # results_df['Ratio_bin'] = np.floor(results_df['Ratio'] / 0.02) * 0.02
+    #
+    # # Melt the DataFrame to have Precision and Recall in a single column
+    # results_melted = results_df.melt(id_vars=['Ratio'], value_vars=['Precision', 'Recall'],
+    #                                  var_name='Metric', value_name='Value')
+
+    results_above_80 = []
+    for prs_id, group in df.groupby('PRS'):
+        threshold = group['Real'].quantile(0.80)
+        # print(f"Threshold for {prs_id}: {threshold}")
+        # Count entries above the 80th percentile
+        true_positive = np.sum((group['Predicted'] >= threshold) & (group['Real'] >= threshold))
+        false_positive = np.sum((group['Predicted'] >= threshold) & (group['Real'] < threshold))
+        false_negative = np.sum((group['Predicted'] < threshold) & (group['Real'] >= threshold))
+
+        precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
+        recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
+
+        min_real = group['Real'].min()
+        max_real = group['Real'].max()
+        mae = np.mean(np.abs(group['Predicted'] - group['Real']))
+        nmae = mae / (max_real - min_real) if (max_real - min_real) > 0 else 0
+
+        # Calculate the percentile rank of Real values
+        group['Real_percentile'] = rankdata(group['Real'], method='average') / len(group)
+        # Calculate the percentile rank of Predicted values if they were among the Real values
+        group['Predicted_percentile'] = group['Predicted'].apply(
+            lambda x: np.sum(group['Real'] <= x) / len(group))
+        # Calculate the difference in percentiles
+        group['Percentile_diff'] = np.abs(group['Real_percentile'] - group['Predicted_percentile'])
+        # Calculate mean percentile difference for the group
+        mean_diff = group['Percentile_diff'].mean()
+
+        results.append({'PRS': prs_id, 'Precision': precision, 'Recall': recall, 'NMAE': nmae,
+                       'Ratio': group['Known'].iloc[0] / group['Total'].iloc[0],
+                       'MeanPercentileDiff': mean_diff*100})
+        # print(len(group[group['Real'] >= threshold]), len(group[group['Predicted'] >= threshold]))
+
+        threshold_80 = group['Real'].quantile(0.8)
+        group_above_80 = group[group['Real'] >= threshold_80]
+        if len(group_above_80) > 0:
+            mae = np.mean(np.abs(group_above_80['Predicted'] - group_above_80['Real']))
+            nmae = mae / (max_real - min_real) if (max_real - min_real) > 0 else 0
+            mean_diff_above_80 = group_above_80['Percentile_diff'].mean()
+            results_above_80.append({'PRS': prs_id, 'MeanPercentileDiff': mean_diff_above_80*100, 'NMAE': nmae,
+                                     'Ratio': group_above_80['Known'].iloc[0] / group_above_80['Total'].iloc[0]})
+
+    # Convert results to DataFrame
+    results_df = pd.DataFrame(results)
+    results_df_above_80 = pd.DataFrame(results_above_80)
+    results_df = results_df.sort_values(by='Ratio', ascending=False)
+    rounding_bin = 0.02
+    results_df['Ratio_bin'] = np.floor(results_df['Ratio'] / rounding_bin) * rounding_bin
+    results_df_above_80['Ratio_bin'] = np.floor(results_df_above_80['Ratio'] / rounding_bin) * rounding_bin
+    # print(results_df)
+    # Melt the DataFrame to have Precision and Recall in a single column
+    # results_melted = results_df.melt(id_vars=['Ratio_bin'], value_vars=['Precision', 'Recall'],
+    #                                  var_name='Metric', value_name='Value')
+
+    # Plotting the results
+    plt.figure(figsize=(6, 3))
+    sns.lineplot(x='Ratio_bin', y='NMAE', data=results_df, label='All individuals', marker='.', color='teal')
+    sns.lineplot(x='Ratio_bin', y='NMAE', data=results_df_above_80, label='High-risk (80th pcnt)', marker='.', color='coral')
+    # sns.lineplot(x='Ratio_bin', y='Value', hue='Metric', data=results_melted, palette='pastel')
+    # sns.lineplot(x='Ratio_bin', y='Precision', data=results_df)
+    # sns.lineplot(x='Ratio_bin', y='MeanPercentileDiff', data=results_df, label='All individuals', marker='.', color='teal')
+    # sns.lineplot(x='Ratio_bin', y='MeanPercentileDiff', data=results_df_above_80, label='High-risk (80th pcnt)', marker='.', color='coral')
+    # plt.ylim(0, 1)
+    plt.ylim(0, 0.3)
+    # plt.ylim(0, 50)
+    plt.gca().invert_xaxis()
+    plt.xlabel('Known SNPs ratio')
+    plt.ylabel('Normalized Score Prediction Error')
+    # plt.ylabel('Mean percentile difference, %')
+    # plt.ylabel('Accuracy')
+    plt.legend(title="", loc="upper left")
+    plt.tight_layout()
+    # plt.show()
+    # plt.savefig('prediction_mean_percentile.pdf', dpi=300, bbox_inches='tight')
+    plt.savefig('prediction_mean_error.pdf', dpi=300, bbox_inches='tight')
+    # plt.savefig('prediction_highrisk_by_population.pdf', dpi=300, bbox_inches='tight')
+    # plt.savefig('prediction_decile_by_population.pdf', dpi=300, bbox_inches='tight')
+    # plt.savefig('prediction_decile_by_score.pdf', dpi=300, bbox_inches='tight')
+
+    # sorted(data, key=lambda x: float(x['Known'].split("/")[0]) / float(x['Known'].split("/")[1]))
+    # sns.boxplot(x='Known', y='Percentile Difference', data=df)
+    # plt.title('Percentile difference between predicted and real PRS')
+    # plt.xlabel('Known/Total SNPs')
+    # fig.savefig('prediction.png', dpi=300, bbox_inches='tight')
 
 
 if __name__ == "__main__":
@@ -1834,10 +2024,11 @@ if __name__ == "__main__":
     # score_uniqueness()
     # sequential()
     # sequential_idv_accuracy()
-    # sequential_loci_accuracy()
+    sequential_loci_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
     # king_accuracy()
     # ibd_accuracy()
     # plink_accuracy()
-    deanonymization_accuracy()
+    # deanonymization_accuracy()
+    # prs_prediction()

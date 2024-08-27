@@ -129,7 +129,7 @@ type PGS struct {
 	Context         *apd.Context
 	WeightPrecision uint32
 	MinPrecision    uint32
-	StudyEAF        [][]float64 // [other, effect] allele frequency from the study / catalogue file
+	StudyEAF        []float64 // effect allele frequency from the study / catalogue file
 	PopulationStats map[string]*Statistics
 	//NumSpecBins     int
 	//Maf             [][]float64 // [major, minor] allele frequency from the population
@@ -245,22 +245,23 @@ scannerLoop:
 	p.Weights = make([]*apd.Decimal, len(p.Loci))
 	p.ScoreAlleles = make([]string, len(p.Loci))
 	p.EffectAlleles = make([]uint8, len(p.Loci))
-	p.StudyEAF = make([][]float64, len(p.Loci))
+	p.StudyEAF = make([]float64, len(p.Loci))
 	for i, loc := range p.Loci {
 		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
 		if err != nil {
 			log.Fatalf("Variant %s, %v: %v\n", loc, err, p.Variants[loc].fields["effect_weight"])
 		}
 		p.ScoreAlleles[i] = p.Variants[loc].fields["effect_allele"].(string)
-		p.StudyEAF[i] = []float64{1 - p.Variants[loc].GetEffectAlleleFrequency(), p.Variants[loc].GetEffectAlleleFrequency()}
+		p.StudyEAF[i] = p.Variants[loc].GetEffectAlleleFrequency()
 	}
 	p.WeightPrecision = maxPrecision
 	p.MinPrecision = minPrecision
 	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	//p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
-	p.PopulationStats = make(map[string]*Statistics, len(POPULATIONS))
-	for _, population := range POPULATIONS {
+	populationsAndAll := append(POPULATIONS, "ALL")
+	p.PopulationStats = make(map[string]*Statistics, len(populationsAndAll))
+	for _, population := range populationsAndAll {
 		p.PopulationStats[population] = &Statistics{
 			AF: make(map[int][]float32, len(p.Loci)),
 			GF: make(map[int][]float32, len(p.Loci)),
@@ -467,10 +468,12 @@ func (p *PGS) savePopulationAlleles() {
 }
 
 func (p *PGS) extractEAF() {
-	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
+	//populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
+	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\\t" + "%AF\n"
 	var freq float32
 	var parsed float64
 	var missing bool
+	populationsAndAll := append(POPULATIONS, "ALL")
 	for k, locus := range p.Loci {
 		missing = true
 		chr, pos := tools.SplitLocus(locus)
@@ -492,7 +495,7 @@ func (p *PGS) extractEAF() {
 			missing = false
 			//fmt.Printf("AF Locus %s: %s\n", locus, fields[1])
 			afPerPopulation := strings.Split(fields[1], "\t")
-			for i, population := range POPULATIONS {
+			for i, population := range populationsAndAll {
 				altAfs := strings.Split(afPerPopulation[i], ",")
 				freq = 0
 				for _, altAf := range altAfs {
@@ -528,20 +531,20 @@ func (p *PGS) extractEAF() {
 			}
 		}
 		//log.Printf("No entry for locus %s, hence all the samples have reference", locus)
-		for i := range POPULATIONS {
+		for i := range populationsAndAll {
 			if missing { // either read a wrong locus or len(lines[:len(lines)-1]) == 0
-				p.PopulationStats[POPULATIONS[i]].AF[k] = []float32{1 - MissingEAF, MissingEAF}
+				p.PopulationStats[populationsAndAll[i]].AF[k] = []float32{1 - MissingEAF, MissingEAF}
 				continue
 			}
 			// Smoothen the extreme cases
-			switch p.PopulationStats[POPULATIONS[i]].AF[k][1] {
+			switch p.PopulationStats[populationsAndAll[i]].AF[k][1] {
 			case 0:
-				p.PopulationStats[POPULATIONS[i]].AF[k][1] = MissingEAF
+				p.PopulationStats[populationsAndAll[i]].AF[k][1] = MissingEAF
 			case 1:
-				p.PopulationStats[POPULATIONS[i]].AF[k][1] = 1 - MissingEAF
+				p.PopulationStats[populationsAndAll[i]].AF[k][1] = 1 - MissingEAF
 			default:
 			}
-			p.PopulationStats[POPULATIONS[i]].AF[k][0] = 1 - p.PopulationStats[POPULATIONS[i]].AF[k][1]
+			p.PopulationStats[populationsAndAll[i]].AF[k][0] = 1 - p.PopulationStats[populationsAndAll[i]].AF[k][1]
 		}
 	}
 }
@@ -556,6 +559,7 @@ func (p *PGS) extractGF() {
 	var total map[string]int
 	var positionAndSamples, idvSnps []string
 	ancestries := tools.LoadAncestry()
+	populationsAndAll := append(POPULATIONS, "ALL")
 	for k, locus := range p.Loci {
 		found = false
 		chr, position = tools.SplitLocus(locus)
@@ -567,7 +571,7 @@ func (p *PGS) extractGF() {
 		}
 		total = make(map[string]int)
 		counts = make(map[string][]int)
-		for _, ppl := range POPULATIONS {
+		for _, ppl := range populationsAndAll {
 			total[ppl] = 0
 			counts[ppl] = make([]int, 3)
 		}
@@ -596,9 +600,11 @@ func (p *PGS) extractGF() {
 				anc = GetIndividualAncestry(idvSnps[0], ancestries)
 				counts[anc][alleles[0]+alleles[1]]++
 				total[anc]++
+				counts["ALL"][alleles[0]+alleles[1]]++
+				total["ALL"]++
 			}
 		}
-		for _, ppl := range POPULATIONS {
+		for _, ppl := range populationsAndAll {
 			p.PopulationStats[ppl].GF[k] = make([]float32, 3)
 			if !found {
 				p.PopulationStats[ppl].GF[k][0] = p.PopulationStats[ppl].AF[k][0] * p.PopulationStats[ppl].AF[k][0]
@@ -754,5 +760,19 @@ func (p *PGS) FindMaxAbsoluteWeight() float64 {
 			maxWeight = math.Abs(w)
 		}
 	}
-	return maxWeight * math.Pow(10, float64(p.WeightPrecision))
+	return maxWeight
+}
+
+func (p *PGS) FindMinAbsoluteWeight() float64 {
+	minWeight := 0.0
+	for _, weight := range p.Weights {
+		w, err := weight.Float64()
+		if err != nil {
+			log.Println("Error converting weight to float64:", err)
+		}
+		if math.Abs(w) < minWeight {
+			minWeight = math.Abs(w)
+		}
+	}
+	return minWeight
 }
