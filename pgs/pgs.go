@@ -42,8 +42,9 @@ const (
 )
 
 var (
-	GENOTYPES   = []uint8{0, 1}
-	POPULATIONS = []string{"AFR", "AMR", "EAS", "EUR", "SAS"}
+	GENOTYPES     = []uint8{0, 1}
+	ANCESTRIES    = []string{"AFR", "AMR", "EAS", "EUR", "SAS"}
+	ANCESTRIESALL = []string{"AFR", "AMR", "EAS", "EUR", "SAS", "ALL"}
 )
 
 type Variant struct {
@@ -259,7 +260,7 @@ scannerLoop:
 	//fmt.Printf("Weight precision: %d digits\n", p.WeightPrecision)
 
 	//p.NumSpecBins = tools.DeriveNumSpectrumBins(len(p.Loci))
-	populationsAndAll := append(POPULATIONS, "ALL")
+	populationsAndAll := append(ANCESTRIES, "ALL")
 	p.PopulationStats = make(map[string]*Statistics, len(populationsAndAll))
 	for _, population := range populationsAndAll {
 		p.PopulationStats[population] = &Statistics{
@@ -341,7 +342,7 @@ func (p *PGS) LoadStats() error {
 }
 
 func (p *PGS) LoadDatasetStats() error {
-	filename := fmt.Sprintf("%s/%s.efal", params.DataFolder, p.PgsID)
+	filename := fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		err = p.extractPopulationAlleles()
 		if err != nil {
@@ -364,7 +365,7 @@ func (p *PGS) LoadDatasetStats() error {
 		//fmt.Println("Loaded population alleles", p.EffectAlleles)
 	}
 
-	filename = fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
+	filename = fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		p.extractEAF()
 		p.extractGF()
@@ -453,7 +454,7 @@ func (p *PGS) extractPopulationAlleles() error {
 }
 
 func (p *PGS) savePopulationAlleles() {
-	filename := fmt.Sprintf("%s/%s.efal", params.DataFolder, p.PgsID)
+	filename := fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating effect alleles file: %v", err)
@@ -468,12 +469,12 @@ func (p *PGS) savePopulationAlleles() {
 }
 
 func (p *PGS) extractEAF() {
-	//populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\n"
-	populationQ := "%CHROM:%POS-%" + strings.Join(POPULATIONS, "_AF\\t%") + "_AF\\t" + "%AF\n"
+	//populationQ := "%CHROM:%POS-%" + strings.Join(ANCESTRIES, "_AF\\t%") + "_AF\n"
+	populationQ := "%CHROM:%POS-%" + strings.Join(ANCESTRIES, "_AF\\t%") + "_AF\\t" + "%AF\n"
 	var freq float32
 	var parsed float64
 	var missing bool
-	populationsAndAll := append(POPULATIONS, "ALL")
+	populationsAndAll := append(ANCESTRIES, "ALL")
 	for k, locus := range p.Loci {
 		missing = true
 		chr, pos := tools.SplitLocus(locus)
@@ -559,7 +560,7 @@ func (p *PGS) extractGF() {
 	var total map[string]int
 	var positionAndSamples, idvSnps []string
 	ancestries := tools.LoadAncestry()
-	populationsAndAll := append(POPULATIONS, "ALL")
+	populationsAndAll := append(ANCESTRIES, "ALL")
 	for k, locus := range p.Loci {
 		found = false
 		chr, position = tools.SplitLocus(locus)
@@ -625,7 +626,7 @@ func (p *PGS) extractGF() {
 //}
 
 //func (p *PGS) assignFreqBins() {
-//	for _, ppl := range POPULATIONS {
+//	for _, ppl := range ANCESTRIES {
 //		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
 //		for i := range p.PopulationStats[ppl].AF {
 //			eaf[i] = float64(p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]])
@@ -673,7 +674,7 @@ func (p *PGS) extractGF() {
 //		lines := strings.Split(string(output), "\n")
 //		if len(lines[:len(lines)-1]) == 0 {
 //			log.Printf("No data for locus %s in frequency spectrum", locus)
-//			for _, ppl := range POPULATIONS {
+//			for _, ppl := range ANCESTRIES {
 //				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
 //				p.PopulationStats[ppl].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[ppl].AF[k][1],
 //					p.PopulationStats[ppl].FreqBinBounds)] += 1
@@ -716,7 +717,7 @@ func (p *PGS) extractGF() {
 //		}
 //	}
 //	// Normalize the frequency spectrum
-//	for _, ppl := range POPULATIONS {
+//	for _, ppl := range ANCESTRIES {
 //		for i := 0; i < p.NumSpecBins; i++ {
 //			p.PopulationStats[ppl].FreqSpectrum[i] /= float32(ancestrySizes[ppl])
 //		}
@@ -724,7 +725,7 @@ func (p *PGS) extractGF() {
 //}
 
 func (p *PGS) SaveStats() {
-	filename := fmt.Sprintf("%s/%s.stat", params.DataFolder, p.PgsID)
+	filename := fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating stats file: %v", err)
@@ -775,4 +776,56 @@ func (p *PGS) FindMinAbsoluteWeight() float64 {
 		}
 	}
 	return minWeight
+}
+
+func (p *PGS) FindMinAndMaxScores() (*apd.Decimal, *apd.Decimal) {
+	maxScore, minScore := apd.New(0, 0), apd.New(0, 0)
+	for _, weight := range p.Weights {
+		if weight.Negative {
+			p.Context.Add(minScore, minScore, weight)
+			p.Context.Add(minScore, minScore, weight)
+			continue
+		}
+		p.Context.Add(maxScore, maxScore, weight)
+		p.Context.Add(maxScore, maxScore, weight)
+	}
+	divisor := new(apd.Decimal).SetInt64(int64(len(p.Weights) * Ploidy))
+	_, err := p.Context.Quo(maxScore, maxScore, divisor)
+	if err != nil {
+		log.Printf("Error normalizing max score %s: %v\n", maxScore.String(), err)
+		return nil, nil
+	}
+	_, err = p.Context.Quo(minScore, minScore, divisor)
+	if err != nil {
+		log.Printf("Error normalizing min score %s: %v\n", maxScore.String(), err)
+		return nil, nil
+	}
+	return minScore, maxScore
+}
+
+func (p *PGS) EstimateMeanAndStd() (map[string]float64, map[string]float64) {
+	means, stds := make(map[string]float64), make(map[string]float64)
+	prob, mui := 0.0, 0.0
+	for i, weight := range p.Weights {
+		w, err := weight.Float64()
+		if err != nil {
+			log.Println("Error converting weight to float64:", err)
+		}
+		for _, anc := range ANCESTRIESALL {
+			prob = float64(p.PopulationStats[anc].AF[i][p.EffectAlleles[i]])
+			mui = prob*prob*(2*w) + 2*prob*(1-prob)*w
+			if _, ok := means[anc]; !ok {
+				means[anc] = 0.0
+				stds[anc] = 0.0
+			}
+			means[anc] += mui
+			stds[anc] += (1-prob)*(1-prob)*math.Pow(0-mui, 2) + 2*prob*(1-prob)*math.Pow(w-mui, 2) +
+				prob*prob*math.Pow(2*w-mui, 2)
+		}
+	}
+	for _, anc := range ANCESTRIESALL {
+		means[anc] /= float64(Ploidy * len(p.Weights))
+		stds[anc] = math.Sqrt(stds[anc]) / float64(Ploidy*len(p.Weights))
+	}
+	return means, stds
 }

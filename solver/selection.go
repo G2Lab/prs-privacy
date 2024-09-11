@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -55,9 +56,17 @@ func All1000GenomesAndRelativeSamples() []string {
 	return append(All1000GenomesSamples(), AllRelativeSamples()...)
 }
 
-//func Samples1000GenomesRelatedExcluded() []string {
-//	allSamples := All1000GenomesSamples()
-//}
+func AllUKBiobankSamples() []string {
+	cmd := exec.Command("bcftools", "query", "-l",
+		"/gpfs/commons/datasets/controlled/ukbb-gursoylab/ImputationV3/Chr1/plink2.vcf.gz")
+	output, err := cmd.Output()
+	if err != nil {
+		log.Fatalf("Error UKBB samples: %v", err)
+	}
+	individuals := strings.Split(string(output), "\n")
+	individuals = individuals[:len(individuals)-1]
+	return individuals
+}
 
 func ReadRelatedIndividuals() map[string][]string {
 	file, err := os.Open("data/related_individuals.txt")

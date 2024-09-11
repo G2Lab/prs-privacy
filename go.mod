@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/cockroachdb/apd/v3 v3.2.1
-	github.com/ericlagergren/decimal v0.0.0-20221120152707-495c53812d05
-	github.com/montanaflynn/stats v0.7.1
+	gonum.org/v1/gonum v0.13.0
 )
+
+require golang.org/x/exp v0.0.0-20230321023759-10a507213a29 // indirect

@@ -34,10 +34,15 @@ const (
 	imputationChunkOverlap = 10000
 )
 
+const (
+	perAncestryAf = "ancestry"
+	globalAf      = "global"
+)
+
 func imputeWorkflow() {
 	for chrId := 1; chrId <= 22; chrId++ {
 		fmt.Printf("---- %d ----\n", chrId)
-		for _, ancestry := range pgs.POPULATIONS {
+		for _, ancestry := range pgs.ANCESTRIES {
 			fmt.Printf("===== %s =====\n", ancestry)
 			fillPreImputeVCF(chrId, ancestry)
 			//fillTruthVCF(chrId, ancestry)
@@ -111,7 +116,7 @@ func indexCompressedVCF(chrId int, ancestry string, postImpute bool) {
 }
 
 func fillPreImputeVCF(chrId int, ancestry string) {
-	guessed := loadGuessedGenotypes()
+	guessed := loadGuessedGenotypes("ancestry")
 	ancestries := tools.LoadAncestry()
 	chr := strconv.Itoa(chrId)
 	var pos, ref, alt string
@@ -198,7 +203,7 @@ func fillPreImputeVCF(chrId int, ancestry string) {
 }
 
 func fillTruthVCF(chrId int, ancestry string) {
-	guessed := loadGuessedGenotypes()
+	guessed := loadGuessedGenotypes(perAncestryAf)
 	ancestries := tools.LoadAncestry()
 	chr := strconv.Itoa(chrId)
 	var pos, ref, alt string
@@ -399,7 +404,7 @@ func constructIBDVCFs() {
 }
 
 func prepareIBD() {
-	guessedSnps := loadGuessedGenotypes()
+	guessedSnps := loadGuessedGenotypes(perAncestryAf)
 	guessedIndividuals := make([]string, 0)
 	for idv := range guessedSnps {
 		guessedIndividuals = append(guessedIndividuals, idv)
@@ -690,7 +695,7 @@ func preparePhasingInputFiles(individuals []string, guessed map[string]map[strin
 		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
 	lineTemplate := "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT"
 	var wg sync.WaitGroup
-	for _, anc := range pgs.POPULATIONS {
+	for _, anc := range pgs.ANCESTRIES {
 		wg.Add(1)
 		go func(ancestry string) {
 			defer wg.Done()
@@ -782,7 +787,7 @@ func beaglePhasing() {
 					"",
 					"",
 				}
-				for _, ancestry := range pgs.POPULATIONS {
+				for _, ancestry := range pgs.ANCESTRIES {
 					args[len(args)-2] = fmt.Sprintf("gt=ibd/chr%d-%s.vcf", chrId, ancestry)
 					args[len(args)-1] = fmt.Sprintf("out=ibd/phased-chr%d-%s", chrId, ancestry)
 					runCommand(prg, args)
@@ -836,7 +841,7 @@ func combineAndAddGroundTruth(guessedIndividuals []string, guessedSnps map[strin
 			for chrId := range tasks {
 				chr = strconv.Itoa(chrId)
 				SNPs := make(map[string]map[string]string)
-				for _, ancestry := range pgs.POPULATIONS {
+				for _, ancestry := range pgs.ANCESTRIES {
 					retrieved = getAllIndividualSnpStrings(fmt.Sprintf("ibd/phased-chr%s-%s.vcf.gz", chr, ancestry), numThreads)
 					transferRetrievedSnps(SNPs, retrieved)
 				}
@@ -1124,8 +1129,21 @@ func newLocusResult() *LocusResult {
 	}
 }
 
-func guessAccuracy() {
-	guessed := loadGuessedGenotypes()
+func guessAccuracy(afType string) {
+	var guessed map[string]map[string]map[string]uint8
+	var idvOutputFilename, lociOutputFilename string
+	switch afType {
+	case perAncestryAf:
+		guessed = loadGuessedGenotypes(perAncestryAf)
+		idvOutputFilename = "individuals.json"
+		lociOutputFilename = "loci.json"
+	case globalAf:
+		guessed = loadGuessedGenotypes(globalAf)
+		idvOutputFilename = "individuals_gaf.json"
+		lociOutputFilename = "loci_gaf.json"
+	default:
+		log.Fatalf("Invalid allele frequency type: %s", afType)
+	}
 	relatives := solver.AllRelativeSamples()
 	mainSamples := solver.All1000GenomesSamples()
 	var err error
@@ -1209,7 +1227,7 @@ func guessAccuracy() {
 		idvResults = append(idvResults, &res)
 	}
 	resultFolder := "results/guessAccuracy"
-	filepath = path.Join(resultFolder, "individuals.json")
+	filepath = path.Join(resultFolder, idvOutputFilename)
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening result file: %v", err)
@@ -1245,7 +1263,7 @@ func guessAccuracy() {
 	var ok bool
 	for _, pgsID := range allPgs {
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(params.DataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
@@ -1277,7 +1295,7 @@ func guessAccuracy() {
 			locusResults[locus].EffectWeight = float32((math.Abs(weight) - minw) / (maxw - minw))
 		}
 	}
-	eafFile, err := os.OpenFile(path.Join(resultFolder, "loci.json"), os.O_CREATE|os.O_WRONLY, 0644)
+	eafFile, err := os.OpenFile(path.Join(resultFolder, lociOutputFilename), os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println("Error opening eaf file:", err)
 		return
@@ -1320,7 +1338,7 @@ func linkingWithImputation() {
 	fmt.Printf("Imputation accuracy for chromosome %d\n", chrId)
 	numWorkers := 15
 	imputedSNPs := make(map[string]map[string]uint8)
-	for _, ancestry := range pgs.POPULATIONS {
+	for _, ancestry := range pgs.ANCESTRIES {
 		fmt.Printf("Reading imputed SNPs: %d, %s\n", chrId, ancestry)
 		chrPath := fmt.Sprintf(postImputeZippedFilename, chrId, ancestry)
 		imputedChunk := getAllIndividualSnps(chrPath, numWorkers)
@@ -1394,7 +1412,7 @@ func linkingWithImputation() {
 		stringedImputedPositions[i] = strconv.Itoa(pos)
 	}
 	chrStr := strconv.Itoa(chrId)
-	references := positionsMajorAlleleSamples(chrStr, imputedRegions, pgs.POPULATIONS)
+	references := positionsMajorAlleleSamples(chrStr, imputedRegions, pgs.ANCESTRIES)
 
 	relatives := solver.AllRelativeSamples()
 	relativeSnps := getRegionIndividualSNPs(chrStr, tools.GetChromosomeFilepath(chrStr, tools.RL), relatives,
@@ -1420,7 +1438,7 @@ func linkingWithImputation() {
 }
 
 func linkingWithGuessed() {
-	guessed := loadGuessedGenotypes()
+	guessed := loadGuessedGenotypes(perAncestryAf)
 	relatives := solver.AllRelativeSamples()
 	mainSamples := solver.All1000GenomesSamples()
 	ancestries := tools.LoadAncestry()
@@ -1474,7 +1492,7 @@ func linkingWithGuessed() {
 		for j, pos = range positions {
 			regions[j] = []string{pos, pos}
 		}
-		references = positionsMajorAlleleSamples(chrStr, regions, pgs.POPULATIONS)
+		references = positionsMajorAlleleSamples(chrStr, regions, pgs.ANCESTRIES)
 		for idv := range guessed {
 			relations[idv]["reference"] = newRelation(guessed[idv][chrStr],
 				references[pgs.GetIndividualAncestry(idv, ancestries)])
@@ -1533,7 +1551,7 @@ func processChromosomeForLinking(chr string, guessed map[string]map[string]map[s
 	}
 	fmt.Printf("Chr %s: Relatives' relations calculated\n", chr)
 
-	references = majorGenotypeSamples(chr, pgs.POPULATIONS, gtpFrequencies)
+	references = majorGenotypeSamples(chr, pgs.ANCESTRIES, gtpFrequencies)
 	for idv := range guessed {
 		relations[idv]["reference"] = newRelation(guessed[idv][chr], references[pgs.GetIndividualAncestry(idv, ancestries)])
 	}
@@ -1554,7 +1572,7 @@ func processChromosomeForLinking(chr string, guessed map[string]map[string]map[s
 }
 
 func linkingWithKing() {
-	guessed := loadGuessedGenotypes()
+	guessed := loadGuessedGenotypes(perAncestryAf)
 	ancestries := tools.LoadAncestry()
 	mainSamples := solver.All1000GenomesSamples()
 	relatedSamples := solver.AllRelativeSamples()
@@ -1638,7 +1656,7 @@ func evaluateImputation() {
 		fmt.Printf("Imputation evaluation for chromosome %d\n", chrId)
 		numWorkers := 4
 		imputedSNPs := make(map[string]map[string]uint8)
-		for _, ancestry := range pgs.POPULATIONS {
+		for _, ancestry := range pgs.ANCESTRIES {
 			fmt.Printf("Reading imputed SNPs: %d, %s\n", chrId, ancestry)
 			chrPath := fmt.Sprintf(postImputeTestingFilename, chrId, ancestry)
 			imputedChunk := getAllIndividualSnps(chrPath, numWorkers)
@@ -1651,7 +1669,7 @@ func evaluateImputation() {
 			individuals = append(individuals, idv)
 		}
 
-		guessed := loadGuessedGenotypes()
+		guessed := loadGuessedGenotypes(perAncestryAf)
 		guessedPositionsMap := make(map[int]struct{})
 		var posInt int
 		for idv := range guessed {
@@ -1861,7 +1879,7 @@ func macroAveragedF1(confusionMatrix [][]int) float32 {
 	return macroF1
 }
 
-func loadGuessedGenotypes() map[string]map[string]map[string]uint8 {
+func loadGuessedGenotypes(afType string) map[string]map[string]map[string]uint8 {
 	var err error
 	var file *os.File
 	var decoder *json.Decoder
@@ -1875,8 +1893,17 @@ func loadGuessedGenotypes() map[string]map[string]map[string]uint8 {
 		SNPs       map[string]uint8
 	}
 	guessed := make(map[string]map[string]map[string]uint8)
+	var prefix string
+	switch afType {
+	case perAncestryAf:
+		prefix = "guesses"
+	case globalAf:
+		prefix = "af-guesses"
+	default:
+		log.Fatalf("Unknown AF type: %s", afType)
+	}
 	for _, object := range dir {
-		if !object.IsDir() && strings.HasPrefix(object.Name(), "guesses") && strings.HasSuffix(object.Name(), ".json") {
+		if !object.IsDir() && strings.HasPrefix(object.Name(), prefix) && strings.HasSuffix(object.Name(), ".json") {
 			//if !object.IsDir() && (strings.HasPrefix(object.Name(), "guesses600") ||
 			//	strings.HasPrefix(object.Name(), "guesses601") ||
 			//	strings.HasPrefix(object.Name(), "guesses602") ||
@@ -1976,7 +2003,7 @@ func calculateGenotypeFrequencies() {
 }
 
 func calculateGenotypeFrequenciesOnlyGuessed() {
-	guessed := loadGuessedGenotypes()
+	guessed := loadGuessedGenotypes(perAncestryAf)
 	missingGenotypeFrequencies := []float32{(1 - pgs.MissingEAF) * (1 - pgs.MissingEAF),
 		2 * pgs.MissingEAF * (1 - pgs.MissingEAF), pgs.MissingEAF * pgs.MissingEAF}
 	folder := "data/frequencies"
@@ -1990,7 +2017,7 @@ func calculateGenotypeFrequenciesOnlyGuessed() {
 	var positionMap map[string]struct{}
 	frequencies := make(map[string]map[string]map[string][]float32)
 	ancestries := tools.LoadAncestry()
-	for _, ppl := range pgs.POPULATIONS {
+	for _, ppl := range pgs.ANCESTRIES {
 		frequencies[ppl] = make(map[string]map[string][]float32)
 		for chr := 1; chr <= 22; chr++ {
 			frequencies[ppl][strconv.Itoa(chr)] = make(map[string][]float32)
@@ -2027,7 +2054,7 @@ func calculateGenotypeFrequenciesOnlyGuessed() {
 			}
 		}
 
-		for _, ppl := range pgs.POPULATIONS {
+		for _, ppl := range pgs.ANCESTRIES {
 			for _, pos := range positions {
 				if _, ok = frequencies[ppl][chrStr][pos]; !ok {
 					fmt.Printf("%s: position %s:%s is missing\n", ppl, chrStr, pos)
@@ -2052,7 +2079,7 @@ func calculateGenotypeFrequenciesOnlyGuessed() {
 func getAllImputedPositions(chr int) []int {
 	imputedMap := make(map[string]struct{})
 	var imputedPositionsPerAncestry []string
-	for _, ancestry := range pgs.POPULATIONS {
+	for _, ancestry := range pgs.ANCESTRIES {
 		imputedPositionsPerAncestry = getAllPositions(fmt.Sprintf(postImputeZippedFilename, chr, ancestry))
 		//imputedPositionsPerAncestry = getAllPositions(fmt.Sprintf(postImputeTestingFilename, chr, ancestry))
 		for _, pos := range imputedPositionsPerAncestry {
@@ -2331,7 +2358,7 @@ func getChromosomeAFs(chr string) map[string]map[string][]float32 {
 	prg := "bcftools"
 	args := []string{
 		"query",
-		"-f", fmt.Sprintf("%%POS-%%" + strings.Join(pgs.POPULATIONS, "_AF\\t%%") + "_AF\n"),
+		"-f", fmt.Sprintf("%%POS-%%" + strings.Join(pgs.ANCESTRIES, "_AF\\t%%") + "_AF\n"),
 		//"-f", fmt.Sprintf("%%POS\t%%%s_AF\n", ancestry),
 		"-r", chr,
 		tools.GetChromosomeFilepath(chr, dataset),
@@ -2343,7 +2370,7 @@ func getChromosomeAFs(chr string) map[string]map[string][]float32 {
 	lines := strings.Split(string(output), "\n")
 	lines = lines[:len(lines)-1]
 	af := make(map[string]map[string][]float32)
-	for _, ppl := range pgs.POPULATIONS {
+	for _, ppl := range pgs.ANCESTRIES {
 		af[ppl] = make(map[string][]float32)
 	}
 	var afTotal float32
@@ -2353,7 +2380,7 @@ func getChromosomeAFs(chr string) map[string]map[string][]float32 {
 		fields = strings.Split(line, "-")
 		pos = fields[0]
 		pplAFs = strings.Split(fields[1], "\t")
-		for i, ppl := range pgs.POPULATIONS {
+		for i, ppl := range pgs.ANCESTRIES {
 			afs := strings.Split(pplAFs[i], ",")
 			afTotal = 0
 			for _, afStr := range afs {

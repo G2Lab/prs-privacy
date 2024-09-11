@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/params"
@@ -29,34 +30,47 @@ func NewIndividual() *Individual {
 	}
 }
 
-func NewCohort(p *pgs.PGS) Cohort {
+func NewCohort(p *pgs.PGS, dataset string) Cohort {
 	c := make(Cohort)
-	c.Populate(p)
+	c.Populate(p, dataset)
 	return c
 }
 
-func (c Cohort) Populate(p *pgs.PGS) {
+func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 	var err error
-	filename := fmt.Sprintf("%s/%s.json", params.DataFolder, p.PgsID)
-	// If the file doesn't exist, calculate the PRS and save it
-	if _, err = os.Stat(filename); os.IsNotExist(err) {
-		err = c.RetrieveGenotypes(p)
-		if err != nil {
-			log.Fatalf("Error retrieving genotypes and calculating PRS: %v", err)
+	var filename string
+	switch dataset {
+	case tools.GG:
+		filename = fmt.Sprintf("%s/%s.json", params.LocalDataFolder, p.PgsID)
+		// If the file doesn't exist, calculate the PRS and save it
+		if _, err = os.Stat(filename); os.IsNotExist(err) {
+			err = c.RetrieveGenotypes(p, dataset)
+			if err != nil {
+				log.Fatalf("Error retrieving genotypes and calculating PRS: %v", err)
+			}
+			c.CalculatePRS(p)
+			c.SaveToDisk(filename)
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID))
+			}
+			// Save scores separately for the ease of reading
+			return
 		}
-		c.CalculatePRS(p)
-		c.SaveToDisk(filename)
-		if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID)); os.IsNotExist(err) {
-			c.SaveScores(fmt.Sprintf("%s/%s.scores", params.DataFolder, p.PgsID))
+		// Otherwise, load the data from disk
+		c.LoadFromDisk(filename)
+	case tools.UKB:
+		filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankDataFolder, p.PgsID)
+		if _, err = os.Stat(filename); os.IsNotExist(err) {
+			err = c.RetrieveGenotypes(p, dataset)
+			c.CalculatePRS(p)
+			c.SaveScores(filename)
 		}
-		// Save scores separately for the ease of reading
-		return
+	default:
+		log.Fatalf("Unknown dataset: %s", dataset)
 	}
-	// Otherwise, load the data from disk
-	c.LoadFromDisk(filename)
 }
 
-func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
+func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 	var err error
 	var ok bool
 	var output []byte
@@ -64,7 +78,15 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 	var allSamples []string
 	var positionSamples, sampleAlleles []string
 	var found, locusAdded bool
-	datasets := []string{tools.GG, tools.RL}
+	var datasets []string
+	switch source {
+	case tools.GG:
+		datasets = []string{tools.GG, tools.RL}
+	case tools.UKB:
+		datasets = []string{tools.UKB}
+	default:
+		log.Fatalf("Unknown source: %s", source)
+	}
 	for _, locus := range p.Loci {
 		for _, dataset := range datasets {
 			found, locusAdded = false, false
@@ -80,7 +102,6 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 			for _, line := range lines[:len(lines)-1] {
 				positionSamples = strings.Split(line, "-")
 				if positionSamples[0] != locus {
-					//fmt.Printf("Locus %s does not match %s\n", locus, positionSamples[0])
 					continue
 				}
 				found = true
@@ -132,6 +153,8 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 					allSamples = All1000GenomesSamples()
 				case tools.RL:
 					allSamples = AllRelativeSamples()
+				case tools.UKB:
+					allSamples = AllUKBiobankSamples()
 				default:
 					log.Fatalln("Unknown dataset:", dataset)
 				}
@@ -139,7 +162,7 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 					if _, ok = c[indv]; !ok {
 						c[indv] = NewIndividual()
 					}
-					c[indv].Genotype = append(c[indv].Genotype, ReferenceAllele, ReferenceAllele)
+					c[indv].Genotype = append(c[indv].Genotype, ReferenceSNP, ReferenceSNP)
 				}
 			}
 		}
@@ -148,10 +171,28 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS) error {
 }
 
 func (c Cohort) CalculatePRS(p *pgs.PGS) {
-	for idv := range c {
-		c[idv].Score = CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
-		//fmt.Printf("Individual %s: %v\n", idv, c[idv].Genotype)
+	numWorkers := 15
+	tasks := make(chan string, 1)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idv := range tasks {
+				score := CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
+				mu.Lock()
+				c[idv].Score.Set(score)
+				mu.Unlock()
+			}
+		}()
 	}
+	for idv := range c {
+		tasks <- idv
+		//c[idv].Score = CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
+	}
+	close(tasks)
+	wg.Wait()
 }
 
 func (c Cohort) SortByScore() []string {

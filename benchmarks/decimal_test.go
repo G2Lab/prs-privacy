@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/cockroachdb/apd/v3"
-	"github.com/ericlagergren/decimal"
 	"math/big"
 	"testing"
+
+	"github.com/cockroachdb/apd/v3"
 )
 
 func BenchmarkBigRatAdd(b *testing.B) {
@@ -18,16 +18,16 @@ func BenchmarkBigRatAdd(b *testing.B) {
 	}
 }
 
-func BenchmarkDecimalAdd(b *testing.B) {
-	ctx := decimal.Context{Precision: 20}
-	dec1 := decimal.WithContext(ctx).SetFloat64(0.12345678901234567)
-	dec2 := decimal.WithContext(ctx).SetFloat64(0.98765432109876543)
-
-	for i := 0; i < b.N; i++ {
-		result := decimal.WithContext(decimal.Context{Precision: 20}).Add(dec1, dec2)
-		_ = result // Avoid compiler optimization
-	}
-}
+//func BenchmarkDecimalAdd(b *testing.B) {
+//	ctx := decimal.Context{Precision: 20}
+//	dec1 := decimal.WithContext(ctx).SetFloat64(0.12345678901234567)
+//	dec2 := decimal.WithContext(ctx).SetFloat64(0.98765432109876543)
+//
+//	for i := 0; i < b.N; i++ {
+//		result := decimal.WithContext(decimal.Context{Precision: 20}).Add(dec1, dec2)
+//		_ = result // Avoid compiler optimization
+//	}
+//}
 
 func BenchmarkAPDAdd(b *testing.B) {
 	c := apd.BaseContext.WithPrecision(20)
@@ -87,8 +87,12 @@ func main() {
 	benchmarkResults := testing.Benchmark(BenchmarkBigRatAdd)
 	fmt.Println("Big.Rat addition:", benchmarkResults)
 
-	benchmarkResults = testing.Benchmark(BenchmarkDecimalAdd)
-	fmt.Println("Decimal addition:", benchmarkResults)
+	/*
+		The ericlagergren/decimal package was much slower than APD,
+		removing it from the comparison to remove the dependency.
+	*/
+	//benchmarkResults = testing.Benchmark(BenchmarkDecimalAdd)
+	//fmt.Println("Decimal addition:", benchmarkResults)
 
 	benchmarkResults = testing.Benchmark(BenchmarkAPDAdd)
 	fmt.Println("APD Decimal addition:", benchmarkResults)

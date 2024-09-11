@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	ReferenceAllele   = 0
-	AlternativeAllele = 1
+	ReferenceSNP   = 0
+	AlternativeSNP = 1
 )
 
 const (
@@ -324,23 +324,3 @@ func findAbsMin(values []float64) float64 {
 	}
 	return minV
 }
-
-//func SampleMaxMinScores(segmentStart, segmentEnd, numSamples int, Betas map[uint8]int64, af [][]float32) (int64, int64) {
-//	var err error
-//	var sample []uint8
-//	var score, maxScore, minScore int64
-//	for i := 0; i < numSamples; i++ {
-//		sample, err = SampleSegmentFromPopulation(segmentStart, segmentEnd, af)
-//		if err != nil {
-//			log.Fatalf("Error sampling segment: %v", err)
-//		}
-//		score = genotypeToScore(segmentStart, segmentEnd, sample, Betas)
-//		if score > maxScore {
-//			maxScore = score
-//		}
-//		if score < minScore {
-//			minScore = score
-//		}
-//	}
-//	return maxScore, minScore
-//}

@@ -2,13 +2,14 @@ package solver
 
 import (
 	"fmt"
-	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/pgs"
 	"log"
 	"math"
 	"sort"
 	"sync"
+
+	"github.com/cockroachdb/apd/v3"
+	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/pgs"
 )
 
 type DP struct {
@@ -613,7 +614,7 @@ func lociToDecimalScore(ctx *apd.Context, loci []uint8, weights []*apd.Decimal) 
 func lociToGenotype(loci []uint8, total int, efal []uint8, knownAlleles map[int]uint8) []uint8 {
 	sol := make([]uint8, total)
 	for i := range efal {
-		if efal[i] == ReferenceAllele {
+		if efal[i] == ReferenceSNP {
 			sol[pgs.Ploidy*i] = 1
 			sol[pgs.Ploidy*i+1] = 1
 		}
@@ -634,12 +635,12 @@ func lociToGenotype(loci []uint8, total int, efal []uint8, knownAlleles map[int]
 	//
 	for _, locus := range loci {
 		switch efal[locus/pgs.Ploidy] {
-		case AlternativeAllele:
+		case AlternativeSNP:
 			sol[locus] = 1
 			if locus%pgs.Ploidy == 1 {
 				sol[locus-1] = 1
 			}
-		case ReferenceAllele:
+		case ReferenceSNP:
 			sol[locus] = 0
 			if locus%pgs.Ploidy == 1 {
 				sol[locus-1] = 0

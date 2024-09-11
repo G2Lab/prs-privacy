@@ -8,9 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/montanaflynn/stats"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 	"io"
 	"log"
 	"math"
@@ -21,6 +18,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/tools"
 )
 
 const catalog = "catalog"
@@ -49,31 +49,6 @@ func listFiles(folderPath string) ([]string, error) {
 	sort.Strings(fileNames)
 
 	return fileNames, nil
-}
-
-func numVariantsStats(fileNames []string) {
-	var err error
-	numVariants := make([]float64, 0)
-	for _, fileName := range fileNames {
-		fmt.Println(fileName)
-		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(filepath.Join(catalog, fileName))
-		if err != nil {
-			log.Println("Error:", err)
-			return
-		}
-		numVariants = append(numVariants, float64(p.NumVariants))
-	}
-	var mean, median float64
-	median, err = stats.Median(numVariants)
-	if err != nil {
-		log.Println("Median error:", err)
-	}
-	mean, err = stats.Mean(numVariants)
-	if err != nil {
-		log.Println("Mean error:", err)
-	}
-	fmt.Printf("Median and mean number of SNPs per PGS: %d, %d\n", int(median), int(mean))
 }
 
 func getPGSWithFewerVariants(limit int) {
@@ -816,8 +791,6 @@ func main() {
 	switch *expr {
 	case "download":
 		downloadScoreFiles(500)
-	case "num":
-		numVariantsStats(filenames)
 	case "overlap":
 		lociOverlapStats(filenames)
 	case "limit":
