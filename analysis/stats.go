@@ -252,7 +252,7 @@ func validateBases() {
 			log.Println("Error:", err)
 			return
 		}
-		err = p.LoadStats()
+		err = p.LoadStats(tools.GG)
 		if err != nil {
 			fmt.Printf("Discarding %s: %v\n", id, err)
 			discarded = append(discarded, p.PgsID)
@@ -733,7 +733,7 @@ func weightPrecisionDistribution() {
 			return
 		}
 		precisions[p.WeightPrecision]++
-		err = p.LoadStats()
+		err = p.LoadStats(tools.GG)
 		if err != nil {
 			log.Printf("%s: Error loading stats: %v\n", p.PgsID, err)
 		}

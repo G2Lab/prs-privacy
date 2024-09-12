@@ -59,7 +59,7 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 		// Otherwise, load the data from disk
 		c.LoadFromDisk(filename)
 	case tools.UKB:
-		filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankDataFolder, p.PgsID)
+		filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)
 		if _, err = os.Stat(filename); os.IsNotExist(err) {
 			err = c.RetrieveGenotypes(p, dataset)
 			c.CalculatePRS(p)
@@ -100,7 +100,7 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 			}
 			lines := strings.Split(string(output), "\n")
 			for _, line := range lines[:len(lines)-1] {
-				positionSamples = strings.Split(line, "-")
+				positionSamples = strings.Split(line, "*")
 				if positionSamples[0] != locus {
 					continue
 				}

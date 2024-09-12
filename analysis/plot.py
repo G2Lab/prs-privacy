@@ -548,7 +548,8 @@ def kinship_experiment():
 
 def score_uniqueness():
     directory = "results/uniqueness/"
-    filepath = os.path.join(directory, "scores_1000G.json")
+    # filepath = os.path.join(directory, "scores_1000Genomes.json")
+    filepath = os.path.join(directory, "scores_low_1000Genomes.json")
     data = []
     with open(filepath, 'r') as f:
         content = json.load(f)
@@ -563,13 +564,39 @@ def score_uniqueness():
     first_color = 'teal'
     second_color = 'coral'
     df = pd.DataFrame(data)
+    # Create bins for powers of 10
+    # bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 1)]
+    bins = []
+    for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 1):
+        bins.append(10**(i-1))
+        bins.append(10**(i-1) * 10**0.5)
+    bins.append(10**i)
+    df['TotalPossibleScoresBin'] = pd.cut(df['TotalPossibleScores'], bins=bins, right=False)
+    # Group by bins and calculate mean and standard deviation values
+    grouped = df.groupby('TotalPossibleScoresBin').agg(
+        RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
+        RealPercentageUnique_std=('RealPercentageUnique', 'std'),
+        PredictedPercentageUnique_mean=('PredictedPercentageUnique', 'mean'),
+        PredictedPercentageUnique_std=('PredictedPercentageUnique', 'std')
+    ).reset_index()
+
     fig, ax = plt.subplots(figsize=(4, 3))
-    sns.lineplot(x='TotalPossibleScores', y='RealPercentageUnique', data=df, ax=ax, color=first_color, linestyle='-',
-                 label='Dataset')
-    sns.lineplot(x='TotalPossibleScores', y='PredictedPercentageUnique', data=df, ax=ax, color=second_color,
-                 linestyle='--', label='Predicted')
+    x = grouped['TotalPossibleScoresBin'].apply(lambda x: x.mid)
+    y_real = grouped['RealPercentageUnique_mean']
+    y_real_std = grouped['RealPercentageUnique_std']
+    y_pred = grouped['PredictedPercentageUnique_mean']
+    y_pred_std = grouped['PredictedPercentageUnique_std']
+
+    ax.plot(x, y_real, color=first_color, label='Dataset')
+    ax.fill_between(x, y_real - y_real_std, y_real + y_real_std, color=first_color, alpha=0.1)
+    ax.plot(x, y_pred, color=second_color, linestyle='--', label='Predicted')
+    ax.fill_between(x, y_pred - y_pred_std, y_pred + y_pred_std, color=second_color, alpha=0.1)
+    # sns.lineplot(x='TotalPossibleScores', y='RealPercentageUnique', data=grouped, ax=ax, color=first_color, linestyle='-',
+    #              label='Dataset')
+    # sns.lineplot(x='TotalPossibleScores', y='PredictedPercentageUnique', data=grouped, ax=ax, color=second_color,
+    #              linestyle='--', label='Predicted')
     plt.xlabel('Number of possible scores')
-    plt.ylabel('Percentage of unique scores')
+    plt.ylabel(r'Unique scores, \%')
     ax.set_xscale('log')
 
     plt.legend()

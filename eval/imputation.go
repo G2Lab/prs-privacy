@@ -1268,7 +1268,7 @@ func guessAccuracy(afType string) {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
 		}
-		err = p.LoadStats()
+		err = p.LoadStats(tools.GG)
 		if err != nil {
 			log.Printf("Error loading stats: %v\n", err)
 			return

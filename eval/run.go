@@ -80,8 +80,8 @@ func main() {
 	case "findprs":
 		findUnsolvablePRSWithOverlap()
 	case "uniqueness":
-		//uniquenessExperiment(tools.UKB)
-		uniquenessExperiment(tools.GG)
+		uniquenessExperiment(tools.UKB)
+		//uniquenessExperiment(tools.GG)
 	}
 	//kinshipExperiment()
 	//kingTest()
@@ -118,7 +118,7 @@ func predictPRS() {
 			return
 		}
 		fmt.Printf("======== %s ========\n", p.PgsID)
-		p.LoadStats()
+		p.LoadStats(tools.GG)
 
 		minScore, maxScore := p.FindMinAndMaxScores()
 		means, stds := p.EstimateMeanAndStd()
@@ -250,7 +250,7 @@ idLoop:
 			p := pgs.NewPGS()
 			fmt.Printf("==== %s ====\n", id)
 			p.LoadCatalogFile(filepath.Join(catalogFolder, id+"_hmPOS_GRCh37.txt"))
-			err = p.LoadStats()
+			err = p.LoadStats(tools.GG)
 			if err != nil {
 				continue
 			}
@@ -405,7 +405,7 @@ func kingTest() {
 			return
 		}
 		fmt.Printf("======== %s ========\n", p.PgsID)
-		err = p.LoadStats()
+		err = p.LoadStats(tools.GG)
 		if err != nil {
 			log.Printf("Error loading stats: %v\n", err)
 			return
@@ -613,7 +613,7 @@ func kinshipExperiment() {
 				return
 			}
 			fmt.Printf("======== %s ========\n", p.PgsID)
-			err = p.LoadStats()
+			err = p.LoadStats(tools.GG)
 			if err != nil {
 				log.Printf("Error loading stats: %v\n", err)
 				return
@@ -755,13 +755,6 @@ func uniquenessExperiment(dataset string) {
 		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
 	})
 
-	var individuals []string
-	switch dataset {
-	case tools.GG:
-		individuals = solver.All1000GenomesSamples()
-	case tools.UKB:
-		individuals = solver.AllUKBiobankSamples()
-	}
 	numWorkers := 23
 	tasks := make(chan string, 1)
 	results := make([]*Result, 0)
@@ -781,16 +774,15 @@ func uniquenessExperiment(dataset string) {
 					log.Printf("Error loading catalog file: %v\n", err)
 					return
 				}
-				if len(p.Loci) > 35 {
-					continue
-				}
-				p.LoadStats()
+				p.LoadStats(dataset)
 				fmt.Printf("======== %s (%d) ========\n", p.PgsID, len(p.Loci))
 				cohort := solver.NewCohort(p, dataset)
+				fmt.Printf("%s: cohort size %d\n", p.PgsID, len(cohort))
 				scores := make(map[string][]string)
 				scoresAsStrings := make([]string, 0)
 				scoresAsFloats := make([]float64, 0)
-				for _, idv := range individuals {
+				//for _, idv := range individuals {
+				for idv := range cohort {
 					sc = cohort[idv].Score.String()
 					if _, ok := scores[sc]; !ok {
 						scores[sc] = make([]string, 0)
@@ -812,20 +804,25 @@ func uniquenessExperiment(dataset string) {
 					}
 					anonsets = append(anonsets, len(idvs))
 				}
-				minScore, maxScore := p.FindMinAndMaxScores()
-				minScoreFloat, _ := minScore.Float64()
-				maxScoreFloat, _ := maxScore.Float64()
-				numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
-				predictedMeans, predictedStds := p.EstimateMeanAndStd()
-				predictedNumUniquePredictedStats, numPossibleScores := estimateNumUniqueScores(len(individuals), numPossibleSubsetSums,
-					predictedMeans["ALL"], predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision)
+				//minScore, maxScore := p.FindMinAndMaxScores()
+				//minScoreFloat, _ := minScore.Float64()
+				//maxScoreFloat, _ := maxScore.Float64()
+				//numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
+				//predictedMeans, predictedStds := p.EstimateMeanAndStd()
+				//predictedNumUniquePredictedStats, numPossibleScores := estimateNumUniqueScores(len(cohort), numPossibleSubsetSums,
+				//	predictedMeans["ALL"], predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision)
+				//if numPossibleScores == -1 {
+				//	fmt.Printf("Too many possible scores for %s\n", pgsID)
+				//	continue
+				//}
+				predictedNumUniquePredictedStats, numPossibleScores := 0.0, 0
 				result := &Result{
 					PgsID:                     pgsID,
 					NumVariants:               pgsToNumVariants[pgsID],
 					TotalPresentScores:        len(scores),
 					TotalPossibleScores:       numPossibleScores,
-					RealPercentageUnique:      float64(realNumUnique) * 100 / float64(len(individuals)),
-					PredictedPercentageUnique: predictedNumUniquePredictedStats * 100 / float64(len(individuals)),
+					RealPercentageUnique:      float64(realNumUnique) * 100 / float64(len(cohort)),
+					PredictedPercentageUnique: predictedNumUniquePredictedStats * 100 / float64(len(cohort)),
 					AnonymitySets:             anonsets,
 				}
 				mutex.Lock()
@@ -839,6 +836,7 @@ func uniquenessExperiment(dataset string) {
 	for _, pgsID := range allPgs {
 		tasks <- pgsID
 	}
+	fmt.Println("---- All tasks sent ----")
 	close(tasks)
 	wg.Wait()
 	resultFolder := "results/uniqueness"
@@ -852,6 +850,7 @@ func uniquenessExperiment(dataset string) {
 	if err = encoder.Encode(results); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
+	fmt.Println("Completed")
 }
 
 func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32) (float64, int) {
@@ -860,26 +859,47 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 	step := math.Pow10(-int(precision))
 	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
 	numPossibleScores := numPossibleScoresDuePrecision
-	if numSubsetSums < numPossibleScoresDuePrecision {
-		fmt.Printf("Num subsums: %d < In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
+	if numSubsetSums > 0 && numSubsetSums < numPossibleScoresDuePrecision {
+		fmt.Printf("Number of subsums: %d < In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
 		step = (maxVal - minVal) / float64(numSubsetSums)
 		numPossibleScores = numSubsetSums
 	} else {
 		fmt.Printf("Num subsums: %d > In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
 	}
-	var lowerBound, upperBound float64
-	for x := minVal; x <= maxVal; x += step {
-		lowerBound = x - step/2
-		upperBound = x + step/2
-		if x == minVal {
-			lowerBound = x
-		}
-		if x == maxVal {
-			upperBound = x
-		}
-		prob := normalDist.CDF(upperBound) - normalDist.CDF(lowerBound)
+	//if numPossibleScores > int(math.Pow10(13)) {
+	if numPossibleScores > int(math.Pow10(10)) {
+		return -1, -1
+	}
 
-		totalUnique += float64(M) * prob * math.Pow(1-prob, float64(M-1))
+	numWorkers := 8
+	segmentSize := (maxVal - minVal) / float64(numWorkers)
+	results := make(chan float64, numWorkers)
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var lowerBound, upperBound float64
+			segmentTotalUnique := 0.0
+			for x := minVal + float64(i)*segmentSize; x < minVal+float64(i+1)*segmentSize; x += step {
+				lowerBound = x - step/2
+				upperBound = x + step/2
+				if x == minVal {
+					lowerBound = x
+				}
+				if x == maxVal {
+					upperBound = x
+				}
+				prob := normalDist.CDF(upperBound) - normalDist.CDF(lowerBound)
+				segmentTotalUnique += float64(M) * prob * math.Pow(1-prob, float64(M-1))
+			}
+			results <- segmentTotalUnique
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	for res := range results {
+		totalUnique += res
 	}
 	return totalUnique, numPossibleScores
 }
@@ -1020,7 +1040,7 @@ func sequenceSolving() {
 				return
 			}
 			fmt.Printf("======== %s ========\n", p.PgsID)
-			err = p.LoadStats()
+			err = p.LoadStats(tools.GG)
 			if err != nil {
 				log.Printf("Error loading stats: %v\n", err)
 				return
@@ -1225,7 +1245,7 @@ func sequenceSolvingAF() {
 				return
 			}
 			fmt.Printf("======== %s ========\n", p.PgsID)
-			err = p.LoadStats()
+			err = p.LoadStats(tools.GG)
 			if err != nil {
 				log.Printf("Error loading stats: %v\n", err)
 				return
@@ -1470,7 +1490,7 @@ solutionLoop:
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
 			}
-			err = refp.LoadStats()
+			err = refp.LoadStats(tools.GG)
 			if err != nil {
 				log.Printf("Error loading stats for %s: %v\n", ref, err)
 				return nil
@@ -1573,7 +1593,7 @@ func accuracyParallel() {
 		return
 	}
 	fmt.Printf("======== %s ========\n", p.PgsID)
-	p.LoadStats()
+	p.LoadStats(tools.GG)
 	cohort := solver.NewCohort(p, tools.GG)
 	populations := tools.LoadAncestry()
 	individuals := solver.All1000GenomesSamples()
@@ -1663,7 +1683,7 @@ func findAllSolutions() {
 		return
 	}
 	fmt.Printf("%s, %s\n", p.PgsID, INDIVIDUAL)
-	err = p.LoadStats()
+	err = p.LoadStats(tools.GG)
 	if err != nil {
 		log.Printf("Error loading stats: %v\n", err)
 		return

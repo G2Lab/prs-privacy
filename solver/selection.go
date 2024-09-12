@@ -1,36 +1,23 @@
 package solver
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
+	"bufio"
 	"encoding/csv"
-	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
-	"os/exec"
 	"strings"
+
+	"github.com/nikirill/prs/params"
 )
 
-const SamplesFile = "data/1000genome-samples.csv"
-
-func selectSamples(num, total int, seedPhrase string) []string {
-	//	given the seed, generate N cryptographically secure pseudo-random numbers modulo M
-	h := sha256.New()
-	seed := int64(binary.BigEndian.Uint64(h.Sum([]byte(seedPhrase))[:8]))
-	fmt.Println(seed)
-	rnd := rand.New(rand.NewSource(seed))
-	selection := make([]string, num)
-	all := All1000GenomesSamples()
-	for i := 0; i < num; i++ {
-		selection[i] = all[rnd.Intn(total)]
-	}
-	return selection
-}
+const (
+	GGSamplesFile   = "data/1000genome-samples.csv"
+	UKBBSamplesFile = params.UKBiobankDataFolder + "individuals.txt"
+)
 
 func All1000GenomesSamples() []string {
-	f, err := os.Open(SamplesFile)
+	f, err := os.Open(GGSamplesFile)
 	if err != nil {
 		log.Fatalf("Error opening the samples file: %v", err)
 	}
@@ -57,14 +44,20 @@ func All1000GenomesAndRelativeSamples() []string {
 }
 
 func AllUKBiobankSamples() []string {
-	cmd := exec.Command("bcftools", "query", "-l",
-		"/gpfs/commons/datasets/controlled/ukbb-gursoylab/ImputationV3/Chr1/plink2.vcf.gz")
-	output, err := cmd.Output()
+	f, err := os.Open(UKBBSamplesFile)
 	if err != nil {
-		log.Fatalf("Error UKBB samples: %v", err)
+		log.Fatalf("Error opening the UKBB samples file: %v", err)
 	}
-	individuals := strings.Split(string(output), "\n")
-	individuals = individuals[:len(individuals)-1]
+	defer f.Close()
+	var individuals []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		individuals = append(individuals, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error reading the UKBB samples file: %v", err)
+	}
 	return individuals
 }
 

@@ -337,21 +337,32 @@ func (p *PGS) GetUnSortedVariantLoci() []string {
 	return loci
 }
 
-func (p *PGS) LoadStats() error {
-	return p.LoadDatasetStats()
+func (p *PGS) LoadStats(dataset string) error {
+	return p.LoadDatasetStats(dataset)
 }
 
-func (p *PGS) LoadDatasetStats() error {
-	filename := fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		err = p.extractPopulationAlleles()
+func (p *PGS) LoadDatasetStats(dataset string) error {
+	var efalFilename, statFilename string
+	switch dataset {
+	case tools.GG:
+		efalFilename = fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
+	case tools.UKB:
+		efalFilename = fmt.Sprintf("%s/%s.efal", params.UKBiobankInputFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", params.UKBiobankInputFolder, p.PgsID)
+	default:
+		log.Printf("Unknown dataset: %s\n", dataset)
+		return errors.New("unknown dataset")
+	}
+	if _, err := os.Stat(efalFilename); os.IsNotExist(err) {
+		err = p.extractPopulationAlleles(dataset)
 		if err != nil {
 			return err
 		}
-		fmt.Println("Extracted population alleles", p.EffectAlleles)
-		p.savePopulationAlleles()
+		//fmt.Println("Extracted population alleles", p.EffectAlleles)
+		p.savePopulationAlleles(efalFilename)
 	} else {
-		efalFile, err := os.Open(filename)
+		efalFile, err := os.Open(efalFilename)
 		if err != nil {
 			log.Printf("Error opening efal file: %v\n", err)
 			return err
@@ -365,14 +376,21 @@ func (p *PGS) LoadDatasetStats() error {
 		//fmt.Println("Loaded population alleles", p.EffectAlleles)
 	}
 
-	filename = fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		p.extractEAF()
-		p.extractGF()
+	if _, err := os.Stat(statFilename); os.IsNotExist(err) {
+		switch dataset {
+		case tools.GG:
+			p.extractEAF()
+			p.extractGF()
+		case tools.UKB:
+			p.CalculateEAFAndGF(dataset)
+		default:
+			log.Printf("Unknown dataset: %s\n", dataset)
+			return errors.New("unknown dataset")
+		}
 		//p.computeFrequencySpectrum()
-		p.SaveStats()
+		p.SaveStats(statFilename)
 	} else {
-		statsFile, err := os.Open(filename)
+		statsFile, err := os.Open(statFilename)
 		if err != nil {
 			log.Printf("Error opening stats file: %v\n", err)
 			return err
@@ -387,14 +405,14 @@ func (p *PGS) LoadDatasetStats() error {
 	return nil
 }
 
-func (p *PGS) extractPopulationAlleles() error {
+func (p *PGS) extractPopulationAlleles(dataset string) error {
 	refAltQ := "%CHROM:%POS-%REF\t%ALT\n"
 	var alt, ref string
 	var missing, alleleSet bool
 	for k, locus := range p.Loci {
 		missing, alleleSet = true, false
 		chr, pos := tools.SplitLocus(locus)
-		query, args := tools.RangeQuery(refAltQ, chr, pos, pos, tools.GG)
+		query, args := tools.RangeQuery(refAltQ, chr, pos, pos, dataset)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {
@@ -405,7 +423,6 @@ func (p *PGS) extractPopulationAlleles() error {
 		for j, line := range lines[:len(lines)-1] {
 			fields := strings.Split(line, "-")
 			if fields[0] != locus {
-				//fmt.Printf("Locus %s does not match %s\n", locus, fields[0])
 				continue
 			}
 			missing = false
@@ -445,16 +462,15 @@ func (p *PGS) extractPopulationAlleles() error {
 				}
 			}
 		}
-		if missing { // || len(lines[:len(lines)-1]) == 0
-			//	log.Printf("No data for locus %s, insert alt as the effect", locus)
+		if missing {
+			//	No data for locus, insert alt as the effect
 			p.EffectAlleles[k] = 1
 		}
 	}
 	return nil
 }
 
-func (p *PGS) savePopulationAlleles() {
-	filename := fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
+func (p *PGS) savePopulationAlleles(filename string) {
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating effect alleles file: %v", err)
@@ -578,7 +594,7 @@ func (p *PGS) extractGF() {
 		}
 		lines := strings.Split(string(output), "\n")
 		for _, line := range lines[:len(lines)-1] {
-			positionAndSamples = strings.Split(line, "-")
+			positionAndSamples = strings.Split(line, "*")
 			if positionAndSamples[0] != locus {
 				//fmt.Printf("Locus %s does not match %s\n", locus, positionAndSamples[0])
 				continue
@@ -617,6 +633,70 @@ func (p *PGS) extractGF() {
 				p.PopulationStats[ppl].GF[k][i] = float32(counts[ppl][i]) / float32(total[ppl])
 			}
 		}
+	}
+}
+
+func (p *PGS) CalculateEAFAndGF(dataset string) {
+	var err error
+	var found bool
+	var chr, position, snps string
+	var output []byte
+	var pair []uint8
+	var positionAndSamples, idvSnps []string
+	var genotypeCount, alleleCount map[uint8]int
+	for k, locus := range p.Loci {
+		found = false
+		chr, position = tools.SplitLocus(locus)
+		query, args := tools.IndividualSnpsQuery(chr, position, dataset)
+		output, err = exec.Command(query, args...).Output()
+		if err != nil {
+			fmt.Println("Error executing bcftools command:", err)
+			continue
+		}
+		genotypeCount = make(map[uint8]int)
+		alleleCount = make(map[uint8]int)
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines[:len(lines)-1] {
+			positionAndSamples = strings.Split(line, "*")
+			if positionAndSamples[0] != locus {
+				continue
+			}
+			found = true
+			samples := strings.Split(positionAndSamples[1], "\t")
+			samples = samples[:len(samples)-1]
+			for _, sample := range samples {
+				idvSnps = strings.Split(sample, "=")
+				snps, err = tools.NormalizeSnp(idvSnps[1])
+				if err != nil {
+					fmt.Printf("Error normalizing %s: %v", idvSnps[1], err)
+					continue
+				}
+				pair, err = tools.SnpToPair(snps)
+				if err != nil {
+					fmt.Printf("Error converting SNPs %s to alleles: %v", snps, err)
+					continue
+				}
+				genotypeCount[pair[0]+pair[1]]++
+				alleleCount[pair[0]]++
+				alleleCount[pair[1]]++
+			}
+		}
+		if !found {
+			if _, ok := p.PopulationStats["ALL"].AF[k]; ok {
+				// Already recorded before due to possibly misaligned index
+				continue
+			}
+			p.PopulationStats["ALL"].AF[k] = []float32{1 - MissingEAF, MissingEAF}
+			p.PopulationStats["ALL"].GF[k] = []float32{(1 - MissingEAF) * (1 - MissingEAF), 2 * MissingEAF * (1 - MissingEAF),
+				MissingEAF * MissingEAF}
+			continue
+		}
+		totalAlleles := alleleCount[0] + alleleCount[1]
+		p.PopulationStats["ALL"].AF[k] = []float32{float32(alleleCount[0]) / float32(totalAlleles),
+			float32(alleleCount[1]) / float32(totalAlleles)}
+		totalGenotypes := genotypeCount[0] + genotypeCount[1] + genotypeCount[2]
+		p.PopulationStats["ALL"].GF[k] = []float32{float32(genotypeCount[0]) / float32(totalGenotypes),
+			float32(genotypeCount[1]) / float32(totalGenotypes), float32(genotypeCount[2]) / float32(totalGenotypes)}
 	}
 }
 
@@ -724,8 +804,7 @@ func (p *PGS) extractGF() {
 //	}
 //}
 
-func (p *PGS) SaveStats() {
-	filename := fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
+func (p *PGS) SaveStats(filename string) {
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Error creating stats file: %v", err)

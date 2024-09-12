@@ -1,7 +1,10 @@
 package params
 
-const LocalDataFolder = "inputs"
-const UKBiobankDataFolder = "/gpfs/commons/datasets/controlled/ukbb-gursoylab/knikitin/inputs/"
+const (
+	LocalDataFolder      = "inputs"
+	UKBiobankDataFolder  = "/gpfs/commons/datasets/controlled/ukbb-gursoylab/knikitin/"
+	UKBiobankInputFolder = UKBiobankDataFolder + "inputs/"
+)
 
 const NumCpusEnv = "SLURM_CPUS_PER_TASK"
 
