@@ -370,17 +370,17 @@ def sequential_idv_accuracy():
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.boxplot(x='Ancestry', y='GuessAccuracy', data=df, palette='Pastel1', hue='Ancestry')
 
-    # Calculate median GuessAccuracy for each ancestry in df_gaf
-    median_gaf_acc = df_gaf.groupby('Ancestry')['GuessAccuracy'].median()
-    for i, (ancestry, median) in enumerate(median_gaf_acc.items()):
-        ax.plot([i - 0.35, i + 0.35], [median, median], linestyle=':', color='red', linewidth=1)
+    # # Calculate median GuessAccuracy for each ancestry in df_gaf
+    # median_gaf_acc = df_gaf.groupby('Ancestry')['GuessAccuracy'].median()
+    # for i, (ancestry, median) in enumerate(median_gaf_acc.items()):
+    #     ax.plot([i - 0.35, i + 0.35], [median, median], linestyle=':', color='red', linewidth=1)
 
     median_ref_acc = df.groupby('Ancestry')['ReferenceAccuracy'].median()
     for i, (ancestry, median) in enumerate(median_ref_acc.items()):
         ax.plot([i - 0.35, i + 0.35], [median, median], linestyle='--', alpha=0.7, color='black')
         # Add "Baseline" label above the dashed line
-        # if i == 2:
-        #     ax.text(i, median - 4, 'Baseline', ha='center', va='bottom', fontsize=10, color='black')
+        if i == 2:
+            ax.text(i, median - 4, 'Baseline', ha='center', va='bottom', fontsize=LABEL_SIZE, color='black')
 
     overall_median_accuracy = df['GuessAccuracy'].median()
     ax.axhline(overall_median_accuracy, color='gray', linestyle='-', linewidth=1, label='Overall Median')
@@ -391,15 +391,16 @@ def sequential_idv_accuracy():
     print("Median accuracy per ancestry:", df.groupby('Ancestry')['GuessAccuracy'].median())
     print("Total samples:", df['Ancestry'].value_counts())
 
-    red_line = Line2D([0], [0], color='red', linestyle=':', label='One-AF loss')
-    gray_line = Line2D([0], [0], alpha=0.7, color='black', linestyle='--', label='Baseline')
-    # Add the custom legend entry to the plot
-    ax.legend(handles=[gray_line, red_line], loc='lower center', ncols=2)
+    # red_line = Line2D([0], [0], color='red', linestyle=':', label='One-AF loss')
+    # gray_line = Line2D([0], [0], alpha=0.7, color='black', linestyle='--', label='Baseline')
+    ## Add the custom legend entry to the plot
+    # ax.legend(handles=[gray_line, red_line], loc='lower center', ncols=2)
 
     plt.xlabel('Ancestry')
-    plt.ylabel(r'Genotype recovery accuracy, %')
+    # plt.ylabel(r'Genotype recovery accuracy, \%')
+    plt.ylabel(r'Recovery accuracy, \%')
     plt.tight_layout()
-    plt.ylim(57, 100)
+    plt.ylim(64, 100)
     fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
 
@@ -453,7 +454,7 @@ def sequential_loci_accuracy():
     gwas_df = df[df['GWAS'] != 0]
     sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax4, common_norm=False)
     sns.kdeplot(data=gwas_df, x='GWAS', ax=ax4, linestyle='--', color='black', common_norm=False, label='GWAS')
-    plt.xlabel('EAF')
+    plt.xlabel('Effect Allele Frequency')
     plt.ylabel('Density')
     plt.xlim(0, 1)
     ancestries = df['Ancestry'].unique()
@@ -548,8 +549,8 @@ def kinship_experiment():
 
 def score_uniqueness():
     directory = "results/uniqueness/"
-    # filepath = os.path.join(directory, "scores_1000Genomes.json")
-    filepath = os.path.join(directory, "scores_low_1000Genomes.json")
+    filepath = os.path.join(directory, "scores_1000Genomes.json")
+    # filepath = os.path.join(directory, "scores_13_1000Genomes.json")
     data = []
     with open(filepath, 'r') as f:
         content = json.load(f)
@@ -558,22 +559,22 @@ def score_uniqueness():
                      'TotalPresentScores': int(result['TotalPresentScores']),
                         'TotalPossibleScores': int(result['TotalPossibleScores']),
                         'RealPercentageUnique': int(result['RealPercentageUnique']),
-                        'PredictedPercentageUnique': int(result['PredictedPercentageUnique']),
-                     'AnonSize': np.median([float(x) for x in result['AnonymitySets']])})
+                        'PredictedPercentageUnique': int(result['PredictedPercentageUnique'])})
+                     # 'AnonSize': np.median([float(x) for x in result['AnonymitySets']])})
 
     first_color = 'teal'
     second_color = 'coral'
     df = pd.DataFrame(data)
     # Create bins for powers of 10
-    # bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 1)]
-    bins = []
-    for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 1):
-        bins.append(10**(i-1))
-        bins.append(10**(i-1) * 10**0.5)
-    bins.append(10**i)
+    bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2)]
+    # bins = []
+    # for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 3):
+    #     bins.append(10**(i-1))
+    #     bins.append(10**(i-1) * 10**0.5)
+    # bins.append(10**i)
     df['TotalPossibleScoresBin'] = pd.cut(df['TotalPossibleScores'], bins=bins, right=False)
     # Group by bins and calculate mean and standard deviation values
-    grouped = df.groupby('TotalPossibleScoresBin').agg(
+    grouped = df.groupby('TotalPossibleScoresBin', observed=True).agg(
         RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
         RealPercentageUnique_std=('RealPercentageUnique', 'std'),
         PredictedPercentageUnique_mean=('PredictedPercentageUnique', 'mean'),
@@ -583,9 +584,9 @@ def score_uniqueness():
     fig, ax = plt.subplots(figsize=(4, 3))
     x = grouped['TotalPossibleScoresBin'].apply(lambda x: x.mid)
     y_real = grouped['RealPercentageUnique_mean']
-    y_real_std = grouped['RealPercentageUnique_std']
+    y_real_std = np.clip(grouped['RealPercentageUnique_std'], 0, 100 - y_real)
     y_pred = grouped['PredictedPercentageUnique_mean']
-    y_pred_std = grouped['PredictedPercentageUnique_std']
+    y_pred_std = np.clip(grouped['PredictedPercentageUnique_std'], 0, 100 - y_pred)
 
     ax.plot(x, y_real, color=first_color, label='Dataset')
     ax.fill_between(x, y_real - y_real_std, y_real + y_real_std, color=first_color, alpha=0.1)
@@ -1640,8 +1641,8 @@ def prs_prediction():
     plt.savefig('prediction_median_percentile.pdf', dpi=300, bbox_inches='tight')
 
 
-LABEL_SIZE = 13
-TICK_SIZE = 13
+LABEL_SIZE = 15
+TICK_SIZE = 15
 LEGEND_SIZE = 11
 def prepare_for_latex():
     params = {
@@ -1680,10 +1681,10 @@ if __name__ == "__main__":
     # percentile_prediction()
     # random_bars()
     # score_uniqueness_old()
-    score_uniqueness()
+    # score_uniqueness()
     # sequential()
-    # sequential_idv_accuracy()
-    # sequential_loci_accuracy()
+    sequential_idv_accuracy()
+    sequential_loci_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
     # king_accuracy()

@@ -890,7 +890,10 @@ func (p *PGS) EstimateMeanAndStd() (map[string]float64, map[string]float64) {
 		if err != nil {
 			log.Println("Error converting weight to float64:", err)
 		}
-		for _, anc := range ANCESTRIESALL {
+		for anc := range p.PopulationStats {
+			if len(p.PopulationStats[anc].AF[i]) == 0 {
+				continue
+			}
 			prob = float64(p.PopulationStats[anc].AF[i][p.EffectAlleles[i]])
 			mui = prob*prob*(2*w) + 2*prob*(1-prob)*w
 			if _, ok := means[anc]; !ok {
@@ -902,7 +905,10 @@ func (p *PGS) EstimateMeanAndStd() (map[string]float64, map[string]float64) {
 				prob*prob*math.Pow(2*w-mui, 2)
 		}
 	}
-	for _, anc := range ANCESTRIESALL {
+	for anc := range p.PopulationStats {
+		if _, ok := means[anc]; !ok {
+			continue
+		}
 		means[anc] /= float64(Ploidy * len(p.Weights))
 		stds[anc] = math.Sqrt(stds[anc]) / float64(Ploidy*len(p.Weights))
 	}

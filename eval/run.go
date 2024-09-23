@@ -5,9 +5,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/cockroachdb/apd/v3"
+	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/solver"
+	"github.com/nikirill/prs/tools"
+	"gonum.org/v1/gonum/stat/distuv"
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,13 +25,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/solver"
-	"github.com/nikirill/prs/tools"
-	"gonum.org/v1/gonum/stat/distuv"
 )
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -79,9 +79,12 @@ func main() {
 		prepareIBD()
 	case "findprs":
 		findUnsolvablePRSWithOverlap()
-	case "uniqueness":
+	case "uniqueness_gg":
+		uniquenessExperiment(tools.GG)
+	case "uniqueness_uk":
 		uniquenessExperiment(tools.UKB)
-		//uniquenessExperiment(tools.GG)
+	case "scores":
+		calculateScoresAndStats()
 	}
 	//kinshipExperiment()
 	//kingTest()
@@ -722,16 +725,61 @@ func kinshipExperiment() {
 	}
 }
 
+func calculateScoresAndStats() {
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var pgsToNumVariants map[string]int
+	err = decoder.Decode(&pgsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	allPgs := make([]string, 0, len(pgsToNumVariants))
+	for id, _ := range pgsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	sort.Slice(allPgs, func(i, j int) bool {
+		if pgsToNumVariants[allPgs[i]] == pgsToNumVariants[allPgs[j]] {
+			return allPgs[i] < allPgs[j]
+		}
+		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
+	})
+	pgsNum, err := strconv.Atoi(os.Args[2])
+	if err != nil {
+		log.Fatalf("Error parsing pgsNum %s: %v", os.Args[2], err)
+	}
+	if pgsNum < 0 || pgsNum >= len(allPgs) {
+		log.Printf("Too high pgsNum %d\n", pgsNum)
+		return
+	}
+	fmt.Printf("======== %s ========\n", allPgs[pgsNum])
+	p := pgs.NewPGS()
+	err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, allPgs[pgsNum]+"_hmPOS_GRCh37.txt"))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	p.LoadStats(tools.UKB)
+	solver.NewCohort(p, tools.UKB)
+	fmt.Printf("%s complete\n", allPgs[pgsNum])
+}
+
 func uniquenessExperiment(dataset string) {
 	fmt.Printf("--- Uniqueness experiment ---\n")
 	type Result struct {
-		PgsID                     string
-		NumVariants               int
-		TotalPresentScores        int
-		TotalPossibleScores       int
-		RealPercentageUnique      float64
-		PredictedPercentageUnique float64
-		AnonymitySets             []int
+		PgsID                       string
+		NumVariants                 int
+		TotalPresentScores          int
+		TotalPossibleScores         int
+		RealPercentageUnique        float64
+		PredictedPercentageUnique   float64
+		RealMedianAnonymitySet      int
+		PredictedMedianAnonymitySet int
 	}
 
 	file, err := os.Open("results/validated_pgs.json")
@@ -755,7 +803,7 @@ func uniquenessExperiment(dataset string) {
 		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
 	})
 
-	numWorkers := 23
+	numWorkers := 3
 	tasks := make(chan string, 1)
 	results := make([]*Result, 0)
 	var mutex sync.Mutex
@@ -778,16 +826,12 @@ func uniquenessExperiment(dataset string) {
 				fmt.Printf("======== %s (%d) ========\n", p.PgsID, len(p.Loci))
 				cohort := solver.NewCohort(p, dataset)
 				fmt.Printf("%s: cohort size %d\n", p.PgsID, len(cohort))
-				scores := make(map[string][]string)
+				scores := make(map[string]int)
 				scoresAsStrings := make([]string, 0)
 				scoresAsFloats := make([]float64, 0)
-				//for _, idv := range individuals {
 				for idv := range cohort {
 					sc = cohort[idv].Score.String()
-					if _, ok := scores[sc]; !ok {
-						scores[sc] = make([]string, 0)
-					}
-					scores[sc] = append(scores[sc], idv)
+					scores[sc]++
 					scoresAsStrings = append(scoresAsStrings, sc)
 					sf, err = cohort[idv].Score.Float64()
 					if err != nil {
@@ -798,38 +842,41 @@ func uniquenessExperiment(dataset string) {
 				}
 				realNumUnique = 0
 				anonsets := make([]int, 0)
-				for _, idvs := range scores {
-					if len(idvs) == 1 {
+				for _, count := range scores {
+					if count == 1 {
 						realNumUnique++
 					}
-					anonsets = append(anonsets, len(idvs))
+					anonsets = append(anonsets, count)
 				}
-				//minScore, maxScore := p.FindMinAndMaxScores()
-				//minScoreFloat, _ := minScore.Float64()
-				//maxScoreFloat, _ := maxScore.Float64()
-				//numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
-				//predictedMeans, predictedStds := p.EstimateMeanAndStd()
-				//predictedNumUniquePredictedStats, numPossibleScores := estimateNumUniqueScores(len(cohort), numPossibleSubsetSums,
-				//	predictedMeans["ALL"], predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision)
-				//if numPossibleScores == -1 {
-				//	fmt.Printf("Too many possible scores for %s\n", pgsID)
-				//	continue
-				//}
-				predictedNumUniquePredictedStats, numPossibleScores := 0.0, 0
+				realMedianAnonSize := median(anonsets)
+				minScore, maxScore := p.FindMinAndMaxScores()
+				minScoreFloat, _ := minScore.Float64()
+				maxScoreFloat, _ := maxScore.Float64()
+				numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
+				predictedMeans, predictedStds := p.EstimateMeanAndStd()
+				predictedNumUniquePredictedStats, predictedMedianAnonSize, numPossibleScores :=
+					estimateNumUniqueScores(len(cohort), numPossibleSubsetSums, predictedMeans["ALL"],
+						predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision, 13)
+				if numPossibleScores == -1 || math.IsNaN(predictedNumUniquePredictedStats) {
+					fmt.Printf("Too many possible scores for %s\n", pgsID)
+					continue
+				}
 				result := &Result{
-					PgsID:                     pgsID,
-					NumVariants:               pgsToNumVariants[pgsID],
-					TotalPresentScores:        len(scores),
-					TotalPossibleScores:       numPossibleScores,
-					RealPercentageUnique:      float64(realNumUnique) * 100 / float64(len(cohort)),
-					PredictedPercentageUnique: predictedNumUniquePredictedStats * 100 / float64(len(cohort)),
-					AnonymitySets:             anonsets,
+					PgsID:                       pgsID,
+					NumVariants:                 pgsToNumVariants[pgsID],
+					TotalPresentScores:          len(scores),
+					TotalPossibleScores:         numPossibleScores,
+					RealPercentageUnique:        float64(realNumUnique) * 100 / float64(len(cohort)),
+					PredictedPercentageUnique:   predictedNumUniquePredictedStats * 100 / float64(len(cohort)),
+					RealMedianAnonymitySet:      realMedianAnonSize,
+					PredictedMedianAnonymitySet: predictedMedianAnonSize,
 				}
 				mutex.Lock()
 				results = append(results, result)
 				mutex.Unlock()
-				fmt.Printf("%s -- Real ratio: %.2f%%, predicted ratio: %.2f%%\n", pgsID,
-					result.RealPercentageUnique, result.PredictedPercentageUnique)
+				fmt.Printf("%s -- Real ratio: %.2f%%, predicted ratio: %.2f%%\nReal median set size: %d, "+
+					"predicted set size: %d\n", pgsID, result.RealPercentageUnique, result.PredictedPercentageUnique,
+					result.RealMedianAnonymitySet, result.PredictedMedianAnonymitySet)
 			}
 		}()
 	}
@@ -839,6 +886,9 @@ func uniquenessExperiment(dataset string) {
 	fmt.Println("---- All tasks sent ----")
 	close(tasks)
 	wg.Wait()
+	for _, res := range results {
+		fmt.Println(*res)
+	}
 	resultFolder := "results/uniqueness"
 	filepath := path.Join(resultFolder, fmt.Sprintf("scores_%s.json", dataset))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
@@ -853,8 +903,8 @@ func uniquenessExperiment(dataset string) {
 	fmt.Println("Completed")
 }
 
-func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32) (float64, int) {
-	totalUnique := 0.0
+func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32,
+	powerBound int) (float64, int, int) {
 	normalDist := distuv.Normal{Mu: mu, Sigma: sigma}
 	step := math.Pow10(-int(precision))
 	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
@@ -866,20 +916,26 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 	} else {
 		fmt.Printf("Num subsums: %d > In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
 	}
-	//if numPossibleScores > int(math.Pow10(13)) {
-	if numPossibleScores > int(math.Pow10(10)) {
-		return -1, -1
+	if numPossibleScores > int(math.Pow10(powerBound)) {
+		return -1, -1, -1
 	}
 
+	type result struct {
+		unique float64
+		sets   map[uint16]uint16
+	}
 	numWorkers := 8
 	segmentSize := (maxVal - minVal) / float64(numWorkers)
-	results := make(chan float64, numWorkers)
+	results := make(chan result, numWorkers)
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			var lowerBound, upperBound float64
+			var lowerBound, upperBound, prob float64
+			var averageCount float64
+			var roundedCount uint16
+			anonSets := make(map[uint16]uint16)
 			segmentTotalUnique := 0.0
 			for x := minVal + float64(i)*segmentSize; x < minVal+float64(i+1)*segmentSize; x += step {
 				lowerBound = x - step/2
@@ -890,18 +946,89 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 				if x == maxVal {
 					upperBound = x
 				}
-				prob := normalDist.CDF(upperBound) - normalDist.CDF(lowerBound)
-				segmentTotalUnique += float64(M) * prob * math.Pow(1-prob, float64(M-1))
+				prob = normalDist.CDF(upperBound) - normalDist.CDF(lowerBound)
+				averageCount = prob * float64(M)
+				segmentTotalUnique += averageCount * math.Pow(1-prob, float64(M-1))
+				roundedCount = uint16(math.Round(averageCount))
+				if averageCount < 1 {
+					randomValue := rand.Float64()
+					if randomValue >= averageCount {
+						continue
+					}
+					roundedCount = 1
+				}
+				if math.IsNaN(averageCount) {
+					continue
+				}
+				if _, exists := anonSets[roundedCount]; exists {
+					anonSets[roundedCount]++
+				} else {
+					anonSets[roundedCount] = 1
+				}
 			}
-			results <- segmentTotalUnique
+			results <- result{segmentTotalUnique, anonSets}
 		}(i)
 	}
 	wg.Wait()
 	close(results)
+	totalUnique := 0.0
+	allSets := make(map[uint16]uint16)
 	for res := range results {
-		totalUnique += res
+		totalUnique += res.unique
+		for sz, count := range res.sets {
+			if _, exists := allSets[sz]; exists {
+				allSets[sz] += count
+			} else {
+				allSets[sz] = count
+			}
+		}
 	}
-	return totalUnique, numPossibleScores
+	allSizes := make([]uint16, 0, len(allSets))
+	var totalCount uint16 = 0
+	for sz, count := range allSets {
+		allSizes = append(allSizes, sz)
+		totalCount += count
+	}
+	// Sorting the anonymity-set sizes
+	sort.Slice(allSizes, func(i, j int) bool {
+		return allSizes[i] < allSizes[j]
+	})
+	cumulativeCount := uint16(0)
+	halfTotal := totalCount / 2
+	for _, sz := range allSizes {
+		cumulativeCount += allSets[sz]
+		if cumulativeCount >= halfTotal {
+			return totalUnique, int(sz), numPossibleScores
+		}
+	}
+	if len(allSizes) == 0 {
+		return totalUnique, 0, numPossibleScores
+	}
+	return totalUnique, int(allSizes[len(allSizes)-1]), numPossibleScores
+}
+
+//func estimateMedianAnonymitySetSize(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32) float64 {
+//	normalDist := distuv.Normal{
+//		Mu:    mu,
+//		Sigma: sigma,
+//	}
+//	step := math.Pow10(-int(precision))
+//	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
+//	if numSubsetSums > 0 && numSubsetSums < numPossibleScoresDuePrecision {
+//		step = (maxVal - minVal) / float64(numSubsetSums)
+//	}
+//	discreteMean := math.Round(mu/step) * step
+//	pMean := normalDist.CDF(discreteMean+step/2) - normalDist.CDF(discreteMean-step/2)
+//	return float64(M) * pMean
+//}
+
+func median(values []int) int {
+	sort.Ints(values)
+	n := len(values)
+	if n%2 == 0 {
+		return (values[n/2-1] + values[n/2]) / 2
+	}
+	return values[n/2]
 }
 
 func calculateNumPossibleSums(weights []*apd.Decimal) int {

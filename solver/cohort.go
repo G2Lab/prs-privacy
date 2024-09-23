@@ -60,11 +60,12 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 		c.LoadFromDisk(filename)
 	case tools.UKB:
 		filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)
-		if _, err = os.Stat(filename); os.IsNotExist(err) {
+		if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
 			err = c.RetrieveGenotypes(p, dataset)
 			c.CalculatePRS(p)
 			c.SaveScores(filename)
 		}
+		c.LoadScores(filename, p.Context)
 	default:
 		log.Fatalf("Unknown dataset: %s", dataset)
 	}
