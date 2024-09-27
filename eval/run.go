@@ -5,12 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/solver"
-	"github.com/nikirill/prs/tools"
-	"gonum.org/v1/gonum/stat/distuv"
 	"io"
 	"log"
 	"math"
@@ -25,6 +19,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/cockroachdb/apd/v3"
+	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/pgs"
+	"github.com/nikirill/prs/solver"
+	"github.com/nikirill/prs/tools"
+	"gonum.org/v1/gonum/stat/distuv"
 )
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -803,6 +804,7 @@ func uniquenessExperiment(dataset string) {
 		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
 	})
 
+	precisionEstimationLimit := 13
 	numWorkers := 3
 	tasks := make(chan string, 1)
 	results := make([]*Result, 0)
@@ -848,18 +850,22 @@ func uniquenessExperiment(dataset string) {
 					}
 					anonsets = append(anonsets, count)
 				}
+				//numPossibleScores := 0
+				//predictedNumUniquePredictedStats := 0.0
+				//predictedMedianAnonSize := 0
 				realMedianAnonSize := median(anonsets)
+				numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
 				minScore, maxScore := p.FindMinAndMaxScores()
 				minScoreFloat, _ := minScore.Float64()
 				maxScoreFloat, _ := maxScore.Float64()
-				numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
 				predictedMeans, predictedStds := p.EstimateMeanAndStd()
 				predictedNumUniquePredictedStats, predictedMedianAnonSize, numPossibleScores :=
 					estimateNumUniqueScores(len(cohort), numPossibleSubsetSums, predictedMeans["ALL"],
-						predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision, 13)
-				if numPossibleScores == -1 || math.IsNaN(predictedNumUniquePredictedStats) {
+						predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision, precisionEstimationLimit)
+				if math.IsNaN(predictedNumUniquePredictedStats) || predictedNumUniquePredictedStats == -1 {
+					predictedNumUniquePredictedStats = -1
 					fmt.Printf("Too many possible scores for %s\n", pgsID)
-					continue
+					//continue
 				}
 				result := &Result{
 					PgsID:                       pgsID,
@@ -904,7 +910,7 @@ func uniquenessExperiment(dataset string) {
 }
 
 func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32,
-	powerBound int) (float64, int, int) {
+	powerUpperBound int) (float64, int, int) {
 	normalDist := distuv.Normal{Mu: mu, Sigma: sigma}
 	step := math.Pow10(-int(precision))
 	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
@@ -916,8 +922,8 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 	} else {
 		fmt.Printf("Num subsums: %d > In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
 	}
-	if numPossibleScores > int(math.Pow10(powerBound)) {
-		return -1, -1, -1
+	if numPossibleScores > int(math.Pow10(powerUpperBound)) {
+		return -1, -1, numPossibleScores
 	}
 
 	type result struct {
@@ -1006,21 +1012,6 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 	}
 	return totalUnique, int(allSizes[len(allSizes)-1]), numPossibleScores
 }
-
-//func estimateMedianAnonymitySetSize(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32) float64 {
-//	normalDist := distuv.Normal{
-//		Mu:    mu,
-//		Sigma: sigma,
-//	}
-//	step := math.Pow10(-int(precision))
-//	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
-//	if numSubsetSums > 0 && numSubsetSums < numPossibleScoresDuePrecision {
-//		step = (maxVal - minVal) / float64(numSubsetSums)
-//	}
-//	discreteMean := math.Round(mu/step) * step
-//	pMean := normalDist.CDF(discreteMean+step/2) - normalDist.CDF(discreteMean-step/2)
-//	return float64(M) * pMean
-//}
 
 func median(values []int) int {
 	sort.Ints(values)
