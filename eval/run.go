@@ -124,7 +124,7 @@ func predictPRS() {
 		fmt.Printf("======== %s ========\n", p.PgsID)
 		p.LoadStats(tools.GG)
 
-		minScore, maxScore := p.FindMinAndMaxScores()
+		minScore, maxScore, _, _ := p.FindMinAndMaxScores()
 		means, stds := p.EstimateMeanAndStd()
 		results[p.PgsID] = &Result{
 			Known:      0,
@@ -805,6 +805,7 @@ func uniquenessExperiment(dataset string) {
 	})
 
 	precisionEstimationLimit := 13
+	//precisionEstimationLimit := 9
 	numWorkers := 3
 	tasks := make(chan string, 1)
 	results := make([]*Result, 0)
@@ -815,7 +816,6 @@ func uniquenessExperiment(dataset string) {
 		go func() {
 			defer wg.Done()
 			for pgsID := range tasks {
-				var sc string
 				var sf float64
 				var realNumUnique int
 				p := pgs.NewPGS()
@@ -828,19 +828,14 @@ func uniquenessExperiment(dataset string) {
 				fmt.Printf("======== %s (%d) ========\n", p.PgsID, len(p.Loci))
 				cohort := solver.NewCohort(p, dataset)
 				fmt.Printf("%s: cohort size %d\n", p.PgsID, len(cohort))
-				scores := make(map[string]int)
-				scoresAsStrings := make([]string, 0)
-				scoresAsFloats := make([]float64, 0)
+				scores := make(map[float64]int)
 				for idv := range cohort {
-					sc = cohort[idv].Score.String()
-					scores[sc]++
-					scoresAsStrings = append(scoresAsStrings, sc)
 					sf, err = cohort[idv].Score.Float64()
 					if err != nil {
 						log.Println("Error converting score to float:", err)
 						return
 					}
-					scoresAsFloats = append(scoresAsFloats, sf)
+					scores[sf]++
 				}
 				realNumUnique = 0
 				anonsets := make([]int, 0)
@@ -851,21 +846,24 @@ func uniquenessExperiment(dataset string) {
 					anonsets = append(anonsets, count)
 				}
 				//numPossibleScores := 0
-				//predictedNumUniquePredictedStats := 0.0
+				//predictedNumUnique := 0.0
 				//predictedMedianAnonSize := 0
-				realMedianAnonSize := median(anonsets)
 				numPossibleSubsetSums := calculateNumPossibleSums(p.Weights)
-				minScore, maxScore := p.FindMinAndMaxScores()
+				minScore, maxScore, secondMin, secondMax := p.FindMinAndMaxScores()
 				minScoreFloat, _ := minScore.Float64()
 				maxScoreFloat, _ := maxScore.Float64()
+				secondMinFloat, _ := secondMin.Float64()
+				secondMaxFloat, _ := secondMax.Float64()
+				fmt.Printf("Min: %.4f, 2ndMin: %.4f, Max: %.4f, 2ndMax: %.4f\n", minScoreFloat, secondMin,
+					maxScoreFloat, secondMax)
 				predictedMeans, predictedStds := p.EstimateMeanAndStd()
-				predictedNumUniquePredictedStats, predictedMedianAnonSize, numPossibleScores :=
+				predictedNumUnique, predictedMedianAnonSize, numPossibleScores :=
 					estimateNumUniqueScores(len(cohort), numPossibleSubsetSums, predictedMeans["ALL"],
-						predictedStds["ALL"], minScoreFloat, maxScoreFloat, p.WeightPrecision, precisionEstimationLimit)
-				if math.IsNaN(predictedNumUniquePredictedStats) || predictedNumUniquePredictedStats == -1 {
-					predictedNumUniquePredictedStats = -1
+						predictedStds["ALL"], minScoreFloat, maxScoreFloat, secondMinFloat, secondMaxFloat,
+						p.WeightPrecision, precisionEstimationLimit)
+				if math.IsNaN(predictedNumUnique) || predictedNumUnique == -1 {
+					predictedNumUnique = -1
 					fmt.Printf("Too many possible scores for %s\n", pgsID)
-					//continue
 				}
 				result := &Result{
 					PgsID:                       pgsID,
@@ -873,8 +871,8 @@ func uniquenessExperiment(dataset string) {
 					TotalPresentScores:          len(scores),
 					TotalPossibleScores:         numPossibleScores,
 					RealPercentageUnique:        float64(realNumUnique) * 100 / float64(len(cohort)),
-					PredictedPercentageUnique:   predictedNumUniquePredictedStats * 100 / float64(len(cohort)),
-					RealMedianAnonymitySet:      realMedianAnonSize,
+					PredictedPercentageUnique:   predictedNumUnique * 100 / float64(len(cohort)),
+					RealMedianAnonymitySet:      median(anonsets),
 					PredictedMedianAnonymitySet: predictedMedianAnonSize,
 				}
 				mutex.Lock()
@@ -909,15 +907,16 @@ func uniquenessExperiment(dataset string) {
 	fmt.Println("Completed")
 }
 
-func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal float64, precision uint32,
-	powerUpperBound int) (float64, int, int) {
+func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal, secondMin, secondMax float64,
+	precision uint32, powerUpperBound int) (float64, int, int) {
 	normalDist := distuv.Normal{Mu: mu, Sigma: sigma}
 	step := math.Pow10(-int(precision))
-	numPossibleScoresDuePrecision := int((maxVal-minVal)/step) + 1
+	// Adding 2 to account for the minimum and maximum scores
+	numPossibleScoresDuePrecision := (int((secondMax-secondMin)/step) + 1) + 2
 	numPossibleScores := numPossibleScoresDuePrecision
 	if numSubsetSums > 0 && numSubsetSums < numPossibleScoresDuePrecision {
 		fmt.Printf("Number of subsums: %d < In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
-		step = (maxVal - minVal) / float64(numSubsetSums)
+		step = (secondMax - secondMin) / float64(numSubsetSums-2)
 		numPossibleScores = numSubsetSums
 	} else {
 		fmt.Printf("Num subsums: %d > In-between scores: %d\n", numSubsetSums, numPossibleScoresDuePrecision)
@@ -931,7 +930,7 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 		sets   map[uint16]uint16
 	}
 	numWorkers := 8
-	segmentSize := (maxVal - minVal) / float64(numWorkers)
+	segmentSize := (secondMax - secondMin) / float64(numWorkers)
 	results := make(chan result, numWorkers)
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
@@ -943,27 +942,14 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 			var roundedCount uint16
 			anonSets := make(map[uint16]uint16)
 			segmentTotalUnique := 0.0
-			for x := minVal + float64(i)*segmentSize; x < minVal+float64(i+1)*segmentSize; x += step {
+			for x := secondMin + float64(i)*segmentSize; x < minVal+float64(i+1)*segmentSize; x += step {
 				lowerBound = x - step/2
 				upperBound = x + step/2
-				if x == minVal {
-					lowerBound = x
-				}
-				if x == maxVal {
-					upperBound = x
-				}
 				prob = normalDist.CDF(upperBound) - normalDist.CDF(lowerBound)
 				averageCount = prob * float64(M)
 				segmentTotalUnique += averageCount * math.Pow(1-prob, float64(M-1))
-				roundedCount = uint16(math.Round(averageCount))
-				if averageCount < 1 {
-					randomValue := rand.Float64()
-					if randomValue >= averageCount {
-						continue
-					}
-					roundedCount = 1
-				}
-				if math.IsNaN(averageCount) {
+				roundedCount = probabilisticallyRound(averageCount)
+				if roundedCount == 0 {
 					continue
 				}
 				if _, exists := anonSets[roundedCount]; exists {
@@ -989,6 +975,11 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 			}
 		}
 	}
+	// Calculating the probability of the minimum and maximum scores (we have excluded them before to skip
+	// the impossible scores [min, 2ndMin] and [2ndMax, max])
+	totalUnique += estimateScore(minVal, normalDist, M, step, allSets)
+	totalUnique += estimateScore(maxVal, normalDist, M, step, allSets)
+	//
 	allSizes := make([]uint16, 0, len(allSets))
 	var totalCount uint16 = 0
 	for sz, count := range allSets {
@@ -1011,6 +1002,32 @@ func estimateNumUniqueScores(M int, numSubsetSums int, mu, sigma, minVal, maxVal
 		return totalUnique, 0, numPossibleScores
 	}
 	return totalUnique, int(allSizes[len(allSizes)-1]), numPossibleScores
+}
+
+func estimateScore(score float64, dist distuv.Normal, M int, step float64, sets map[uint16]uint16) float64 {
+	prob := dist.CDF(score+step/2) - dist.CDF(score-step/2)
+	averageCount := prob * float64(M)
+	roundedCount := probabilisticallyRound(averageCount)
+	if roundedCount > 0 {
+		if _, exists := sets[roundedCount]; exists {
+			sets[roundedCount]++
+		} else {
+			sets[roundedCount] = 1
+		}
+	}
+	return averageCount * math.Pow(1-prob, float64(M-1))
+}
+
+func probabilisticallyRound(value float64) uint16 {
+	rounded := uint16(math.Round(value))
+	if value < 1 {
+		randomValue := rand.Float64()
+		if randomValue >= value {
+			return 0
+		}
+		return 1
+	}
+	return rounded
 }
 
 func median(values []int) int {

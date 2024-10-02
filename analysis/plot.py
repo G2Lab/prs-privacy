@@ -2,6 +2,7 @@ import csv
 import fnmatch
 import json
 import random
+from ast import Index
 from cProfile import label
 
 import matplotlib as mpl
@@ -554,7 +555,7 @@ def kinship_experiment():
 
 def load_uniqueness_data(dataset):
     directory = "results/uniqueness/"
-    filepath = os.path.join(directory, f"scores_{dataset}.json")
+    filepath = os.path.join(directory, f"scores_{dataset}_low.json")
     data = []
     with open(filepath, 'r') as f:
         content = json.load(f)
@@ -573,21 +574,19 @@ def load_uniqueness_data(dataset):
 
 def score_uniqueness():
     ggdf = load_uniqueness_data('1000Genomes')
-    ukbdf = load_uniqueness_data('UKBB')
+    ukbdf = load_uniqueness_data('UKBiobank')
     df = pd.concat([ggdf, ukbdf])
 
-    first_color = 'teal'
-    second_color = 'coral'
     # Create bins for powers of 10
     bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2)]
     df['TotalPossibleScoresBin'] = pd.cut(df['TotalPossibleScores'], bins=bins, right=False)
     # Group by bins and calculate mean and std for real values
-    # Group by bins and calculate mean and std for real values (use all real values)
     grouped_real = df.groupby(['TotalPossibleScoresBin', 'Dataset'], observed=True).agg(
         RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
         RealPercentageUnique_std=('RealPercentageUnique', 'std'),
         RealAnonSize_mean=('RealAnonSize', 'mean'),
-        RealAnonSize_std=('RealAnonSize', 'std')
+        RealAnonSize_std=('RealAnonSize', 'std'),
+        TotalPossibleScores_mean=('TotalPossibleScores', 'mean')
     ).reset_index()
 
     # Filter out rows where PredictedPercentageUnique == -1 for predicted values
@@ -599,15 +598,38 @@ def score_uniqueness():
         PredictedAnonSize_std=('PredictedAnonSize', 'std')
     ).reset_index()
 
-    fig1, ax1 = plt.subplots(figsize=(6, 4))
-    for dataset, color, label_prefix in [('1000Genomes', first_color, '1000 Genomes'), ('UKBB', second_color, 'UK Biobank')]:
+    for dataset in df['Dataset'].unique():
+        dataset_group = grouped_real[grouped_real['Dataset'] == dataset]
+        try:
+            unique_95_bin = dataset_group[dataset_group['RealPercentageUnique_mean'] >= 95].iloc[0]
+            total_scores_at_95_percent_unique = unique_95_bin['TotalPossibleScores_mean']
+        except IndexError:
+            pass
+        try:
+            anon_2_bin = dataset_group[dataset_group['RealAnonSize_mean'] <= 2].iloc[0]
+            total_scores_at_anon_2 = anon_2_bin['TotalPossibleScores_mean']
+        except IndexError:
+            pass
+
+        # Print the results for each dataset
+        print(f"{dataset} - Mean TotalPossibleScores at 95% unique: {total_scores_at_95_percent_unique}")
+        print(f"{dataset} - Mean TotalPossibleScores when RealAnonSize_mean reaches 2: {total_scores_at_anon_2}")
+
+
+    first_color, second_color = 'teal', 'coral'
+    first_marker, second_marker = '.', '*'
+    observed, estimated = 'observed', 'estimated'
+
+    fig1, ax1 = plt.subplots(figsize=(5, 4))
+    for dataset, color, label_prefix, marker in [('1000Genomes', first_color, '1000G', first_marker),
+                                                 ('UKBiobank', second_color, 'UKBB', second_marker)]:
         # Plot real values for percentage uniqueness
         subset_real = grouped_real[grouped_real['Dataset'] == dataset]
         x_real = subset_real['TotalPossibleScoresBin'].apply(lambda x: x.mid)
         y_real = subset_real['RealPercentageUnique_mean']
         y_real_std = np.clip(subset_real['RealPercentageUnique_std'], 0, 100 - y_real)
 
-        ax1.plot(x_real, y_real, color=color, label=f'{label_prefix} measured')
+        ax1.plot(x_real, y_real, color=color, label=f'{label_prefix} {observed}', marker=marker)
         ax1.fill_between(x_real, y_real - y_real_std, y_real + y_real_std, color=color, alpha=0.1)
 
         # Plot predicted values
@@ -615,7 +637,7 @@ def score_uniqueness():
         if not subset_pred.empty:
             x_pred = subset_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
             y_pred = subset_pred['PredictedPercentageUnique_mean']
-            ax1.plot(x_pred, y_pred, color=color, linestyle='--', label=f'{label_prefix} predicted')
+            ax1.plot(x_pred, y_pred, color=color, linestyle='--', label=f'{label_prefix} {estimated}', marker=marker)
 
     ax1.set_xscale('log')
     ax1.set_xlabel('Number of possible scores')
@@ -624,22 +646,25 @@ def score_uniqueness():
     plt.tight_layout()
 
     # Second graph for anonymity set size
-    fig2, ax2 = plt.subplots(figsize=(6, 4))
-    for dataset, color, label_prefix in [('1000Genomes', first_color, '1000 Genomes'), ('UKBB', second_color, 'UK Biobank')]:
+    fig2, ax2 = plt.subplots(figsize=(5, 4))
+    for dataset, color, label_prefix, marker in [('1000Genomes', first_color, '1000G', first_marker),
+                                                 ('UKBiobank', second_color, 'UKBB', second_marker)]:
         subset_anon_real = grouped_real[grouped_real['Dataset'] == dataset]
         x_anon_real = subset_anon_real['TotalPossibleScoresBin'].apply(lambda x: x.mid)
         y_real_anon = subset_anon_real['RealAnonSize_mean']
         y_real_anon_std = np.clip(subset_anon_real['RealAnonSize_std'], 0, y_real_anon - 1)
 
-        ax2.plot(x_anon_real, y_real_anon, color=color, label=f'{label_prefix} measured')
-        ax2.fill_between(x_anon_real, np.maximum(y_real_anon - y_real_anon_std, 1), y_real_anon + y_real_anon_std, color=color, alpha=0.1)
+        ax2.plot(x_anon_real, y_real_anon, color=color, label=f'{label_prefix} {observed}', marker=marker)
+        ax2.fill_between(x_anon_real, np.maximum(y_real_anon - y_real_anon_std, 1), y_real_anon + y_real_anon_std,
+                         color=color, alpha=0.1)
 
         # Plot predicted anonymity set size
         subset_anon_pred = grouped_predicted[grouped_predicted['Dataset'] == dataset]
         if not subset_anon_pred.empty:
             x_anon_pred = subset_anon_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
             y_pred_anon = subset_anon_pred['PredictedAnonSize_mean']
-            ax2.plot(x_anon_pred, y_pred_anon, color=color, linestyle='--', label=f'{label_prefix} predicted')
+            ax2.plot(x_anon_pred, y_pred_anon, color=color, linestyle='--', label=f'{label_prefix} {estimated}',
+                     marker=marker)
 
     ax2.set_xlabel('Number of possible scores')
     ax2.set_ylabel('Median anonymity set size')
@@ -649,7 +674,8 @@ def score_uniqueness():
     ax2.legend()
     plt.tight_layout()
     plt.show()
-    # fig.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
+    # fig1.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
+    # fig2.savefig('anonymity.pdf', dpi=300, bbox_inches='tight')
 
 
 def score_uniqueness_old():
@@ -1579,7 +1605,7 @@ def prs_prediction():
 
 LABEL_SIZE = 15
 TICK_SIZE = 15
-LEGEND_SIZE = 11
+LEGEND_SIZE = 13
 def prepare_for_latex():
     params = {
         'axes.labelsize': LABEL_SIZE,

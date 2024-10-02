@@ -857,29 +857,69 @@ func (p *PGS) FindMinAbsoluteWeight() float64 {
 	return minWeight
 }
 
-func (p *PGS) FindMinAndMaxScores() (*apd.Decimal, *apd.Decimal) {
+func (p *PGS) FindMinAndMaxScores() (*apd.Decimal, *apd.Decimal, *apd.Decimal, *apd.Decimal) {
 	maxScore, minScore := apd.New(0, 0), apd.New(0, 0)
+	secondMaxScore, secondMinScore := new(apd.Decimal), new(apd.Decimal)
+	var smallestPositiveWeight, smallestNegativeWeight *apd.Decimal
+	allPositive, allNegative := true, true
 	for _, weight := range p.Weights {
 		if weight.Negative {
 			p.Context.Add(minScore, minScore, weight)
 			p.Context.Add(minScore, minScore, weight)
+			allPositive = false
+			if smallestNegativeWeight == nil || weight.Cmp(smallestNegativeWeight) > 0 {
+				smallestNegativeWeight = weight
+			}
 			continue
 		}
 		p.Context.Add(maxScore, maxScore, weight)
 		p.Context.Add(maxScore, maxScore, weight)
+		allNegative = false
+		if smallestPositiveWeight == nil || weight.Cmp(smallestPositiveWeight) < 0 {
+			smallestPositiveWeight = weight
+		}
+	}
+	var err error
+	if allNegative {
+		_, err = p.Context.Add(secondMaxScore, maxScore, smallestNegativeWeight)
+	} else {
+		_, err = p.Context.Sub(secondMaxScore, maxScore, smallestPositiveWeight)
+	}
+	if err != nil {
+		log.Printf("Error computing second max score %s: %v\n", maxScore.String(), err)
+		return nil, nil, nil, nil
+	}
+	if allPositive {
+		secondMinScore.Set(smallestPositiveWeight)
+	} else {
+		_, err = p.Context.Sub(secondMinScore, minScore, smallestNegativeWeight)
+		if err != nil {
+			log.Printf("Error computing second max score %s: %v\n", maxScore.String(), err)
+			return nil, nil, nil, nil
+		}
 	}
 	divisor := new(apd.Decimal).SetInt64(int64(len(p.Weights) * Ploidy))
-	_, err := p.Context.Quo(maxScore, maxScore, divisor)
+	_, err = p.Context.Quo(maxScore, maxScore, divisor)
 	if err != nil {
 		log.Printf("Error normalizing max score %s: %v\n", maxScore.String(), err)
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	_, err = p.Context.Quo(minScore, minScore, divisor)
 	if err != nil {
-		log.Printf("Error normalizing min score %s: %v\n", maxScore.String(), err)
-		return nil, nil
+		log.Printf("Error normalizing min score %s: %v\n", minScore.String(), err)
+		return nil, nil, nil, nil
 	}
-	return minScore, maxScore
+	_, err = p.Context.Quo(secondMaxScore, secondMaxScore, divisor)
+	if err != nil {
+		log.Printf("Error normalizing second max score %s: %v\n", secondMaxScore.String(), err)
+		return nil, nil, nil, nil
+	}
+	_, err = p.Context.Quo(secondMinScore, secondMinScore, divisor)
+	if err != nil {
+		log.Printf("Error normalizing second min score %s: %v\n", secondMinScore.String(), err)
+		return nil, nil, nil, nil
+	}
+	return minScore, maxScore, secondMinScore, secondMaxScore
 }
 
 func (p *PGS) EstimateMeanAndStd() (map[string]float64, map[string]float64) {
