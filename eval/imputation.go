@@ -413,18 +413,18 @@ func prepareIBD() {
 	preparePlinkInput(guessedIndividuals, guessedSnps)
 	compressVcfFile("ibd/plink.vcf", "ibd/plink.vcf.gz")
 	indexVcfFile("ibd/plink.vcf.gz")
-	plinkIBD("ibd/plink.vcf.gz")
+	plinkGCTA("ibd/plink.vcf.gz")
 	plinkKing("ibd/plink.vcf.gz")
 	//
-	positions, alleles := prepareEagleInput(guessedIndividuals, guessedSnps)
-	prepareReferences(positions, alleles)
+	//positions, alleles := prepareEagleInput(guessedIndividuals, guessedSnps)
+	//prepareReferences(positions, alleles)
 	//ancestries := tools.LoadAncestry()
 	//positions, alleles := preparePhasingInputFiles(guessedIndividuals, guessedSnps, ancestries)
 	//beaglePhasing()
 	//combineAndAddGroundTruth(guessedIndividuals, guessedSnps, positions, alleles)
-	refinedIBD()
-	mergeRefinedIBDForAllChromosomes()
-	convertIBDToKinship()
+	//refinedIBD()
+	//mergeRefinedIBDForAllChromosomes()
+	//convertIBDToKinship()
 }
 
 func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[string]map[string]uint8) {
@@ -478,6 +478,7 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 		transferSnps(trueSNPs, retrieved, chr)
 		fmt.Printf("Chr %s: loaded true trueSNPs\n", chr)
 	}
+	references := getMajorGenotypesForGuessedLoci()
 
 	formatHeader := "##fileformat=VCFv4.1\n" +
 		"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
@@ -486,6 +487,9 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 	samplesHeader := "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
 	for _, idv := range guessedIndividuals {
 		samplesHeader += fmt.Sprintf("\t%s", "$"+idv)
+	}
+	for anc := range references {
+		samplesHeader += fmt.Sprintf("\t%s", "$"+anc)
 	}
 	for _, idv := range truthIndividuals {
 		samplesHeader += fmt.Sprintf("\t%s", idv)
@@ -520,6 +524,23 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 			line := fmt.Sprintf(lineTemplate, chr, pos, alleles[chr][pos][0], alleles[chr][pos][1])
 			for _, idv := range guessedIndividuals {
 				if snp, ok = guessed[idv][chr][pos]; ok {
+					switch snp {
+					case 0:
+						line += "\t0|0"
+					case 1:
+						line += "\t1/0"
+					case 2:
+						line += "\t1|1"
+					default:
+						log.Fatalf("Invalid SNP value: %d", snp)
+					}
+				} else {
+					continue positionLoop
+					//line += "\t.|."
+				}
+			}
+			for anc := range references {
+				if snp, ok = references[anc][chr][pos]; ok {
 					switch snp {
 					case 0:
 						line += "\t0|0"
@@ -1012,7 +1033,7 @@ func concatenateChromosomes() {
 	}
 }
 
-func plinkIBD(path string) {
+func plinkGCTA(path string) {
 	runCommand("plink", []string{"--vcf", path, "--make-rel", "square", "--out", "ibd/plink"})
 }
 
@@ -1147,7 +1168,7 @@ func guessAccuracy(afType string) {
 	relatives := solver.AllRelativeSamples()
 	mainSamples := solver.All1000GenomesSamples()
 	var err error
-	var chr, idv, pos, anc, filepath string
+	var chr, idv, pos, filepath string
 	var positionMap map[string]struct{}
 	var positions []string
 	trueSnps := make(map[string]map[string]map[string]uint8)
@@ -1175,25 +1196,8 @@ func guessAccuracy(afType string) {
 			trueSnps[idv][chr] = retrieved[idv]
 		}
 	}
-	// Find the most frequent genotype for each position
-	gtpFrequencies := loadGenotypeFrequenciesForGuessed()
-	references := make(map[string]map[string]map[string]uint8)
-	var gtp uint8
-	for anc = range gtpFrequencies {
-		references[anc] = make(map[string]map[string]uint8)
-		for chrStr := range gtpFrequencies[anc] {
-			references[anc][chrStr] = make(map[string]uint8)
-			for pos = range gtpFrequencies[anc][chrStr] {
-				gtp = 0
-				for j := 1; j <= 2; j++ {
-					if gtpFrequencies[anc][chrStr][pos][j] > gtpFrequencies[anc][chrStr][pos][gtp] {
-						gtp = uint8(j)
-					}
-				}
-				references[anc][chrStr][pos] = gtp
-			}
-		}
-	}
+	//
+	references := getMajorGenotypesForGuessedLoci()
 	ancestries := tools.LoadAncestry()
 	idvResults := make([]*IdvResult, 0)
 	locusResults := make(map[string]*LocusResult)
@@ -1435,6 +1439,30 @@ func linkingWithImputation() {
 		log.Fatal("Cannot encode json", err)
 	}
 	fmt.Println("Completed")
+}
+
+// Find the most frequent genotype for each position
+func getMajorGenotypesForGuessedLoci() map[string]map[string]map[string]uint8 {
+	// Find the most frequent genotype for each position
+	gtpFrequencies := loadGenotypeFrequenciesForGuessed()
+	references := make(map[string]map[string]map[string]uint8)
+	var gtp uint8
+	for anc := range gtpFrequencies {
+		references[anc] = make(map[string]map[string]uint8)
+		for chrStr := range gtpFrequencies[anc] {
+			references[anc][chrStr] = make(map[string]uint8)
+			for pos := range gtpFrequencies[anc][chrStr] {
+				gtp = 0
+				for j := 1; j <= 2; j++ {
+					if gtpFrequencies[anc][chrStr][pos][j] > gtpFrequencies[anc][chrStr][pos][gtp] {
+						gtp = uint8(j)
+					}
+				}
+				references[anc][chrStr][pos] = gtp
+			}
+		}
+	}
+	return references
 }
 
 func linkingWithGuessed() {
@@ -1904,12 +1932,6 @@ func loadGuessedGenotypes(afType string) map[string]map[string]map[string]uint8 
 	}
 	for _, object := range dir {
 		if !object.IsDir() && strings.HasPrefix(object.Name(), prefix) && strings.HasSuffix(object.Name(), ".json") {
-			//if !object.IsDir() && (strings.HasPrefix(object.Name(), "guesses600") ||
-			//	strings.HasPrefix(object.Name(), "guesses601") ||
-			//	strings.HasPrefix(object.Name(), "guesses602") ||
-			//	strings.HasPrefix(object.Name(), "guesses603") ||
-			//	strings.HasPrefix(object.Name(), "guesses604") ||
-			//	strings.HasPrefix(object.Name(), "guesses605")) {
 			guesses := make([]*Guess, 0)
 			file, err = os.Open(filepath.Join(folder, object.Name()))
 			if err != nil {
@@ -2113,28 +2135,6 @@ func dividePositionsIntoRegions(positions []int, regionLen int) [][]string {
 	return regions
 }
 
-func similarity(a, b map[string]uint8, af map[string][]float32) float32 {
-	var score float32 = 0.0
-	for locus := range a {
-		if a[locus] == b[locus] {
-			if _, ok := b[locus]; !ok {
-				b[locus] = 0
-			}
-			switch a[locus] {
-			case 0:
-				score += solver.AfToLikelihood(af[locus][0]) * pgs.Ploidy
-			case 1:
-				score += solver.AfToLikelihood(af[locus][0]) + solver.AfToLikelihood(af[locus][1])
-			case 2:
-				score += solver.AfToLikelihood(af[locus][1]) * pgs.Ploidy
-			default:
-				log.Fatalf("Invalid SNP value: %d", a[locus])
-			}
-		}
-	}
-	return score
-}
-
 func matchCount(a, b map[string]uint8) []int {
 	var numMatches int = 0
 	for locus := range a {
@@ -2146,26 +2146,6 @@ func matchCount(a, b map[string]uint8) []int {
 		}
 	}
 	return []int{numMatches, len(a)}
-}
-
-func mutualInformation(a, b map[string]uint8, genFreq map[string][]float32) []float32 {
-	var cumul float64 = 0
-	for locus := range a {
-		if _, ok := b[locus]; !ok {
-			b[locus] = 0
-		}
-		if a[locus] == b[locus] {
-			if _, ok := genFreq[locus]; !ok {
-				//log.Printf("Missing frequency for locus %s", locus)
-				continue
-			}
-			cumul += -math.Log2(float64(genFreq[locus][a[locus]]))
-		}
-	}
-	if math.IsInf(cumul, 1) || math.IsInf(cumul, -1) {
-		cumul = math.MaxFloat32
-	}
-	return []float32{float32(cumul), float32(len(a))}
 }
 
 func loadGenotypeFrequencies(chr int) map[string][]float32 {
@@ -2198,61 +2178,6 @@ func loadGenotypeFrequenciesForGuessed() map[string]map[string]map[string][]floa
 		log.Fatalf("Cannot decode json file %s: %v", filepath, err)
 	}
 	return frequencies
-}
-
-func countSimilarity(a, b map[string]uint8) float32 {
-	var score float32 = 0.0
-	for locus := range a {
-		if _, ok := b[locus]; !ok {
-			b[locus] = 0
-		}
-		if a[locus] == b[locus] {
-			score++
-		}
-	}
-	return score / float32(len(a))
-}
-
-func calculateKinship(chrId string, imputedSNPs map[string]map[string]uint8) {
-	related := solver.ReadRelatedIndividuals()
-	var relativeSNPs map[string]uint8
-	for idv := range imputedSNPs {
-		for _, relative := range related[idv] {
-			relativeSNPs = getAllIndividualSNPs(chrId, relative, tools.GG)
-			fmt.Printf("Individual %s and relative %s: %.3f\n", idv, relative, kingRobust(imputedSNPs[idv], relativeSNPs))
-		}
-	}
-}
-
-func calculateAccuracy(chrId int, ancestry string, trueSNPs, imputedSNPs map[string]map[string]uint8) {
-	fmt.Printf("Retrieving AF for chromosome %d\n", chrId)
-	chrAF := getChromosomeAF(strconv.Itoa(chrId), ancestry)
-	fmt.Println("Retrieval complete")
-	var exists bool
-	for idv := range trueSNPs {
-		numMatches, totalSNPs := 0, 0
-		var adjMatch, adjTotal, addition float64 = 0.0, 0.0, 0.0
-		for pos := range trueSNPs[idv] {
-			switch trueSNPs[idv][pos] {
-			case 0:
-				addition = 2 / chrAF[pos][0]
-			case 1:
-				addition = 1/chrAF[pos][0] + 1/chrAF[pos][1]
-			case 2:
-				addition = 2 / chrAF[pos][1]
-			default:
-				log.Printf("Invalid SNP value: %d", trueSNPs[idv][pos])
-			}
-			adjTotal += addition
-			totalSNPs++
-			if _, exists = imputedSNPs[idv][pos]; exists && trueSNPs[idv][pos] == imputedSNPs[idv][pos] {
-				numMatches++
-				adjMatch += addition
-			}
-		}
-		fmt.Printf("Individual %s: %d matches out of %d, accuracy %.3f, AF-adjusted acc %.4f\n", idv, numMatches,
-			totalSNPs, float64(numMatches)/float64(totalSNPs), adjMatch/adjTotal)
-	}
 }
 
 func getPositionsAFs(chr string, regions [][]string, ancestries []string) map[string]map[string]float32 {
@@ -3039,10 +2964,6 @@ func majorGenotypeSamples(chr string, ancestries []string,
 	}
 
 	return references
-}
-
-func samplePredicate(input string) bool {
-	return strings.HasPrefix(input, "HG") || strings.HasPrefix(input, "NA")
 }
 
 func getAllPositions(filepath string) []string {

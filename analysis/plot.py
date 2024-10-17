@@ -17,27 +17,6 @@ from scipy.stats import norm
 from scipy.stats import rankdata
 
 
-def pairwise(filepath):
-    correlations = []
-    with open(filepath, 'r') as file:
-        reader = csv.reader(file)
-        for row in reader:
-            row_values = [float(value) for value in row]
-            correlations.append(row_values)
-
-    xs = np.arange(1, len(correlations) + 1, 1)
-    ys = []
-    for i in range(len(correlations)):
-        ys.append([correlations[i][j] for j in range(i + 1, len(correlations))])
-        plt.scatter([xs[i] for _ in range(len(ys[i]))], ys[i], s=1)
-
-    plt.xlabel("Distance between a pair of SNPs")
-    plt.ylabel("Standard deviation of pairwise conditional probabilities")
-    plt.tight_layout()
-    # plt.show()
-    plt.savefig('pairwise.png', dpi=300)
-
-
 def score_distribution(filepath):
     scores = []
     with open(filepath, 'r') as file:
@@ -53,149 +32,6 @@ def score_distribution(filepath):
     plt.tight_layout()
     plt.show()
     # plt.savefig('score_distribution.png', dpi=300)
-
-
-def solution_ranking(pgs_id):
-    accuracies, positions, scores, likelihoods = [], [], [], []
-    major_accuracies, major_scores, major_likelihoods = [], [], []
-    directory = "results/"
-    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                 fnmatch.fnmatch(filename, f"*{pgs_id}*")]
-    print(filepaths)
-    for filepath in filepaths:
-        with open(filepath, 'r') as file:
-            reader = csv.reader(file)
-            try:
-                next(reader)
-            except StopIteration:
-                # Empty file
-                continue
-            for row in reader:
-                if len(row) < 11:
-                    continue
-                score, major_score, median_score = float(row[1]), float(row[2]), float(row[3])
-                accuracy, major_accuracy = float(row[4]), float(row[5])
-                position, total_solutions = float(row[6]), float(row[7])
-                first_likelihood, likelihood, major_likelihood = float(row[8]), float(row[9]), float(row[10])
-                accuracies.append(accuracy)
-                major_accuracies.append(major_accuracy)
-                positions.append(1 - position / total_solutions)
-                likelihoods.append(likelihood)
-                major_likelihoods.append(major_likelihood * score / major_score)
-
-    # plt.hist(accuracies, bins=50, histtype='step', label="Top-choice accuracy")
-    # plt.hist(major_accuracies, bins=50, histtype='step', label="All-major accuracy")
-    # plt.hist(positions, bins=50, histtype='step', label="True solution proximity to the top")
-    plt.hist(likelihoods, bins=50, histtype='step', label="Likelihood ratio")
-    plt.hist(major_likelihoods, bins=50, histtype='step', label="Likelihood ratio")
-    plt.title(pgs_id)
-    plt.xlabel("Ratio")
-    plt.ylabel("Count")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-
-def true_position_cdf(pgs_ids):
-    colors = ['dodgerblue', 'limegreen', 'tomato', 'blueviolet']
-    directory = "results/accuracyLikelihood/"
-    positions = []
-    for pgs in pgs_ids:
-        filepath = os.path.join(directory, pgs + ".json")
-        with open(filepath, 'r') as file:
-            for row in file:
-                row = row.strip()
-                data = json.loads(row)
-                accuracy = list(map(lambda x: float(x), data["Accuracies"]))
-                positions.append(float(accuracy.index(1.0)) / float(len(accuracy)))
-
-        spos = [pos * 100 for pos in np.sort(positions)]
-        cdf = np.arange(1, len(spos) + 1) / len(spos)
-        plt.plot(spos, cdf, label=pgs, linewidth=2, color=colors[pgs_ids.index(pgs)])
-
-    # plt.title("CDF for the likelihood position of the true solution")
-    plt.xlabel("Selected solution in the top X% by likelihood", fontsize=16)
-    plt.ylabel("Fraction", fontsize=16)
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.legend()
-    plt.tight_layout()
-    plt.grid(True)
-    # plt.show()
-    plt.savefig('cdf.pdf')
-
-
-def accuracy_cdf(pgs_ids):
-    colors = ['firebrick', 'sandybrown', 'forestgreen', 'mediumorchid']
-    directory = "results/accuracyLikelihood/"
-    accuracy = []
-    for pgs in pgs_ids:
-        filepath = os.path.join(directory, pgs + ".json")
-        with open(filepath, 'r') as file:
-            for row in file:
-                row = row.strip()
-                data = json.loads(row)
-                accuracy.append(float(data["Accuracies"][0]))
-
-        spos = [pos for pos in np.sort(accuracy)]
-        cdf = np.arange(1, len(spos) + 1) / len(spos)
-        plt.plot(spos, cdf, label=pgs, linewidth=2, color=colors[pgs_ids.index(pgs)])
-
-    # plt.title("CDF for the likelihood position of the true solution")
-    plt.xlabel("Top-solution accuracy", fontsize=16)
-    plt.ylabel("Fraction", fontsize=16)
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.gca().invert_xaxis()
-    plt.legend()
-    plt.tight_layout()
-    plt.grid(True)
-    # plt.show()
-    plt.savefig('accuracy.pdf')
-
-
-def score_deviation():
-    filepath = "results/distro.json"
-    rows = []
-    with open(filepath, 'r') as file:
-        for row in file:
-            row = row.strip()
-            if row.startswith("[["):
-                rows.append(list(map(lambda x: [float(x[0]), float(x[1])], json.loads(row))))
-            else:
-                rows.append(list(map(lambda x: float(x), json.loads(row))))
-    maxTotal = rows[0]
-    examples = rows[1]
-    left = rows[2]
-    right = rows[3]
-    # diff = [left[i]-right[i] for i in range(0, len(left))]
-    full = [left[i] + right[i] for i in range(0, len(left))]
-    print(len(left), len(right))
-    mf = statistics.median(full)
-    leftLim, rightLim = mf - maxTotal[0], mf - maxTotal[1]
-    plt.axvline(leftLim, color='purple', linewidth=1, label='Naive Min')
-    plt.axvline(rightLim, color='purple', linewidth=1, label='Naive Max')
-
-    # plt.hist(diff, bins=50, color='blue', alpha=0.7, label='Left-right diff')
-    plt.hist(full, bins=50, color='orange', alpha=0.7)
-    # plt.hist(left, bins=50, color='blue', alpha=0.7, label='Scores')
-    # plt.hist(right, bins=50, color='orange', alpha=0.7, label='Scores')
-    labels = ['Sampled Max', 'Sampled Min']
-    colors = ['red', 'green', 'yellow', 'purple']
-    for i in range(0, len(examples)):
-        plt.axvline(examples[i], color=colors[i], linestyle='dashed', linewidth=1, label=labels[i])
-    # for example in examples:
-    #     plt.axvline(example[0], color=colors[0], linestyle='dashed', linewidth=1, label=labels[0])
-    #     plt.axvline(example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
-    # plt.axvline(example[0]+example[1], color=colors[1], linestyle='dashed', linewidth=1, label=labels[1])
-    # for v in major:
-    #     plt.axvline(v, color=colors[major.index(v)], linestyle='dashed', linewidth=1, label=labels[major.index(v)])
-    # for v in minor:
-    #     plt.axvline(v, color=colors[minor.index(v)+2], linestyle='dashed', linewidth=1, label=labels[minor.index(v)])
-    plt.xlabel("Score")
-    plt.ylabel("Frequency")
-    plt.legend()
-    plt.show()
 
 
 def loci_coverage():
@@ -239,73 +75,6 @@ def loci_coverage():
     plt.tight_layout()
     fig.savefig('coverage.png', dpi=300, bbox_inches='tight')
     # plt.show()
-
-
-def accuracy(pgs_ids):
-    num_variants = {
-        "PGS003181": 15,
-        "PGS000778": 20,
-        "PGS004249": 25,
-        "PGS001868": 30,
-        "PGS002270": 33,
-        "PGS001835": 38,
-    }
-    world = "All"
-    pops = ["AFR", "AMR", "EAS", "EUR", "SAS"]
-    directory = "results/accuracy/"
-    data = {}
-    for pgs_id in pgs_ids + [world]:
-        data[pgs_id] = {
-            'Ancestry': [],
-            'Accuracy': [],
-            'Score': []
-        }
-    for pgs_id in pgs_ids:
-        filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                     fnmatch.fnmatch(filename, f"*{pgs_id}-*")]
-        for filepath in filepaths:
-            with open(filepath, 'r') as f:
-                content = json.load(f)
-            for result in content:
-                if len(result["LikelihoodAccuracies"]) > 0:
-                    data[pgs_id]['Ancestry'].append(result["Ancestry"])
-                    data[pgs_id]['Accuracy'].append(float(result["LikelihoodAccuracies"][0]))
-                    data[pgs_id]['Score'].append(float(result["Score"]))
-                    data[world]['Ancestry'].append(result["Ancestry"])
-                    data[world]['Accuracy'].append(float(result["LikelihoodAccuracies"][0]))
-                    data[world]['Score'].append(float(result["Score"]))
-
-    for pgs_id in pgs_ids + [world]:
-        print(f"PGS: {pgs_id}, Mean accuracy: {np.mean(data[pgs_id]['Accuracy'])}, "
-              f"Median accuracy: {np.median(data[pgs_id]['Accuracy'])}")
-        df = pd.DataFrame(data[pgs_id])
-        fig, ax = plt.subplots(figsize=(4, 3))
-        sns.violinplot(x='Ancestry', y='Accuracy', data=df, ax=ax, palette='Pastel1', hue='Ancestry')
-        if pgs_id != world:
-            ax.set_title(f'Accuracy by Ancestry {pgs_id} ({num_variants[pgs_id]} variants)')
-        else:
-            ax.set_title(f'Accuracy by Ancestry {pgs_id}')
-        fig.savefig(f'{pgs_id}-ancestry.png', dpi=300, bbox_inches='tight')
-        #         plt.tight_layout()
-        #         plt.show()
-
-        decile_labels = ['10%', '20%', '30%', '40%', '50%',
-                         '60%', '70%', '80%', '90%', '100%']
-
-        df['Decile'] = pd.qcut(df['Score'], q=10, labels=decile_labels)
-        fig, ax = plt.subplots(figsize=(4, 3))
-        #         sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2, medianprops=dict(color='white'))
-        sns.boxplot(x='Decile', y='Accuracy', data=df, ax=ax, width=0.5, fliersize=2)
-        if pgs_id != world:
-            ax.set_title(f'Accuracy by Score {pgs_id} ({num_variants[pgs_id]} variants)')
-        else:
-            ax.set_title(f'Accuracy by Score {pgs_id}')
-        plt.xticks(rotation=45)
-        fig.savefig(f'{pgs_id}-score.png', dpi=300, bbox_inches='tight')
-
-
-#         plt.tight_layout()
-#         plt.show()
 
 
 def sequential():
@@ -555,7 +324,7 @@ def kinship_experiment():
 
 def load_uniqueness_data(dataset):
     directory = "results/uniqueness/"
-    filepath = os.path.join(directory, f"scores_{dataset}_low.json")
+    filepath = os.path.join(directory, f"scores_{dataset}.json")
     data = []
     with open(filepath, 'r') as f:
         content = json.load(f)
@@ -578,43 +347,57 @@ def score_uniqueness():
     df = pd.concat([ggdf, ukbdf])
 
     # Create bins for powers of 10
-    bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2)]
+    bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 3)]
+    bins = []
+    for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2):
+        bins.append(10**(i-1))
+        bins.append(10**(i-1) * 10**0.5)
+    bins.append(10**i)
     df['TotalPossibleScoresBin'] = pd.cut(df['TotalPossibleScores'], bins=bins, right=False)
     # Group by bins and calculate mean and std for real values
     grouped_real = df.groupby(['TotalPossibleScoresBin', 'Dataset'], observed=True).agg(
-        RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
+        # RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
+        RealPercentageUnique_median=('RealPercentageUnique', 'median'),
         RealPercentageUnique_std=('RealPercentageUnique', 'std'),
-        RealAnonSize_mean=('RealAnonSize', 'mean'),
+        # RealAnonSize_mean=('RealAnonSize', 'mean'),
+        RealAnonSize_median=('RealAnonSize', 'median'),
         RealAnonSize_std=('RealAnonSize', 'std'),
-        TotalPossibleScores_mean=('TotalPossibleScores', 'mean')
+        TotalPossibleScores_mean=('TotalPossibleScores', 'mean'),
+        NumVariants_median=('NumVariants', 'median')
     ).reset_index()
 
-    # Filter out rows where PredictedPercentageUnique == -1 for predicted values
-    grouped_predicted = df[df['PredictedPercentageUnique'] != -1].groupby([
+    df['PredictedPercentageUnique_filtered'] = df['PredictedPercentageUnique'].where(df['PredictedPercentageUnique'] > 0)
+    grouped_predicted = df.groupby([
         'TotalPossibleScoresBin', 'Dataset'], observed=True).agg(
-        PredictedPercentageUnique_mean=('PredictedPercentageUnique', 'mean'),
-        PredictedPercentageUnique_std=('PredictedPercentageUnique', 'std'),
-        PredictedAnonSize_mean=('PredictedAnonSize', 'mean'),
-        PredictedAnonSize_std=('PredictedAnonSize', 'std')
+        # PredictedPercentageUnique_mean=('PredictedPercentageUnique_filtered', 'mean'),
+        PredictedPercentageUnique_median=('PredictedPercentageUnique_filtered', 'median'),
+        PredictedPercentageUnique_std=('PredictedPercentageUnique_filtered', 'std'),
+        # PredictedAnonSize_mean=('PredictedAnonSize', 'mean'),
+        PredictedAnonSize_median=('PredictedAnonSize', 'median'),
+        PredictedAnonSize_std=('PredictedAnonSize', 'std'),
+        NumVariants_median=('NumVariants', 'median')
     ).reset_index()
 
+    num_unique = {}
+    anon_group = {}
     for dataset in df['Dataset'].unique():
         dataset_group = grouped_real[grouped_real['Dataset'] == dataset]
         try:
-            unique_95_bin = dataset_group[dataset_group['RealPercentageUnique_mean'] >= 95].iloc[0]
-            total_scores_at_95_percent_unique = unique_95_bin['TotalPossibleScores_mean']
+            unique_95_bin = dataset_group[dataset_group['RealPercentageUnique_median'] >= 95].iloc[0]
+            num_unique[dataset] = unique_95_bin['TotalPossibleScores_mean']
+            print(f"{dataset} - Bin: {unique_95_bin['TotalPossibleScoresBin']}, Median NumVariants: {unique_95_bin['NumVariants_median']} (RealPercentageUnique >= 95)")
         except IndexError:
             pass
         try:
-            anon_2_bin = dataset_group[dataset_group['RealAnonSize_mean'] <= 2].iloc[0]
-            total_scores_at_anon_2 = anon_2_bin['TotalPossibleScores_mean']
+            anon_2_bin = dataset_group[dataset_group['RealAnonSize_median'] <= 2].iloc[0]
+            anon_group[dataset] = anon_2_bin['TotalPossibleScores_mean']
+            print(f"{dataset} - Bin: {anon_2_bin['TotalPossibleScoresBin']}, Median NumVariants: {anon_2_bin['NumVariants_median']} (RealAnonSize <= 2)")
         except IndexError:
             pass
 
         # Print the results for each dataset
-        print(f"{dataset} - Mean TotalPossibleScores at 95% unique: {total_scores_at_95_percent_unique}")
-        print(f"{dataset} - Mean TotalPossibleScores when RealAnonSize_mean reaches 2: {total_scores_at_anon_2}")
-
+        print(f"{dataset} - Mean TotalPossibleScores at 95% unique: {num_unique[dataset]}")
+        print(f"{dataset} - Mean TotalPossibleScores when RealAnonSize reaches 2: {anon_group[dataset]}")
 
     first_color, second_color = 'teal', 'coral'
     first_marker, second_marker = '.', '*'
@@ -626,7 +409,7 @@ def score_uniqueness():
         # Plot real values for percentage uniqueness
         subset_real = grouped_real[grouped_real['Dataset'] == dataset]
         x_real = subset_real['TotalPossibleScoresBin'].apply(lambda x: x.mid)
-        y_real = subset_real['RealPercentageUnique_mean']
+        y_real = subset_real['RealPercentageUnique_median']
         y_real_std = np.clip(subset_real['RealPercentageUnique_std'], 0, 100 - y_real)
 
         ax1.plot(x_real, y_real, color=color, label=f'{label_prefix} {observed}', marker=marker)
@@ -636,9 +419,14 @@ def score_uniqueness():
         subset_pred = grouped_predicted[grouped_predicted['Dataset'] == dataset]
         if not subset_pred.empty:
             x_pred = subset_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
-            y_pred = subset_pred['PredictedPercentageUnique_mean']
-            ax1.plot(x_pred, y_pred, color=color, linestyle='--', label=f'{label_prefix} {estimated}', marker=marker)
+            y_pred = subset_pred['PredictedPercentageUnique_median']
+            ax1.plot(x_pred, y_pred, color=color, linestyle=':', label=f'{label_prefix} {estimated}', marker=marker)
 
+    ax1.text(x=0.2, y=93, s='95', va='center', ha='right', color='gray', fontsize=TICK_SIZE)
+    ax1.axhline(y=95, color='lightgray', linestyle='--', linewidth=1.5)
+    # for dataset in df['Dataset'].unique():
+    #     ax1.vlines(x=num_unique[dataset], ymin=0.8, ymax=95, color='lightgray', linestyle=':', linewidth=1.5)
+    ax1.set_ylim(0, 105)
     ax1.set_xscale('log')
     ax1.set_xlabel('Number of possible scores')
     ax1.set_ylabel(r'Unique scores, \%')
@@ -651,7 +439,7 @@ def score_uniqueness():
                                                  ('UKBiobank', second_color, 'UKBB', second_marker)]:
         subset_anon_real = grouped_real[grouped_real['Dataset'] == dataset]
         x_anon_real = subset_anon_real['TotalPossibleScoresBin'].apply(lambda x: x.mid)
-        y_real_anon = subset_anon_real['RealAnonSize_mean']
+        y_real_anon = subset_anon_real['RealAnonSize_median']
         y_real_anon_std = np.clip(subset_anon_real['RealAnonSize_std'], 0, y_real_anon - 1)
 
         ax2.plot(x_anon_real, y_real_anon, color=color, label=f'{label_prefix} {observed}', marker=marker)
@@ -662,10 +450,14 @@ def score_uniqueness():
         subset_anon_pred = grouped_predicted[grouped_predicted['Dataset'] == dataset]
         if not subset_anon_pred.empty:
             x_anon_pred = subset_anon_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
-            y_pred_anon = subset_anon_pred['PredictedAnonSize_mean']
-            ax2.plot(x_anon_pred, y_pred_anon, color=color, linestyle='--', label=f'{label_prefix} {estimated}',
+            y_pred_anon = subset_anon_pred['PredictedAnonSize_median']
+            ax2.plot(x_anon_pred, y_pred_anon, color=color, linestyle=':', label=f'{label_prefix} {estimated}',
                      marker=marker)
 
+    ax2.text(x=0.2, y=2, s='2', va='center', ha='right', color='gray', fontsize=TICK_SIZE)
+    ax2.axhline(y=2, color='lightgray', linestyle='--', linewidth=1.5)
+    # for dataset in df['Dataset'].unique():
+    #     ax2.vlines(x=anon_group[dataset], ymin=0.8, ymax=2, color='lightgray', linestyle=':', linewidth=1.5)
     ax2.set_xlabel('Number of possible scores')
     ax2.set_ylabel('Median anonymity set size')
     ax2.set_xscale('log')
@@ -673,49 +465,9 @@ def score_uniqueness():
     ax2.set_ylim(0.8, 30000)
     ax2.legend()
     plt.tight_layout()
-    plt.show()
-    # fig1.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
-    # fig2.savefig('anonymity.pdf', dpi=300, bbox_inches='tight')
-
-
-def score_uniqueness_old():
-    directory = "results/uniqueness/"
-    filepath = os.path.join(directory, "scores.json")
-    data = []
-    with open(filepath, 'r') as f:
-        content = json.load(f)
-    for result in content:
-        data.append({'NumVariants': int(result['NumVariants']),
-                     'Unique': 100*float(result['NumUniqueIndividuals'])/2504,
-                     'AnonSize': np.median([float(x) for x in result['AnonymitySets']])})
-
-    first_color = 'teal'
-    second_color = 'coral'
-    df = pd.DataFrame(data)
-    fig, ax1 = plt.subplots(figsize=(4, 3))
-    sns.lineplot(x='NumVariants', y='AnonSize', data=df, ax=ax1, color=first_color, linestyle='--')
-    plt.xlabel('Number of variants in a PRS')
-    plt.ylabel('Median anonymity set size', color=first_color)
-    ax1.tick_params(axis='y', labelcolor=first_color)
-
-    ax2 = ax1.twinx()
-    sns.lineplot(x='NumVariants', y='Unique', data=df, ax=ax2, color=second_color)
-    plt.ylabel('Uniquely scored individuals (%)', color=second_color)
-    ax2.tick_params(axis='y', labelcolor=second_color)
-
-    grouped = df.groupby('NumVariants')['AnonSize'].median().reset_index()
-    for _, row in grouped.iterrows():
-        num_variants = row['NumVariants']
-        median_anon_size = row['AnonSize']
-        print(f'Number of Variants: {num_variants}, Median Anonymity Set Size: {median_anon_size}')
-
-    grouped = df.groupby('NumVariants')['Unique'].median().reset_index()
-    for _, row in grouped.iterrows():
-        print(f'Number of Variants: {row['NumVariants']}, Unique percentage: {row['Unique']}')
-
-    plt.tight_layout()
-    fig.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
+    fig1.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
+    fig2.savefig('anonymity.pdf', dpi=300, bbox_inches='tight')
 
 
 def random_hist():
@@ -768,34 +520,6 @@ def af_hist():
     # plt.show()
 
 
-def guessed_mia():
-    directory = "results/impute/"
-    filepath = os.path.join(directory, "unimputed.json")
-    data = []
-    with open(filepath, 'r') as f:
-        content = json.load(f)
-    for idv, result in content.items():
-        data.append({'SelfPos': int(result['SelfPos']), 'RelativePos': int(result['RelativePos']),
-                     'SelfAccuracy': float(result['SelfAccuracy']), 'RelativeAccuracy': float(result['RelAccuracy'])})
-
-    df = pd.DataFrame(data)
-    fig, ax = plt.subplots(figsize=(4, 3))
-    # melted_df = pd.melt(df, value_vars=['SelfPos', 'RelativePos'], var_name='PositionType', value_name='Value')
-    # sns.boxplot(x='PositionType', y='Value', data=melted_df)
-    # plt.title("Linking position")
-    # plt.ylabel('Match position')
-    # fig.savefig('linking-pos.png', dpi=300, bbox_inches='tight')
-    # plt.gca().invert_yaxis()
-    melted_df = pd.melt(df, value_vars=['SelfAccuracy', 'RelativeAccuracy'], var_name='Type', value_name='Value')
-    sns.boxplot(x='Type', y='Value', data=melted_df)
-    plt.title("SNP matching accuracy")
-    plt.ylabel('Match comparison accuracy')
-    fig.savefig('linking-acc.png', dpi=300, bbox_inches='tight')
-    plt.xlabel('')
-    plt.tight_layout()
-    plt.show()
-
-
 def full_imputed():
     directory = "results/impute/"
     filepath = os.path.join(directory, "full_imputed22.json")
@@ -829,181 +553,6 @@ def full_imputed():
     # plt.title("SNP matching accuracy")
     # plt.ylabel('Match comparison accuracy')
     # fig.savefig('linking-acc.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-
-def linking_accuracy():
-    directory = "results/linking/"
-    filepaths = [os.path.join(directory, filename) for filename in os.listdir(directory) if
-                 # fnmatch.fnmatch(filename, f"unimputed*.json")]
-                 fnmatch.fnmatch(filename, f"imputed*.json")]
-    data = {}
-    for filepath in filepaths:
-        with open(filepath, 'r') as f:
-            content = json.load(f)
-        for idv, relations in content.items():
-            if idv not in data:
-                data[idv] = {}
-            for rel in relations:
-                if rel["Target"] not in data[idv]:
-                    data[idv][rel["Target"]] = {}
-                    data[idv][rel["Target"]]["Count"] = [float(c) for c in rel["Count"]]
-                    data[idv][rel["Target"]]["King"] = [float(c) for c in rel["King"]]
-                    data[idv][rel["Target"]]["Information"] = [float(c) for c in rel["Information"] if float(c) < 1e20]
-                else:
-                    for i, c in enumerate(rel["Count"]):
-                        data[idv][rel["Target"]]["Count"][i] += float(c)
-                    for i, c in enumerate(rel["King"]):
-                        data[idv][rel["Target"]]["King"][i] += float(c)
-                    for i, c in enumerate(rel["Information"]):
-                        data[idv][rel["Target"]]["Information"][i] += float(c) if float(c) < 1e20 else 0
-
-    divided = {}
-    for idv in data:
-        divided[idv] = {"Count": [], "King": [], "Information": []}
-        for target in data[idv]:
-            divided[idv]["Count"].append((target, data[idv][target]["Count"][0] / data[idv][target]["Count"][1]))
-            divided[idv]["King"].append((target, data[idv][target]["King"][0] / data[idv][target]["King"][1]))
-            divided[idv]["Information"].append(
-                (target, data[idv][target]["Information"][0] / data[idv][target]["Information"][1]))
-        # sort by the second element of the tuple
-        divided[idv]["Count"] = sorted(divided[idv]["Count"], key=lambda x: x[1], reverse=True)
-        divided[idv]["King"] = sorted(divided[idv]["King"], key=lambda x: x[1], reverse=True)
-        divided[idv]["Information"] = sorted(divided[idv]["Information"], key=lambda x: x[1], reverse=True)
-        # print(f"IDV: {idv}, Count: {divided[idv]['Count'][0]}, King: {divided[idv]['King'][0]}")
-
-    parsed = {"SelfCountPos": [], "SelfKingPos": [], "SelfInformationPos": [],
-              "RelativeCountPos": [], "RelativeKingPos": [], "RelativeInformationPos": [],
-              "ReferenceCountPos": [], "ReferenceKingPos": [], "ReferenceInformationPos": [],
-              "SelfCountAcc": [], "SelfKingAcc": [], "SelfInformationAcc": [],
-              "RelativeCountAcc": [], "RelativeKingAcc": [], "RelativeInformationAcc": [],
-              "ReferenceCountAcc": [], "ReferenceKingAcc": [], "ReferenceInformationAcc": [],
-              "EveryCountRatio": [], "EveryKingRatio": [], "EveryInformationRatio": []}
-    related = read_related_individuals()
-    for idv in divided:
-        relative_found = False
-        for i, tpl in enumerate(divided[idv]["Count"]):
-            if tpl[0] == idv:
-                parsed["SelfCountPos"].append(i)
-                parsed["SelfCountAcc"].append(tpl[1])
-            if tpl[0] == "reference":
-                parsed["ReferenceCountPos"].append(i)
-                parsed["ReferenceCountAcc"].append(tpl[1])
-            if not relative_found and tpl[0] in related[idv]:
-                parsed["RelativeCountPos"].append(i)
-                parsed["RelativeCountAcc"].append(tpl[1])
-                relative_found = True
-            parsed["EveryCountRatio"].append(tpl[1])
-    for idv in divided:
-        relative_found = False
-        for i, tpl in enumerate(divided[idv]["King"]):
-            if tpl[0] == idv:
-                parsed["SelfKingPos"].append(i)
-                parsed["SelfKingAcc"].append(tpl[1])
-            if tpl[0] == "reference":
-                parsed["ReferenceKingPos"].append(i)
-                parsed["ReferenceKingAcc"].append(tpl[1])
-            if not relative_found and tpl[0] in related[idv]:
-                parsed["RelativeKingPos"].append(i)
-                parsed["RelativeKingAcc"].append(tpl[1])
-                relative_found = True
-            parsed["EveryKingRatio"].append(tpl[1])
-    for idv in divided:
-        relative_found = False
-        for i, tpl in enumerate(divided[idv]["Information"]):
-            if tpl[0] == idv:
-                parsed["SelfInformationPos"].append(i)
-                parsed["SelfInformationAcc"].append(tpl[1])
-            if tpl[0] == "reference":
-                parsed["ReferenceInformationPos"].append(i)
-                parsed["ReferenceInformationAcc"].append(tpl[1])
-            if not relative_found and tpl[0] in related[idv]:
-                parsed["RelativeInformationPos"].append(i)
-                parsed["RelativeInformationAcc"].append(tpl[1])
-                relative_found = True
-            parsed["EveryInformationRatio"].append(tpl[1])
-
-    print(f"SelfCountAcc: {np.median(parsed['SelfCountAcc'])}, {np.mean(parsed['SelfCountAcc'])}")
-    print(f"RelativeCountAcc: {np.median(parsed['RelativeCountAcc'])}, {np.mean(parsed['RelativeCountAcc'])}")
-    print(f"ReferenceCountAcc: {np.median(parsed['ReferenceCountAcc'])}, {np.mean(parsed['ReferenceCountAcc'])}")
-    print(f"SelfKingAcc: {np.median(parsed['SelfKingAcc'])}, {np.mean(parsed['SelfKingAcc'])}")
-    print(f"RelativeKingAcc: {np.median(parsed['RelativeKingAcc'])}, {np.mean(parsed['RelativeKingAcc'])}")
-    print(f"ReferenceKingAcc: {np.median(parsed['ReferenceKingAcc'])}, {np.mean(parsed['ReferenceKingAcc'])}")
-    print(f"SelfInformationAcc: {np.median(parsed['SelfInformationAcc'])}, {np.mean(parsed['SelfInformationAcc'])}")
-    print(
-        f"RelativeInformationAcc: {np.median(parsed['RelativeInformationAcc'])}, {np.mean(parsed['RelativeInformationAcc'])}")
-    print(
-        f"ReferenceInformationAcc: {np.median(parsed['ReferenceInformationAcc'])}, {np.mean(parsed['ReferenceInformationAcc'])}")
-
-    palette = {}
-    for key in parsed:
-        if key.startswith("Self"):
-            palette[key] = sns.color_palette("pastel")[0]
-        elif key.startswith("Relative"):
-            palette[key] = sns.color_palette("pastel")[1]
-        elif key.startswith("Reference"):
-            palette[key] = sns.color_palette("pastel")[2]
-        else:
-            palette[key] = sns.color_palette("pastel")[3]
-
-    keys = [["SelfCountPos", "RelativeCountPos", "ReferenceCountPos"],
-            ["SelfKingPos", "RelativeKingPos", "ReferenceKingPos"],
-            ["SelfInformationPos", "RelativeInformationPos", "ReferenceInformationPos"],
-            ["SelfCountAcc", "RelativeCountAcc", "ReferenceCountAcc", "EveryCountRatio"],
-            ["SelfKingAcc", "RelativeKingAcc", "ReferenceKingAcc", "EveryKingRatio"],
-            ["SelfInformationAcc", "RelativeInformationAcc", "ReferenceInformationAcc", "EveryInformationRatio"]]
-    df = []
-    for key in keys:
-        df.append(prepare_data(parsed, key))
-    fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
-    for i, ax1 in enumerate(axes1):
-        ax1.invert_yaxis()
-        ax1.set_ylabel('Rank')
-        ax1.set_xlabel('')
-        ax1.set_xticklabels(["Self", "Relative", "Reference"])
-        sns.boxplot(x='Versus', y='Value', data=df[i], hue='Versus', palette=palette, ax=axes1[i])
-        medians = df[i].groupby(['Versus'])['Value'].median()
-        print(f"Medians for df[{i}]:", medians)  # Debug print
-        # for tick, label in zip(range(len(medians)), ax1.get_xticklabels()):
-        #     ax1.annotate(f'{medians[label.get_text()]:.2f}',
-        #                  xy=(tick, medians[label.get_text()]),
-        #                  xytext=(0, 5),  # 5 points vertical offset
-        #                  textcoords='offset points',
-        #                  ha='center', va='center',
-        #                  color='red', fontsize=10, fontweight='bold')
-    axes1[0].set_title('Match Count Based')
-    axes1[0].set_ylim(2550, -50)
-    axes1[1].set_title('KING Based')
-    axes1[1].set_ylim(2550, -50)
-    axes1[2].set_title('Mutual Information Based')
-    axes1[2].set_ylim(2550, -50)
-    # fig1.savefig('unimputed-pos.png', dpi=300, bbox_inches='tight')
-    fig1.savefig('imputed-pos.png', dpi=300, bbox_inches='tight')
-
-    fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
-    for i, ax2 in enumerate(axes2):
-        ax2.set_xlabel('')
-        ax2.set_xticklabels(["Self", "Relative", "Reference", "All"])
-        sns.boxplot(x='Versus', y='Value', data=df[i + 3], hue='Versus', palette=palette, ax=axes2[i])
-        medians = df[i + 3].groupby(['Versus'])['Value'].median()
-        print(f"Medians for df[{i}]:", medians)  # Debug print
-        # for tick, label in zip(range(len(medians)), ax2.get_xticklabels()):
-        #     ax2.annotate(f'{medians[label.get_text()]:.2f}',
-        #                  xy=(tick, medians[label.get_text()]),
-        #                  xytext=(0, 5),  # 5 points vertical offset
-        #                  textcoords='offset points',
-        #                  ha='center', va='center',
-        #                  color='red', fontsize=10, fontweight='bold')
-    axes2[0].set_title('Match Count Based')
-    axes2[0].set_ylabel('Match ratio')
-    axes2[1].set_ylabel('KING score')
-    axes2[1].set_title('KING Based')
-    axes2[2].set_ylabel('Mutual information')
-    axes2[2].set_title('Mutual Information Based')
-    # fig2.savefig('unimputed-acc.png', dpi=300, bbox_inches='tight')
-    fig2.savefig('imputed-acc.png', dpi=300, bbox_inches='tight')
-
-    plt.tight_layout()
     plt.show()
 
 
@@ -1074,14 +623,6 @@ def prepare_data(parsed, keys):
     return pd.DataFrame(data, columns=['Versus', 'Value'])
 
 
-def prepare_data_for_cdf(parsed, key):
-    data = []
-    for label in key:
-        values = parsed[label]
-        data.extend([(label, value) for value in values])
-    return data
-
-
 def read_related_individuals():
     file_path = "data/related_individuals.txt"
     related = {}
@@ -1148,58 +689,6 @@ def imputation_accuracy():
     # ax.set_xticklabels([str(tick) if i % 10000 == 0 else '' for i, tick in enumerate(xticks)])
     plt.show()
     # plt.savefig('imputation.png', dpi=300, bbox_inches='tight')
-
-
-def percentile_prediction():
-    filepath = "results/predict/prediction.json"
-    data = []
-    with open(filepath, 'r') as f:
-        content = json.load(f)
-    for result in content.values():
-        for i, predicted in enumerate(result['Predicted']):
-            data.append({'Known': f'{result["Known"]}/{result["Total"]}',
-                         'Percentile Difference': 100 * abs(float(result['Predicted'][i]) - float(result['Real'][i]))})
-
-    sorted(data, key=lambda x: float(x['Known'].split("/")[0]) / float(x['Known'].split("/")[1]))
-    df = pd.DataFrame(data)
-    fig, ax = plt.subplots(figsize=(5, 3))
-    ax.invert_yaxis()
-    sns.boxplot(x='Known', y='Percentile Difference', data=df)
-    plt.title('Percentile difference between predicted and real PRS')
-    plt.xlabel('Known/Total SNPs')
-    plt.tight_layout()
-    fig.savefig('prediction.png', dpi=300, bbox_inches='tight')
-    # plt.show()
-
-
-def random_bars():
-    # Data
-    labels = ['TP53', 'BRCA1', 'CFTR']
-    values1 = [10, 15, 20]
-    values2 = [x + random.randint(1, 5) for x in values1]  # Slightly higher values
-
-    # Parameters
-    x = np.arange(len(labels))  # the label locations
-    width = 0.22  # narrower width of the bars
-
-    # Set seaborn color palette
-    palette = sns.color_palette("colorblind")
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-
-    # Plotting the bars with seaborn colors
-    bars1 = ax.bar(x - width / 2, values1, width, label='Old technique', color=palette[2])
-    bars2 = ax.bar(x + width / 2, values2, width, label='My awesome technique', color=palette[1])
-
-    # Adding labels, title, and legend
-    ax.set_xlabel('Genes')
-    ax.set_ylabel('Predictive power')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.legend()
-
-    fig.savefig('randbars.pdf', dpi=300, bbox_inches='tight')
-    # plt.show()
 
 
 def plot_normal_distribution_with_fill(mu=0, sigma=1):
@@ -1303,6 +792,69 @@ def plink_accuracy():
     plt.show()
 
 
+def load_ancestry_baselines(id_file, data_file, method):
+    if id_file is not None:
+        with open(id_file, "r") as f:
+            ids = [line.strip() for line in f]
+        ids = ids[1:]
+        indf = pd.read_csv(data_file, sep='\t', header=None)
+        indf.columns = ids
+        indf.index = ids
+    else:
+        indf = pd.read_csv(data_file, sep='\t', index_col=0)
+
+    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
+    related = read_related_individuals()
+    individual_to_ancestry = read_ancestry()
+
+    ancestries = ['EUR', 'AFR', 'EAS', 'SAS', 'AMR']
+    results = []
+    for idv in pruned_df.index:
+        target = idv[1:]  # Remove the '$' symbol
+        if target in ancestries:
+            continue
+        anc = "$"+individual_to_ancestry[target]
+        kinship = pruned_df.at[anc, target]
+        self_rank = pruned_df.loc[anc].rank(ascending=False)[target]
+        results.append({'Category': 'Self', 'Kinship': kinship, 'Rank': self_rank, 'Method': method})
+        relatives = []
+        category = ''
+        if target in related:
+            relatives = []
+            for relative in related[target]:
+                if relative[0] not in pruned_df.columns:
+                    continue
+                relative_kinship = pruned_df.at[anc, relative[0]]
+                relative_rank = pruned_df.loc[anc].rank(ascending=False)[relative[0]]
+                category = ''
+                if relative[1] == '1':
+                    category = '1st degree'
+                elif relative[1] == '2':
+                    category = '2nd degree'
+                results.append({'Category': category, 'Kinship': relative_kinship, 'Rank': relative_rank, 'Method': method})
+                relatives.append(relative[0])
+        other_columns = pruned_df.columns[~pruned_df.columns.isin([target] + relatives)]
+        kinships = pruned_df.loc[anc, other_columns]
+        ranks = pruned_df.loc[anc].rank(ascending=False)[other_columns]
+        temp_df = pd.DataFrame({
+            'Category': 'Unrelated',
+            'Kinship': kinships.values,
+            'Rank': ranks.values,
+            'Method': method
+        })
+        results.extend(temp_df.to_dict('records'))
+        if len(relatives) > 0:
+            temp_df = pd.DataFrame({
+                'Category': f'{category} unrelated',
+                'Kinship': kinships.values,
+                'Rank': ranks.values,
+                'Method': method
+            })
+            results.extend(temp_df.to_dict('records'))
+
+    return pd.DataFrame(results)
+
+
 def load_results(id_file, data_file, method):
     if id_file is not None:
         with open(id_file, "r") as f:
@@ -1319,11 +871,14 @@ def load_results(id_file, data_file, method):
     truth_df = indf.loc[~indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
     related = read_related_individuals()
 
+    ancestries = ['EUR', 'AFR', 'EAS', 'SAS', 'AMR']
     first_degree_pairs = set()
     second_degree_pairs = set()
     results = []
     for idv in pruned_df.index:
         target = idv[1:]  # Remove the '$' symbol
+        if target in ancestries:
+            continue
         if target not in pruned_df.columns:
             continue
         kinship = pruned_df.at[idv, target]
@@ -1332,6 +887,7 @@ def load_results(id_file, data_file, method):
         results.append({'Category': 'Self', 'Kinship': truth_df.at[target, target],
                         'Rank': truth_df.loc[target].rank(ascending=False)[target], 'Method': 'True'+method})
         relatives = []
+        category = ''
         if target in related:
             relatives = []
             for relative in related[target]:
@@ -1354,23 +910,31 @@ def load_results(id_file, data_file, method):
         kinships = pruned_df.loc[idv, other_columns]
         ranks = pruned_df.loc[idv].rank(ascending=False)[other_columns]
         temp_df = pd.DataFrame({
-            'Category': 'Everyone else',
+            'Category': 'Unrelated',
             'Kinship': kinships.values,
             'Rank': ranks.values,
             'Method': method
         })
         results.extend(temp_df.to_dict('records'))
-        #
+        if len(relatives) > 0:
+            temp_df = pd.DataFrame({
+                'Category': f'{category} unrelated',
+                'Kinship': kinships.values,
+                'Rank': ranks.values,
+                'Method': method
+            })
+            results.extend(temp_df.to_dict('records'))
+        # Add the true values for unrelated individuals
         other_columns = truth_df.columns[~truth_df.columns.isin([target] + relatives)]
         kinships = truth_df.loc[target, other_columns]
         ranks = truth_df.loc[target].rank(ascending=False)[other_columns]
         temp_df = pd.DataFrame({
-            'Category': 'Everyone else',
+            'Category': 'Unrelated',
             'Kinship': kinships.values,
             'Rank': ranks.values,
             'Method': 'True'+method
         })
-    results.extend(temp_df.to_dict('records'))
+        results.extend(temp_df.to_dict('records'))
 
     print(f"Number of unique 1st degree pairs: {len(first_degree_pairs)}")
     print(first_degree_pairs)
@@ -1378,24 +942,6 @@ def load_results(id_file, data_file, method):
     print(second_degree_pairs)
 
     return pd.DataFrame(results)
-
-
-def plot_rank_cdf(df, category, ax):
-    colors = sns.color_palette("deep")
-    # Filter the dataframe for the given category
-    category_df = df[df['Category'] == category]
-    methods = ['KING', 'GCTA']
-    for i, method in enumerate(category_df['Method'].unique()):
-        if method not in methods:
-            continue
-        method_df = category_df[category_df['Method'] == method]
-        # Sort the ranks for the cumulative distribution
-        sorted_ranks = np.sort(method_df['Rank'])
-        # Calculate the cumulative distribution
-        cdf = np.arange(1, len(sorted_ranks) + 1) / len(sorted_ranks) * 100
-        ax.plot(sorted_ranks, cdf, label=f'{method}', color=colors[i], linewidth=2)
-    ax.set_title(f'{category}')
-    ax.set_xlim(-5, 100)
 
 
 def deanonymization_accuracy():
@@ -1408,38 +954,39 @@ def deanonymization_accuracy():
     }
     mpl.rcParams.update(params)
 
-    king_df = load_results("ibd/nophase/plink.king.id", "ibd/nophase/plink.king", 'KING')
-    rel_df = load_results("ibd/nophase/plink.rel.id", "ibd/nophase/plink.rel", 'GCTA')
-    rel_df['Kinship'] = rel_df['Kinship'] / 2 # Relatedness -> Kinship
-    rel_df['Kinship'] = [0.5 if k > 0.5 else k for k in rel_df['Kinship']]
+    king_df = load_results("ibd/plink.king.id", "ibd/plink.king", 'KING')
+    gcta_df = load_results("ibd/plink.rel.id", "ibd/plink.rel", 'GCTA')
+    gcta_df['Kinship'] = gcta_df['Kinship'] / 2 # Relatedness -> Kinship
+    gcta_df['Kinship'] = [0.5 if k > 0.5 else k for k in gcta_df['Kinship']]
     # refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
-    # df = pd.concat([king_df, rel_df, refined_df])
-    df = pd.concat([king_df, rel_df])
+    # df = pd.concat([king_df, gcta_df, refined_df])
 
+    # Set cutoffs for accuracy levels
+    cutoffs = {
+        'Self': 0.3535,
+        '1st degree': 0.1768,
+        '2nd degree': 0.089,
+    }
     palette = sns.color_palette("pastel")
-    for category in df['Category'].unique():
-        print(f'==== {category} ====')
-        for method in df['Method'].unique():
-            category_df = df[(df['Category'] == category) & (df['Method'] == method)]
-            print(f'{method} kinship: {category_df["Kinship"].median()}, '
-                  f'rank: {category_df["Rank"].median()}')
-    self_cutoff = 0.3535
-    first_degree_cutoff = 0.1768
-    second_degree_cutoff = 0.089
+    plot_kinship('KING', king_df, cutoffs)
+    plot_kinship('GCTA', gcta_df, cutoffs)
+
+    df = pd.concat([king_df, gcta_df])
     fig1, ax1 = plt.subplots(figsize=(7, 3))
     guess_methods = ['KING', 'GCTA']
     ground_truth_methods = ['TrueKING', 'TrueGCTA']
     method_df = df[df['Method'].isin(guess_methods)]
+    method_df = method_df[method_df['Category'].isin(['Self', '1st degree', '2nd degree', 'Unrelated'])]
     sns.boxplot(x='Category', y='Kinship', data=method_df, hue='Method', palette='pastel', ax=ax1,
-                order=['Self', '1st degree', '2nd degree', 'Everyone else'])
+                order=['Self', '1st degree', '2nd degree', 'Unrelated'])
 
     box_width = 0.8 / len(ground_truth_methods)
     for method in ground_truth_methods:
-        for category in ['Self', '1st degree', '2nd degree', 'Everyone else']:
+        for category in ['Self', '1st degree', '2nd degree', 'Unrelated']:
             category_data = df[(df['Method'] == method) & (df['Category'] == category)]
             median_value = category_data['Kinship'].median()
             # Find the position of the category on the X axis
-            category_pos = ['Self', '1st degree', '2nd degree', 'Everyone else'].index(category)
+            category_pos = ['Self', '1st degree', '2nd degree', 'Unrelated'].index(category)
             method_position_offset = ground_truth_methods.index(method) * box_width
             x_position = category_pos - 0.4 + method_position_offset + box_width / 2
             print(f'{method} median: {median_value}, position: {category_pos}')
@@ -1447,15 +994,14 @@ def deanonymization_accuracy():
                      color=palette[3], linestyle='-')
 
     # Adding the legend for the red lines
-    ax1.plot([], [], color=palette[3], linestyle='-', label='Max accuracy')
+    ax1.plot([], [], color=palette[3], linestyle='-', label='True-genotypes baseline')
 
-    # ax1.text(x=ax1.get_xlim()[1] + 0.03, y=0.5, s='Criteria', va='center', ha='left', color='black')
-    # ax1.axhline(y=self_cutoff, color='lightgray', linestyle='--', linewidth=1)
-    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=self_cutoff, s='Self', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
-    ax1.axhline(y=first_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
-    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=first_degree_cutoff, s='1st', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
-    ax1.axhline(y=second_degree_cutoff, color='lightgray', linestyle='--', linewidth=1)
-    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=second_degree_cutoff, s='2nd', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax1.axhline(y=cutoffs['Self'], color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=cutoffs['Self'], s='Self', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax1.axhline(y=cutoffs['1st degree'], color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=cutoffs['1st degree'], s='1st', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax1.axhline(y=cutoffs['2nd degree'], color='lightgray', linestyle='--', linewidth=1)
+    ax1.text(x=ax1.get_xlim()[1] + 0.03, y=cutoffs['2nd degree'], s='2nd', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
     ax1.set_yticks([-0.5, -0.25, 0, 0.25, 0.5])
     ax1.set_yticklabels(['-0.5', '0.25', '0', '0.25', '0.5'])
     ax1.set_ylabel('Kinship')
@@ -1463,50 +1009,14 @@ def deanonymization_accuracy():
     ax1.legend(title="")
     fig1.savefig('kinship_score.pdf', dpi=300, bbox_inches='tight')
 
-    fig2, ax2 = plt.subplots(figsize=(5, 3))
-    categories = ['Self', '1st degree', '2nd degree']
-    sns.boxplot(x='Category', y='Rank', data=method_df[method_df['Category'].isin(categories)], hue='Method', palette='pastel',
-                ax=ax2, order=categories)
-    ax2.invert_yaxis()
-    ax2.set_ylabel('Rank (/2535)')
-    ax2.set_xlabel('')
-    ax2.legend(title="")
-    fig2.savefig('kinship_rank.pdf', dpi=300, bbox_inches='tight')
+    categories = ['Self', '1st degree', '2nd degree', 'Unrelated']
+    plot_precision_recall(df, 'KING', categories, cutoffs)
+    plot_precision_recall(df, 'GCTA', categories, cutoffs)
 
-    fig3, axes3 = plt.subplots(1, 3, figsize=(6, 3), sharey=True)
-    # Plot CDFs for each category
-    categories = ['Self', '1st degree', '2nd degree']
-    for i, category in enumerate(categories):
-        plot_rank_cdf(method_df, category, axes3[i])
-    axes3[0].set_ylabel('Percentage')
-    axes3[1].set_xlabel('Rank (/2535)')
-    handles, labels = axes3[0].get_legend_handles_labels()
-    fig3.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.05), title='', ncol=len(labels), frameon=False)
-    # plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.tight_layout()
-    fig3.savefig('kinship_cdf.pdf', dpi=300, bbox_inches='tight')
-    # plt.show()
-
-    results = pd.DataFrame()
-    pd.set_option('display.max_columns', None)  # Show all columns
-    total_count = df.groupby(['Category', 'Method']).size().reset_index(name='Total_Count')
-    for rank_value in range(1, 9):
-        rank_df = df[df['Rank'] <= rank_value].groupby(['Category', 'Method']).size().reset_index(name=f'Rank_<={rank_value}_Count')
-        merged_df = pd.merge(rank_df, total_count, on=['Category', 'Method'], how='right')
-        merged_df[f'Rank_<={rank_value}_Count'].fillna(0, inplace=True)
-        merged_df[f'Percentage_Rank_<={rank_value}'] = (merged_df[f'Rank_<={rank_value}_Count'] / merged_df['Total_Count']) * 100
-        if results.empty:
-            results = merged_df[['Category', 'Method', f'Percentage_Rank_<={rank_value}']]
-        else:
-            results = pd.merge(results, merged_df[['Category', 'Method', f'Percentage_Rank_<={rank_value}']],
-                               on=['Category', 'Method'], how='outer')
-    print(results)
-
-    fig4, ax4 = plt.subplots(figsize=(4, 3))
     df_king = df[df['Method'] == 'KING']
-    categories = ['Self', '1st degree', '2nd degree', 'Everyone else']
-    colors = {'Self': 'black', '1st degree': 'coral', '2nd degree': 'green', 'Everyone else': 'purple'}
-    patterns = {'Self': '-', '1st degree': 'dotted', '2nd degree': '--', 'Everyone else': '-.'}
+    fig4, ax4 = plt.subplots(figsize=(4, 3))
+    colors = {'Self': 'black', '1st degree': 'coral', '2nd degree': 'green', 'Unrelated': 'purple'}
+    patterns = {'Self': '-', '1st degree': 'dotted', '2nd degree': '--', 'Unrelated': '-.'}
     for category in categories:
         sns.kdeplot(df_king[df_king['Category'] == category]['Kinship'], label=category, common_norm=False,
                     ax=ax4, color=colors[category], linestyle=patterns[category])
@@ -1521,91 +1031,269 @@ def deanonymization_accuracy():
     # plt.show()
 
 
+def plot_kinship(method, df, cutoffs):
+    categories = ['Self', '1st degree', '2nd degree', 'Unrelated']
+    fig, ax = plt.subplots(figsize=(6, 3))
+    sns.boxplot(x='Category', y='Kinship', data=df[(df['Method']==method) & (df['Category'].isin(categories))], ax=ax,
+                legend=False, palette='pastel', order=categories, hue='Category')
+
+    for category in categories:
+        category_data = df[(df['Method'] == 'True'+method) & (df['Category'] == category)]
+        if len(category_data) > 0:
+            median_value = category_data['Kinship'].median()
+            category_pos = ['Self', '1st degree', '2nd degree', 'Unrelated'].index(category)
+            x_position = category_pos
+            ax.plot([x_position - 0.4, x_position + 0.4], [median_value, median_value], color='red',
+                    linestyle='-')
+    ax.plot([], [], color='red', linestyle='-', label='True-genotypes baseline')
+
+    ax.axhline(y=cutoffs['Self'], color='lightgray', linestyle='--', linewidth=1)
+    ax.text(x=ax.get_xlim()[1] + 0.03, y=cutoffs['Self'], s='Self', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax.axhline(y=cutoffs['1st degree'], color='lightgray', linestyle='--', linewidth=1)
+    ax.text(x=ax.get_xlim()[1] + 0.03, y=cutoffs['1st degree'], s='1st', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax.axhline(y=cutoffs['2nd degree'], color='lightgray', linestyle='--', linewidth=1)
+    ax.text(x=ax.get_xlim()[1] + 0.03, y=cutoffs['2nd degree'], s='2nd', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
+    ax.set_yticks([-0.5, -0.25, 0, 0.25, 0.5])
+    ax.set_yticklabels(['-0.5', '-0.25', '0', '0.25', '0.5'])
+    ax.set_ylabel('Kinship')
+    ax.set_xlabel('')
+    ax.legend(title="", loc='lower left')
+    fig.savefig(f'kinship_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
+
+
+def plot_precision_recall(df_orig, method, categories, cutoffs):
+    df = df_orig[df_orig['Method'] == method]
+    precision, recall = calculate_precision_and_recall(df, categories, cutoffs)
+    if method == 'KING':
+        baselines = load_ancestry_baselines("ibd/plink.king.id", "ibd/plink.king", method)
+    elif method == 'GCTA':
+        baselines = load_ancestry_baselines("ibd/plink.rel.id", "ibd/plink.rel", method)
+    else:
+        return
+    baseline_precision, baseline_recall = calculate_precision_and_recall(baselines, categories, cutoffs)
+
+    print(f"=== {method}: Precision and recall ===")
+    print(precision)
+    print(recall)
+    print(f"=== {method}: Baseline precision and recall ===")
+    print(baseline_precision)
+    print(baseline_recall)
+
+    fig2, ax2 = plt.subplots(figsize=(7, 4))
+    palette = sns.color_palette("pastel")
+    bar_width = 0.3
+    index = np.arange(len(categories))
+
+    precision_values = [precision[cat] for cat in categories]
+    recall_values = [recall[cat] for cat in categories]
+    ax2.bar(index, precision_values, bar_width, label='Precision', color=palette[0])
+    ax2.bar(index + bar_width, recall_values, bar_width, label='Recall', color=palette[1])
+    for i, category in enumerate(categories):
+        plw, rlw = 5, 5
+        if baseline_precision[category] > 0.01:
+            plw = 3
+        if baseline_recall[category] > 0.01:
+            rlw = 3
+        ax2.hlines(y=baseline_precision[category], xmin=index[i] - bar_width/2, xmax=index[i] + bar_width/2, color='red',
+                   linestyle='-', linewidth=plw)
+        ax2.hlines(y=baseline_recall[category], xmin=index[i] + bar_width - bar_width/2,
+                   xmax=index[i] + bar_width + bar_width/2, color='red', linestyle='-', linewidth=rlw)
+    ax2.plot([], [], color='red', linestyle='-', label='Predicting major genotypes')
+
+    ax2.set_xlabel('')
+    ax2.set_ylabel('')
+    ax2.set_xticks(index + bar_width / 2)
+    ax2.set_xticklabels(categories)
+    ax2.legend(title="", loc='lower right')
+    plt.tight_layout()
+    fig2.savefig(f'kinship_precision_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
+
+
+def calculate_precision_and_recall(df, categories, cutoffs):
+    precision = {}
+    recall = {}
+    for category in categories:
+        if category == 'Unrelated':
+            true_positive = len(df[(df['Category'] == category) & (df['Kinship'] < cutoffs['2nd degree'])])
+            false_positive = len(df[(df['Category'].isin(['Self', '1st degree', '2nd degree'])) & (df['Kinship'] < cutoffs['2nd degree'])])
+            false_negative = len(df[(df['Category'] == category) & (df['Kinship'] >= cutoffs['2nd degree'])])
+        else:
+            true_positive = len(df[(df['Category'] == category) & (df['Kinship'] >= cutoffs[category])])
+            false_negative = len(df[(df['Category'] == category) & (df['Kinship'] < cutoffs[category])])
+            if category == 'Self':
+                false_positive = len(df[(df['Category'].isin(['1st degree', '2nd degree', 'Unrelated'])) & (df['Kinship'] >= cutoffs[category])])
+            if category == '1st degree':
+                false_positive = len(df[(df['Category'] == '1st degree unrelated') & (df['Kinship'] >= cutoffs[category])])
+            if category == '2nd degree':
+                false_positive = len(df[(df['Category'] == '2nd degree unrelated') & (df['Kinship'] >= cutoffs[category])])
+        precision[category] = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
+        recall[category] = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
+    return precision, recall
+
+
+def read_ancestry():
+    with open('data/superpopulations.json', 'r') as file:
+        data = json.load(file)
+    for idv, anc in data.items():
+        if "," in anc:
+            data[idv] = anc.split(',')[0]
+    return data
+
+# def prs_prediction():
+#     filepath = "results/predict/prediction2.json"
+#     data = []
+#     with open(filepath, 'r') as f:
+#         content = json.load(f)
+#     for prs_id, results in content.items():
+#         for i, prd in enumerate(results['Predicted']):
+#             data.append({'PRS': prs_id, 'Known': float(results["Known"]), 'Total': float(results["Total"]),
+#                          'Max': float(results["Max"]), 'Min': float(results["Min"]),
+#                          'Mean': float(results["Means"][results["Ancestries"][i]]),
+#                          'Std': float(results['Stds'][results["Ancestries"][i]]),
+#                          'Ancestry': results["Ancestries"][i],
+#                          'Predicted': float(results['Predicted'][i]), 'Real': float(results['Real'][i])})
+#
+#     df = pd.DataFrame(data)
+#     print(df['PRS'].nunique())
+#     pd.set_option('display.max_rows', None)
+#     pd.set_option('display.max_columns', None)
+#     bin_size = 0.05
+#     df['Ratio'] = (df['Known'] / df['Total']).round(3)
+#     df['Binned_Ratio'] = (bin_size * np.round(df['Ratio'] / bin_size)).round(3)
+#     df['Threshold'] = df['Mean'] + df['Std']
+#     df['Above_Threshold'] = df['Real'] > df['Threshold']
+#     df['Predicted_Above_Threshold'] = df['Predicted'] > df['Threshold']
+#
+#     df['Real_Percentile'] = norm.cdf(df['Real'], loc=df['Mean'], scale=df['Std'])
+#     df['Predicted_Percentile'] = norm.cdf(df['Predicted'], loc=df['Mean'], scale=df['Std'])
+#     df['Percentile_Diff'] = abs(df['Real_Percentile'] - df['Predicted_Percentile']) * 100
+#
+#     def calculate_metrics(group):
+#         tp = np.sum((group['Above_Threshold'] == True) & (group['Predicted_Above_Threshold'] == True))
+#         fp = np.sum((group['Above_Threshold'] == False) & (group['Predicted_Above_Threshold'] == True))
+#         fn = np.sum((group['Above_Threshold'] == True) & (group['Predicted_Above_Threshold'] == False))
+#
+#         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+#         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+#         std_dev = group['Predicted'].std()
+#         percentile_diff = group['Percentile_Diff'].median()
+#         percentile_diff_std = group['Percentile_Diff'].std()
+#         high_risk_percentile_diff = group[group['Real'] > group['Threshold']]['Percentile_Diff'].median()
+#         high_risk_percentile_diff_std = group[group['Real'] > group['Threshold']]['Percentile_Diff'].std()
+#
+#         return pd.Series({'Precision': precision, 'Recall': recall, 'Std_Dev': std_dev,
+#                           'Mean_Percentile_Diff': percentile_diff, 'High_Risk_Percentile_Diff': high_risk_percentile_diff,
+#                           'Percentile_std': percentile_diff_std, 'High_Risk_Percentile_Std': high_risk_percentile_diff_std})
+#
+#     grouped = df.groupby('Binned_Ratio').apply(calculate_metrics).reset_index()
+#
+#     plt.figure(figsize=(4, 3))
+#     sns.lineplot(data=grouped, x='Binned_Ratio', y='Precision', label='Precision', color='coral')
+#     sns.lineplot(data=grouped, x='Binned_Ratio', y='Recall', label='Recall', color='teal')
+#     plt.fill_between(grouped['Binned_Ratio'], grouped['Precision'] - grouped['Std_Dev'],
+#                      grouped['Precision'] + grouped['Std_Dev'], color='teal', alpha=0.1)
+#     plt.fill_between(grouped['Binned_Ratio'], grouped['Recall'] - grouped['Std_Dev'],
+#                      grouped['Recall'] + grouped['Std_Dev'], color='coral', alpha=0.1)
+#     plt.xlabel('Guessed SNPs ratio')
+#     plt.ylabel('')
+#     plt.gca().invert_xaxis()
+#     plt.ylim(0, 1)
+#     plt.legend(loc='lower left')
+#     # plt.savefig('prediction_highrisk_by_population.pdf', dpi=300, bbox_inches='tight')
+#     # plt.show()
+#
+#     plt.figure(figsize=(4, 3))
+#     sns.lineplot(data=grouped, x='Binned_Ratio', y='Mean_Percentile_Diff', label='All individuals', linestyle='-',
+#                  color='teal')
+#     # plt.fill_between(grouped['Binned_Ratio'], grouped['Mean_Percentile_Diff'] - grouped['Percentile_std'],
+#     #                  grouped['Mean_Percentile_Diff'] + grouped['Percentile_std'], color='teal', alpha=0.1)
+#     sns.lineplot(data=grouped, x='Binned_Ratio', y='High_Risk_Percentile_Diff', label=r'High risk ($>\mu$+$\sigma$)',
+#                  linestyle='--', color='coral')
+#     # plt.fill_between(grouped['Binned_Ratio'], grouped['High_Risk_Percentile_Diff'] - grouped['High_Risk_Percentile_Std'],
+#     #                  grouped['High_Risk_Percentile_Diff'] + grouped['High_Risk_Percentile_Std'], color='coral', alpha=0.1)
+#     plt.xlabel('Guessed SNPs ratio')
+#     plt.ylabel('Median percentile error')
+#     plt.legend(loc='upper left')
+#     plt.ylim(0, 50)
+#     plt.xticks(np.arange(0.1, 0.9, 0.1))
+#     plt.gca().invert_xaxis()
+#     # plt.show()
+#     plt.savefig('prediction_median_percentile.pdf', dpi=300, bbox_inches='tight')
+
+
 def prs_prediction():
-    filepath = "results/predict/prediction.json"
+    filepath = "results/predict/prediction2.json"
     data = []
     with open(filepath, 'r') as f:
         content = json.load(f)
     for prs_id, results in content.items():
         for i, prd in enumerate(results['Predicted']):
-            data.append({'PRS': prs_id, 'Known': float(results["Known"]), 'Total': float(results["Total"]),
-                         'Max': float(results["Max"]), 'Min': float(results["Min"]),
+            data.append({'PRS': prs_id, 'Known': int(results["Known"]), 'Total': int(results["Total"]),
+                         'Known/Total': f'{results["Known"]}/{results["Total"]}',
+                         'Trait': results["Trait"], 'Max': float(results["Max"]), 'Min': float(results["Min"]),
                          'Mean': float(results["Means"][results["Ancestries"][i]]),
                          'Std': float(results['Stds'][results["Ancestries"][i]]),
-                         'Ancestry': results["Ancestries"][i],
+                         'Ancestry': results["Ancestries"][i], 'Correct': float(results['CorrectSnps'][i]),
                          'Predicted': float(results['Predicted'][i]), 'Real': float(results['Real'][i])})
 
     df = pd.DataFrame(data)
-    print(df['PRS'].nunique())
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    bin_size = 0.05
-    df['Ratio'] = (df['Known'] / df['Total']).round(3)
-    df['Binned_Ratio'] = (bin_size * np.round(df['Ratio'] / bin_size)).round(3)
-    df['Threshold'] = df['Mean'] + df['Std']
-    df['Above_Threshold'] = df['Real'] > df['Threshold']
-    df['Predicted_Above_Threshold'] = df['Predicted'] > df['Threshold']
-
+    # pd.set_option('display.max_rows', None)
+    # pd.set_option('display.max_columns', None)
+    # results = []
+    # for prs_id, group in df.groupby('PRS'):
+    #     # Use the Mean and Std from the data
+    #     group['HighRiskThreshold'] = group['Mean'] + group['Std']
+    #
+    #     high_risk_indices = group[group['Real'] >= group['HighRiskThreshold']].index
+    #
+    #     true_positives = np.sum(group.loc[high_risk_indices, 'Predicted'] >= group.loc[high_risk_indices, 'HighRiskThreshold'])
+    #     false_positives = np.sum(group['Predicted'] >= group['HighRiskThreshold']) - true_positives
+    #     false_negatives = len(high_risk_indices) - true_positives
+    #
+    #     precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+    #     recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+    #
+    #     results.append({
+    #         'PRS': prs_id,
+    #         'Trait': group['Trait'].iloc[0],
+    #         'Known/Total': f"{group['Known'].iloc[0]}/{group['Total'].iloc[0]}",
+    #         'Precision': precision,
+    #         'Recall': recall
+    #     })
+    #
+    # df = pd.DataFrame(results)
+    df['Ratio'] = df['Known/Total'].apply(lambda x: float(x.split('/')[0])*100 / float(x.split('/')[1]))
+    # Calculate percentiles and percentile differences
     df['Real_Percentile'] = norm.cdf(df['Real'], loc=df['Mean'], scale=df['Std'])
     df['Predicted_Percentile'] = norm.cdf(df['Predicted'], loc=df['Mean'], scale=df['Std'])
     df['Percentile_Diff'] = abs(df['Real_Percentile'] - df['Predicted_Percentile']) * 100
+    # results_df_melted = df.melt(id_vars=['PRS', 'Trait', 'Ratio'], value_vars=['Precision', 'Recall'], var_name='Metric', value_name='Value')
 
-    def calculate_metrics(group):
-        tp = np.sum((group['Above_Threshold'] == True) & (group['Predicted_Above_Threshold'] == True))
-        fp = np.sum((group['Above_Threshold'] == False) & (group['Predicted_Above_Threshold'] == True))
-        fn = np.sum((group['Above_Threshold'] == True) & (group['Predicted_Above_Threshold'] == False))
+    df['HighRisk'] = df['Real'] > (df['Mean'] + df['Std'])
+    df['RiskCategory'] = np.where(df['HighRisk'], 'High Risk', 'All')
 
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        std_dev = group['Predicted'].std()
-        percentile_diff = group['Percentile_Diff'].median()
-        percentile_diff_std = group['Percentile_Diff'].std()
-        high_risk_percentile_diff = group[group['Real'] > group['Threshold']]['Percentile_Diff'].median()
-        high_risk_percentile_diff_std = group[group['Real'] > group['Threshold']]['Percentile_Diff'].std()
-
-        return pd.Series({'Precision': precision, 'Recall': recall, 'Std_Dev': std_dev,
-                          'Mean_Percentile_Diff': percentile_diff, 'High_Risk_Percentile_Diff': high_risk_percentile_diff,
-                          'Percentile_std': percentile_diff_std, 'High_Risk_Percentile_Std': high_risk_percentile_diff_std})
-
-    grouped = df.groupby('Binned_Ratio').apply(calculate_metrics).reset_index()
-
-    plt.figure(figsize=(4, 3))
-    sns.lineplot(data=grouped, x='Binned_Ratio', y='Precision', label='Precision', color='coral')
-    sns.lineplot(data=grouped, x='Binned_Ratio', y='Recall', label='Recall', color='teal')
-    plt.fill_between(grouped['Binned_Ratio'], grouped['Precision'] - grouped['Std_Dev'],
-                     grouped['Precision'] + grouped['Std_Dev'], color='teal', alpha=0.1)
-    plt.fill_between(grouped['Binned_Ratio'], grouped['Recall'] - grouped['Std_Dev'],
-                     grouped['Recall'] + grouped['Std_Dev'], color='coral', alpha=0.1)
-    plt.xlabel('Guessed SNPs ratio')
-    plt.ylabel('')
-    plt.gca().invert_xaxis()
-    plt.ylim(0, 1)
-    plt.legend(loc='lower left')
-    # plt.savefig('prediction_highrisk_by_population.pdf', dpi=300, bbox_inches='tight')
+    plt.figure(figsize=(9, 5))
+    # sns.boxplot(x='Trait', y='Value', hue='Metric', data=results_df_melted)
+    sns.boxplot(x='Trait', y='Correct', data=df)
+    # sns.boxplot(x='Trait', y='Percentile_Diff', data=df, hue='RiskCategory')
+    xtick_labels = df.groupby('Trait').apply(lambda x: '\n'.join([f"{prs} ({kt})" for prs, kt in
+                                                                  zip(x['PRS'].unique(), x['Known/Total'].unique())])).reset_index()
+    xtick_labels = xtick_labels.set_index('Trait')[0].to_dict()
+    plt.xticks(ticks=plt.xticks()[0], labels=[f"{trait}\n{xtick_labels[trait]}" for trait in xtick_labels])
+    plt.legend(title="")
+    # plt.ylabel('Percentile difference')
+    plt.ylabel('Ratio of correctly predicted SNPs')
+    plt.xlabel('')
+    # plt.ylim(0, 1)
+    plt.tight_layout()
+    # plt.savefig('prediction_percentile_box.pdf', dpi=300, bbox_inches='tight')
+    plt.savefig('prediction_snps.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
-
-    plt.figure(figsize=(4, 3))
-    sns.lineplot(data=grouped, x='Binned_Ratio', y='Mean_Percentile_Diff', label='All individuals', linestyle='-',
-                 color='teal')
-    # plt.fill_between(grouped['Binned_Ratio'], grouped['Mean_Percentile_Diff'] - grouped['Percentile_std'],
-    #                  grouped['Mean_Percentile_Diff'] + grouped['Percentile_std'], color='teal', alpha=0.1)
-    sns.lineplot(data=grouped, x='Binned_Ratio', y='High_Risk_Percentile_Diff', label=r'High risk ($>\mu$+$\sigma$)',
-                 linestyle='--', color='coral')
-    # plt.fill_between(grouped['Binned_Ratio'], grouped['High_Risk_Percentile_Diff'] - grouped['High_Risk_Percentile_Std'],
-    #                  grouped['High_Risk_Percentile_Diff'] + grouped['High_Risk_Percentile_Std'], color='coral', alpha=0.1)
-    plt.xlabel('Guessed SNPs ratio')
-    plt.ylabel('Median percentile error')
-    plt.legend(loc='upper left')
-    plt.ylim(0, 50)
-    plt.xticks(np.arange(0.1, 0.9, 0.1))
-    plt.gca().invert_xaxis()
-    # plt.show()
-    plt.savefig('prediction_median_percentile.pdf', dpi=300, bbox_inches='tight')
 
 
 LABEL_SIZE = 15
 TICK_SIZE = 15
-LEGEND_SIZE = 13
+LEGEND_SIZE = 15
 def prepare_for_latex():
     params = {
         'axes.labelsize': LABEL_SIZE,
@@ -1613,8 +1301,10 @@ def prepare_for_latex():
         'ytick.labelsize': TICK_SIZE,
         'legend.fontsize': LEGEND_SIZE,
         'text.usetex': True,
-        'font.family': 'serif',
-        'font.serif': 'Computer Modern',
+        # 'font.family': 'serif',
+        # 'font.serif': 'Computer Modern',
+        'font.family': 'sans-serif',
+        'font.serif': 'Helvetica',
         'savefig.bbox': 'tight',
         'savefig.format': 'pdf',
     }
@@ -1623,34 +1313,10 @@ def prepare_for_latex():
 
 if __name__ == "__main__":
     prepare_for_latex()
-    # pairwise("data/prior/PGS000040.pairwise")
-    # score_distribution("PGS000040.scores")
-    # solution_ranking("PGS000639")
-    # solution_ranking("PGS002302")
-    # solution_ranking("PGS000073")
-    # solution_ranking("PGS000037")
-    # true_position_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
-    # accuracy_cdf(["PGS000037", "PGS000639", "PGS000073", "PGS002302"])
-    # score_deviation()
-    # loci_coverage()
-    # king_test()
-    # kinship_experiment()
-    # random_hist()
-    # guessed_mia()
-    # full_imputed()
-    # linking_accuracy()
-    # imputation_accuracy()
-    # percentile_prediction()
-    # random_bars()
-    # score_uniqueness_old()
-    score_uniqueness()
-    # sequential()
+    # score_uniqueness()
     # sequential_idv_accuracy()
     # sequential_loci_accuracy()
     # af_hist()
     # plot_normal_distribution_with_fill()
-    # king_accuracy()
-    # ibd_accuracy()
-    # plink_accuracy()
-    # deanonymization_accuracy()
+    deanonymization_accuracy()
     # prs_prediction()
