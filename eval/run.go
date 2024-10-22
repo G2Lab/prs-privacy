@@ -57,16 +57,12 @@ func main() {
 		sequenceSolving()
 	case "sequenceaf":
 		sequenceSolvingAF()
-	case "impute":
-		imputeWorkflow()
 	case "accuracy":
 		guessAccuracy(perAncestryAf)
 	case "gaccuracy":
 		guessAccuracy(globalAf)
 	case "genfreq":
 		calculateGenotypeFrequenciesForGuessed()
-	case "king":
-		linkingWithKing()
 	case "ibd":
 		prepareIBD()
 	case "uniqueness_gg":
