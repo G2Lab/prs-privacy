@@ -177,7 +177,7 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 					if _, ok = c[indv]; !ok {
 						c[indv] = NewIndividual()
 					}
-					c[indv].Genotype = append(c[indv].Genotype, ReferenceSNP, ReferenceSNP)
+					c[indv].Genotype = append(c[indv].Genotype, ReferenceAllele, ReferenceAllele)
 				}
 			}
 		}

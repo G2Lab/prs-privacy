@@ -2,14 +2,15 @@ package pgs
 
 import (
 	"fmt"
-	"github.com/nikirill/prs/params"
 	"path"
 	"testing"
+
+	"github.com/nikirill/prs/params"
 )
 
 func TestPGSLoad(t *testing.T) {
 	p := NewPGS()
-	err := p.LoadCatalogFile(path.Join(params.LocalDataFolder, "PGS000073_hmPOS_GRCh38.txt"))
+	err := p.LoadCatalogFile(path.Join(params.LocalDataFolder, "PGS000073_hmPOS_GRCh37.txt"))
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -27,7 +28,6 @@ func TestPGSLoad(t *testing.T) {
 	fmt.Println("Variants:")
 	for _, variant := range p.Variants {
 		fmt.Println("ID:", variant.GetLocus())
-		//fmt.Println("Weight:", variant.GetWeight(&apd.BaseContext))
 		fmt.Println("Hm Chr:", variant.GetHmChr())
 		fmt.Println("Hm Pos:", variant.GetHmPos())
 		fmt.Println("----")

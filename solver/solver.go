@@ -1,7 +1,6 @@
 package solver
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -9,18 +8,11 @@ import (
 
 	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 )
 
 const (
-	ReferenceSNP   = 0
-	AlternativeSNP = 1
-)
-
-const (
-	UseLikelihood = iota
-	UseSpectrum
-	UseLikelihoodAndSpectrum
+	ReferenceAllele   = 0
+	AlternativeAllele = 1
 )
 
 func ScoreToTarget(score *apd.Decimal, p *pgs.PGS) *apd.Decimal {
@@ -95,59 +87,6 @@ func CalculateFullSequenceLikelihood(sequence []uint8, af map[int][]float32, efa
 
 func AfToLikelihood(af float32) float32 {
 	return float32(-math.Log2(float64(af)))
-}
-
-// SampleFromPopulation samples an individual according to the MAF
-func SampleFromPopulation(af map[int][]float32) ([]uint8, error) {
-	sample := make([]uint8, len(af)*pgs.Ploidy)
-	// Initial sample based on individual priors
-	for i := range af {
-		for j := 0; j < pgs.Ploidy; j++ {
-			ind := tools.SampleFromDistribution(af[i])
-			sample[i*pgs.Ploidy+j] = pgs.GENOTYPES[ind]
-			if sample[i*pgs.Ploidy+j] == 255 {
-				return nil, errors.New("error in population sampling")
-			}
-		}
-	}
-	return sample, nil
-}
-
-func SampleSegmentFromPopulation(start, end int, af [][]float32) ([]uint8, error) {
-	sample := make([]uint8, (end-start)*pgs.Ploidy)
-	// Initial sample based on individual priors
-	for i := start; i < end; i++ {
-		for j := 0; j < pgs.Ploidy; j++ {
-			ind := tools.SampleFromDistribution(af[i])
-			sample[(i-start)*pgs.Ploidy+j] = pgs.GENOTYPES[ind]
-			if sample[(i-start)*pgs.Ploidy+j] == 255 {
-				return nil, errors.New("error in population sampling")
-			}
-		}
-	}
-	return sample, nil
-}
-
-func LocusLikelihood(sequence []uint8, i int, af [][]float32) float32 {
-	var likelihood float32 = 0.0
-	for j := 0; j < pgs.Ploidy; j++ {
-		likelihood += AfToLikelihood(af[i][sequence[i*pgs.Ploidy+j]])
-	}
-	return likelihood
-}
-
-func AllReferenceAlleleSample(af map[int][]float32) []uint8 {
-	sample := make([]uint8, 2*len(af))
-	for i := 0; i < len(af); i++ {
-		if af[i][0] > 0.5 {
-			sample[2*i] = 0
-			sample[2*i+1] = 0
-		} else {
-			sample[2*i] = 1
-			sample[2*i+1] = 1
-		}
-	}
-	return sample
 }
 
 func locusAlreadyExists(v uint8, array []uint8) bool {
@@ -233,48 +172,16 @@ func ArrayToString(array []uint8) string {
 	return strings.Join(str, "")
 }
 
-func CalculateSequenceEASpectrum(sequence []uint8, af map[int][]float32, bins []float32, effectAlleles []uint8) []float32 {
-	spectrum := make([]float32, len(bins))
-	var binIdx int
-	for i := 0; i < len(sequence); i += 2 {
-		binIdx = tools.ValueToBinIdx(af[i/pgs.Ploidy][effectAlleles[i/pgs.Ploidy]], bins)
-		for j := 0; j < pgs.Ploidy; j++ {
-			if sequence[i+j] == effectAlleles[i/pgs.Ploidy] {
-				spectrum[binIdx]++
-			}
-		}
-	}
-	return spectrum
-}
-
-func CalculateLociEASpectrum(mutatedLoci []uint8, af map[int][]float32, bins []float32, effectAlleles []uint8) []float32 {
-	spectrum := make([]float32, len(bins))
-	var binIdx int
-	for _, loc := range mutatedLoci {
-		binIdx = tools.ValueToBinIdx(af[int(loc)/pgs.Ploidy][effectAlleles[int(loc)/pgs.Ploidy]], bins)
-		spectrum[binIdx] += float32(loc%pgs.Ploidy) + 1
-	}
-	return spectrum
-}
-
-func SortByLikelihoodAndFrequency(solutions map[string][]uint8, stats *pgs.Statistics, effectAlleles []uint8, sorting uint8) [][]uint8 {
+func SortByLikelihood(solutions map[string][]uint8, stats *pgs.Statistics, effectAlleles []uint8) [][]uint8 {
 	flattened := make([][]uint8, len(solutions))
-	fitness := make([]float32, len(solutions))
+	likelihood := make([]float32, len(solutions))
 	i := 0
 	for _, solution := range solutions {
 		flattened[i] = solution
-		switch sorting {
-		case UseLikelihood:
-			fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles)
-			//case UseSpectrum:
-			//	fitness[i] = CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
-			//case UseLikelihoodAndSpectrum:
-			//	fitness[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles) +
-			//		CalculateSolutionSpectrumDistance(solution, stats, effectAlleles)
-		}
+		likelihood[i] = CalculateFullSequenceLikelihood(solution, stats.AF, effectAlleles)
 		i++
 	}
-	sortBy(flattened, fitness, false)
+	sortBy(flattened, likelihood, false)
 	return flattened
 }
 
@@ -295,41 +202,4 @@ func sortBy(items [][]uint8, properties []float32, reverse bool) {
 			}
 		}
 	}
-}
-
-func ChiSquaredValue(observed, expected []float32) float32 {
-	var chi float32
-	for i := 0; i < len(observed); i++ {
-		if expected[i] == 0 {
-			continue
-		}
-		chi += float32(math.Pow(float64(observed[i])-float64(expected[i]), 2)) / expected[i]
-	}
-	return chi
-}
-
-//func CalculateSolutionSpectrumDistance(solution []uint8, stats *pgs.Statistics, effectAlleles []uint8) float32 {
-//	return ChiSquaredValue(CalculateSequenceEASpectrum(solution, stats.AF, stats.FreqBinBounds, effectAlleles), stats.FreqSpectrum)
-//}
-
-func CalculateTwoSpectrumDistance(spectrum1, spectrum2 []float32) float32 {
-	return ChiSquaredValue(spectrum1, spectrum2)
-}
-
-func IncrementObservedInSpectrum(increment, prevBinCount, expectedBinCount float32) float32 {
-	return (2*increment*(prevBinCount-expectedBinCount) + float32(math.Pow(float64(increment), 2))) / expectedBinCount
-}
-
-func CombineLikelihoodAndChiSquared(likelihood, chiSquared float32) float32 {
-	return likelihood + chiSquared
-}
-
-func findAbsMin(values []float64) float64 {
-	minV := math.Abs(values[0])
-	for _, v := range values {
-		if math.Abs(v) < minV {
-			minV = math.Abs(v)
-		}
-	}
-	return minV
 }

@@ -132,7 +132,7 @@ func (dp *DP) SolveDeterministic() map[string][]uint8 {
 	}
 
 	solutionHeap := newGenHeap()
-	dp.deterministicMitM(numSegments, indices, tables, betas, targets, solutionHeap, sorting)
+	dp.deterministicMitM(numSegments, indices, tables, betas, targets, solutionHeap)
 
 	solutions := make(map[string][]uint8)
 	for _, sol := range *solutionHeap {
@@ -499,7 +499,7 @@ func lociToScore(loci []uint8, weights []*apd.BigInt) *apd.BigInt {
 func lociToGenotype(loci []uint8, total int, efal []uint8, knownAlleles map[int]uint8) []uint8 {
 	sol := make([]uint8, total)
 	for i := range efal {
-		if efal[i] == ReferenceSNP {
+		if efal[i] == ReferenceAllele {
 			sol[pgs.Ploidy*i] = 1
 			sol[pgs.Ploidy*i+1] = 1
 		}
@@ -520,12 +520,12 @@ func lociToGenotype(loci []uint8, total int, efal []uint8, knownAlleles map[int]
 	//
 	for _, locus := range loci {
 		switch efal[locus/pgs.Ploidy] {
-		case AlternativeSNP:
+		case AlternativeAllele:
 			sol[locus] = 1
 			if locus%pgs.Ploidy == 1 {
 				sol[locus-1] = 1
 			}
-		case ReferenceSNP:
+		case ReferenceAllele:
 			sol[locus] = 0
 			if locus%pgs.Ploidy == 1 {
 				sol[locus-1] = 0
