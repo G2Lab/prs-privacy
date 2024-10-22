@@ -64,7 +64,7 @@ func main() {
 	case "gaccuracy":
 		guessAccuracy(globalAf)
 	case "genfreq":
-		calculateGenotypeFrequenciesOnlyGuessed()
+		calculateGenotypeFrequenciesForGuessed()
 	case "king":
 		linkingWithKing()
 	case "ibd":
