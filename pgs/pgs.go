@@ -101,15 +101,12 @@ func (v *Variant) GetEffectAlleleFrequency() float64 {
 	if eaf, ok := v.fields["allelefrequency_effect"].(float64); ok {
 		return eaf
 	}
-	//log.Fatalf("PopulationEAF not found for variant %s", v.GetLocus())
 	return 0.0
 }
 
 type Statistics struct {
 	AF map[int][]float32 // Effect Allele Frequency
 	GF map[int][]float32 // Genotype Frequency
-	//FreqSpectrum  []float32         // Allele Frequency Spectrum
-	//FreqBinBounds []float32         // Bounds of the frequency spectrum bins
 }
 
 type PGS struct {
@@ -132,8 +129,6 @@ type PGS struct {
 	MinPrecision    uint32
 	StudyEAF        []float64 // effect allele frequency from the study / catalogue file
 	PopulationStats map[string]*Statistics
-	//NumSpecBins     int
-	//Maf             [][]float64 // [major, minor] allele frequency from the population
 }
 
 func NewPGS() *PGS {
@@ -266,8 +261,6 @@ scannerLoop:
 		p.PopulationStats[population] = &Statistics{
 			AF: make(map[int][]float32, len(p.Loci)),
 			GF: make(map[int][]float32, len(p.Loci)),
-			//FreqSpectrum:  make([]float32, p.NumSpecBins),
-			//FreqBinBounds: make([]float32, p.NumSpecBins),
 		}
 	}
 
@@ -387,7 +380,6 @@ func (p *PGS) LoadDatasetStats(dataset string) error {
 			log.Printf("Unknown dataset: %s\n", dataset)
 			return errors.New("unknown dataset")
 		}
-		//p.computeFrequencySpectrum()
 		p.SaveStats(statFilename)
 	} else {
 		statsFile, err := os.Open(statFilename)
@@ -426,7 +418,6 @@ func (p *PGS) extractPopulationAlleles(dataset string) error {
 				continue
 			}
 			missing = false
-			//fmt.Printf("Locus %s: %s\n", locus, fields[1])
 			ref = strings.Split(fields[1], "\t")[0]
 			alt = strings.Split(fields[1], "\t")[1]
 			if alleleSet {
@@ -502,7 +493,6 @@ func (p *PGS) extractEAF() {
 			continue
 		}
 		lines := strings.Split(string(output), "\n")
-		//fmt.Printf("Locus %s: %d lines\n", locus, len(lines))
 		for _, line := range lines[:len(lines)-1] {
 			fields := strings.Split(line, "-")
 			if fields[0] != locus {
@@ -510,7 +500,6 @@ func (p *PGS) extractEAF() {
 				continue
 			}
 			missing = false
-			//fmt.Printf("AF Locus %s: %s\n", locus, fields[1])
 			afPerPopulation := strings.Split(fields[1], "\t")
 			for i, population := range populationsAndAll {
 				altAfs := strings.Split(afPerPopulation[i], ",")
@@ -547,7 +536,6 @@ func (p *PGS) extractEAF() {
 				}
 			}
 		}
-		//log.Printf("No entry for locus %s, hence all the samples have reference", locus)
 		for i := range populationsAndAll {
 			if missing { // either read a wrong locus or len(lines[:len(lines)-1]) == 0
 				p.PopulationStats[populationsAndAll[i]].AF[k] = []float32{1 - MissingEAF, MissingEAF}
@@ -699,110 +687,6 @@ func (p *PGS) CalculateEAFAndGF(dataset string) {
 			float32(genotypeCount[1]) / float32(totalGenotypes), float32(genotypeCount[2]) / float32(totalGenotypes)}
 	}
 }
-
-//func (p *PGS) computeFrequencySpectrum() {
-//	p.assignFreqBins()
-//	p.querySampleFrequencies()
-//}
-
-//func (p *PGS) assignFreqBins() {
-//	for _, ppl := range ANCESTRIES {
-//		eaf := make([]float64, len(p.PopulationStats[ppl].AF))
-//		for i := range p.PopulationStats[ppl].AF {
-//			eaf[i] = float64(p.PopulationStats[ppl].AF[i][p.EffectAlleles[i]])
-//		}
-//		sort.Float64s(eaf)
-//		elementsPerBin := len(eaf) / p.NumSpecBins
-//		var endIdx int
-//		for i := 0; i < p.NumSpecBins; i++ {
-//			endIdx = (i + 1) * elementsPerBin
-//			// If we're at the last bin, adjust the endIndex to include all remaining elements
-//			if i == p.NumSpecBins-1 {
-//				endIdx = len(eaf)
-//			}
-//			p.PopulationStats[ppl].FreqBinBounds[i] = float32(eaf[endIdx-1])
-//		}
-//	}
-//}
-
-//func (p *PGS) querySampleFrequencies() {
-//	ancestry := tools.LoadAncestry()
-//	ancestrySizes := make(map[string]int, len(ancestry))
-//	var popNames []string
-//	for _, popNameStr := range ancestry {
-//		// Some samples are assigned multiple comma-separated ancestries
-//		popNames = strings.Split(popNameStr, ",")
-//		for _, popName := range popNames {
-//			if _, exists := ancestrySizes[popName]; !exists {
-//				ancestrySizes[popName] = 0
-//			}
-//			ancestrySizes[popName]++
-//		}
-//	}
-//	var normalized, sample, anc string
-//	var ancs []string
-//	var val int
-//	for k, locus := range p.Loci {
-//		chr, pos := tools.SplitLocus(locus)
-//		query, args := tools.RangeGenotypesQuery(chr, pos, pos)
-//		cmd := exec.Command(query, args...)
-//		output, err := cmd.Output()
-//		if err != nil {
-//			log.Printf("Error executing bcftools command: %v", err)
-//			continue
-//		}
-//		lines := strings.Split(string(output), "\n")
-//		if len(lines[:len(lines)-1]) == 0 {
-//			log.Printf("No data for locus %s in frequency spectrum", locus)
-//			for _, ppl := range ANCESTRIES {
-//				// Assume that all the samples have the reference allele, and one "ghost" sample has the effect allele
-//				p.PopulationStats[ppl].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[ppl].AF[k][1],
-//					p.PopulationStats[ppl].FreqBinBounds)] += 1
-//			}
-//			continue
-//		}
-//		for _, line := range lines[:len(lines)-1] {
-//			fields := strings.Split(line, "-")
-//			if fields[0] != locus {
-//				fmt.Printf("Locus %s does not match %s\n", locus, fields[0])
-//				continue
-//			}
-//			samples := strings.Split(fields[1], "\t")
-//			for _, sample = range samples[:len(samples)-1] {
-//				gtp := strings.Split(sample, "=")
-//				ancs = strings.Split(ancestry[gtp[0]], ",")
-//				alleles := strings.Split(gtp[1], "|")
-//				for _, allele := range alleles {
-//					normalized, err = tools.NormalizeAllele(allele)
-//					if err != nil {
-//						if normalized != "." {
-//							log.Printf("%v: %s, at %s\n", err, sample, locus)
-//						}
-//						continue
-//					}
-//					val, err = strconv.Atoi(normalized)
-//					if err != nil {
-//						log.Printf("Error converting %s to int: %v", normalized, err)
-//						continue
-//					}
-//					if uint8(val) != p.EffectAlleles[k] {
-//						continue
-//					}
-//					for _, anc = range ancs {
-//						p.PopulationStats[anc].FreqSpectrum[tools.ValueToBinIdx(p.PopulationStats[anc].AF[k][p.EffectAlleles[k]],
-//							p.PopulationStats[anc].FreqBinBounds)]++
-//					}
-//				}
-//			}
-//		}
-//	}
-//	// Normalize the frequency spectrum
-//	for _, ppl := range ANCESTRIES {
-//		for i := 0; i < p.NumSpecBins; i++ {
-//			p.PopulationStats[ppl].FreqSpectrum[i] /= float32(ancestrySizes[ppl])
-//		}
-//	}
-//}
 
 func (p *PGS) SaveStats(filename string) {
 	file, err := os.Create(filename)

@@ -174,6 +174,32 @@ func CalculateDecimalSum(ctx *apd.Context, snps []uint8, weights []*apd.Decimal,
 	return sum
 }
 
+func CalculateBigIntSum(snps []uint8, weights []*apd.BigInt, efal []uint8) *apd.BigInt {
+	sum := new(apd.BigInt)
+	for i := 0; i < len(snps); i += pgs.Ploidy {
+		for j := 0; j < pgs.Ploidy; j++ {
+			switch snps[i+j] == efal[i/pgs.Ploidy] {
+			case true:
+				sum.Add(sum, weights[i/pgs.Ploidy])
+			case false:
+				continue
+			}
+		}
+	}
+	return sum
+}
+
+func FindMaxAbsoluteBigInt(ints []*apd.BigInt) int64 {
+	var maxWeight int64 = 0
+	for _, weight := range ints {
+		w := weight.Int64()
+		if math.Abs(float64(w)) > float64(maxWeight) {
+			maxWeight = int64(math.Abs(float64(w)))
+		}
+	}
+	return maxWeight
+}
+
 func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decimal, efal []uint8) *apd.Decimal {
 	score := CalculateDecimalSum(ctx, snps, weights, efal)
 	// Normalize the score by dividing by the number of loci and ploidy
@@ -182,23 +208,6 @@ func CalculateDecimalScore(ctx *apd.Context, snps []uint8, weights []*apd.Decima
 	if err != nil {
 		log.Println("Error normalizing the score:", err)
 		return nil
-	}
-	return score
-}
-
-func CalculateBigIntScore(snps []uint8, weights []*apd.BigInt) *apd.BigInt {
-	score := apd.NewBigInt(0)
-	for i := 0; i < len(snps); i += pgs.Ploidy {
-		for j := 0; j < pgs.Ploidy; j++ {
-			switch snps[i+j] {
-			case 0:
-				continue
-			case 1:
-				score.Add(score, weights[i/pgs.Ploidy])
-			default:
-				log.Printf("Invalid alelle value: %d", snps[i+j])
-			}
-		}
 	}
 	return score
 }

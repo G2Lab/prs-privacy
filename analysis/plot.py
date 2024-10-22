@@ -347,7 +347,7 @@ def score_uniqueness():
     df = pd.concat([ggdf, ukbdf])
 
     # Create bins for powers of 10
-    bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 3)]
+    # bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 3)]
     bins = []
     for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2):
         bins.append(10**(i-1))
@@ -429,7 +429,7 @@ def score_uniqueness():
     ax1.set_ylim(0, 105)
     ax1.set_xscale('log')
     ax1.set_xlabel('Number of possible scores')
-    ax1.set_ylabel(r'Unique scores, \%')
+    ax1.set_ylabel(r'Identifiable individuals, \%')
     ax1.legend()
     plt.tight_layout()
 
@@ -518,42 +518,6 @@ def af_hist():
     fig.savefig('allelefreq.pdf', dpi=300, bbox_inches='tight')
     # plt.tight_layout()
     # plt.show()
-
-
-def full_imputed():
-    directory = "results/impute/"
-    filepath = os.path.join(directory, "full_imputed22.json")
-    data = []
-    with open(filepath, 'r') as f:
-        content = json.load(f)
-    for idv, result in content.items():
-        data.append({'SelfPosCount': int(result['Self']['count']), 'SelfPosKing': int(result['Self']['king']),
-                     'RelativePosCount': int(result['Relative']['count']),
-                     'RelativePosKing': int(result['Relative']['king']),
-                     'SelfAccuracy': float(result['CountAccuracy']["self"]),
-                     'RelativeAccuracy': float(result['KingScore']["relative"])})
-
-    df = pd.DataFrame(data)
-    fig, ax = plt.subplots(figsize=(3, 3))
-    # melted_df = pd.melt(df, value_vars=['SelfPosCount', 'SelfPosKing'], var_name='Method', value_name='Value')
-    # melted_df = pd.melt(df, value_vars=['RelativePosCount', 'RelativePosKing'], var_name='Method', value_name='Value')
-    sns.boxplot(x=["Relative" for x in df['RelativeAccuracy']], y='RelativeAccuracy', data=df)
-    # plt.title("Self linking")
-    # plt.title("Relative linking")
-    plt.title("Accuracy")
-    plt.ylabel('KING score of the relative')
-    # plt.gca().invert_yaxis()
-    # ax.set_xticklabels(['Self match ratio', 'Relative KING score'])
-    plt.xlabel('')
-    plt.tight_layout()
-    fig.savefig('relative-accuracy.png', dpi=300, bbox_inches='tight')
-    # fig.savefig('self-linking.png', dpi=300, bbox_inches='tight')
-    # melted_df = pd.melt(df, value_vars=['SelfAccuracy', 'RelativeAccuracy'], var_name='Type', value_name='Value')
-    # sns.boxplot(x='Type', y='Value', data=melted_df)
-    # plt.title("SNP matching accuracy")
-    # plt.ylabel('Match comparison accuracy')
-    # fig.savefig('linking-acc.png', dpi=300, bbox_inches='tight')
-    plt.show()
 
 
 def king_accuracy():
@@ -1139,6 +1103,109 @@ def read_ancestry():
             data[idv] = anc.split(',')[0]
     return data
 
+
+def plot_defense(pgs):
+    params = {
+        # 'axes.labelsize': 12,
+        # 'xtick.labelsize': 12,
+        # 'ytick.labelsize': 12,
+        'legend.fontsize': 13,
+        'legend.title_fontsize': 13,
+    }
+    mpl.rcParams.update(params)
+    directory = "results/defense/"
+    filepath = os.path.join(directory, pgs+".json")
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    data = []
+    for result in content:
+        data.append({'Precision': int(result['Precision']), 'Density': float(result['Density']),
+                     'TotalPossibleScores': int(result['TotalPossibleScores']),
+                     'PercentageUnique': float(result['PercentageUnique']),
+                     'AnonSize': int(result['MedianAnonymitySetSize'])})
+    df = pd.DataFrame(data)
+
+    fig1, ax1 = plt.subplots(figsize=(5, 3))
+    sns.lineplot(x='Precision', y='PercentageUnique', data=df, color='coral', marker='.', ax=ax1)
+    ax1.set_ylim(0, 105)
+    plt.gca().invert_xaxis()
+    ax1.set_xticks([p for p in range(17, 0, -2)])
+    ax1.set_xlabel('Weight precision, digits')
+    ax1.set_ylabel(r'Identifiable individuals, \%')
+    ax1.spines['right'].set_visible(False)
+    ax2 = ax1.twinx()
+    sns.lineplot(x='Precision', y='AnonSize', data=df, color='coral', marker='v', linestyle="--", ax=ax2)
+    ax2.set_ylabel('Median Anonymity Size')
+    ax2.spines['right'].set_linestyle((0, (5, 5)))
+    ax2.set_yscale('log')
+    ax2.yaxis.set_minor_locator(plt.NullLocator())
+    identifiability_legend = Line2D([0], [0], color='coral', marker='.', label='Identifiability')
+    anonymity_legend = Line2D([0], [0], color='coral', marker='v', linestyle="--", label='Anonymity')
+    ax1.legend(handles=[identifiability_legend, anonymity_legend], title='UKBB', loc='center left')
+    plt.tight_layout()
+    fig1.savefig('precision_uniqueness.pdf', dpi=300, bbox_inches='tight')
+
+    fig2, ax3 = plt.subplots(figsize=(4, 3))
+    sns.lineplot(x='Precision', y='Density', data=df, color='coral', marker='.', ax=ax3, label='UKBB')
+    ax3.set_xticks([p for p in range(17, 0, -2)])
+    ax3.set_yticks([p for p in range(0, 30, 5)])
+    ax3.set_xlabel('Weight precision, digits')
+    ax3.set_ylabel('Density')
+    ax3.legend()
+    plt.gca().invert_xaxis()
+    plt.tight_layout()
+    fig2.savefig('precision_density.pdf', dpi=300, bbox_inches='tight')
+
+
+# def plot_defended_distribution():
+#     filepath = "results/defense/distro.json"
+#     with open(filepath, 'r') as f:
+#         content = json.load(f)
+#     data = []
+#     for precision, scores in content.items():
+#         for score, count in scores.items():
+#             data.append({'Precision': int(precision), 'Score': float(score), 'Count': int(count)})
+#     df = pd.DataFrame(data)
+#     filtered_df = df[df['Precision'].isin([4, 17])]
+#
+#     # Plot the distribution of the scores
+#     plt.figure(figsize=(4, 3))
+#     sns.histplot(data=filtered_df, x='Score', weights='Count', hue='Precision', multiple='dodge', bins=100)
+#     plt.xlabel('PRS')
+#     plt.ylabel('Count')
+#     plt.tick_params(axis='y', which='both', labelleft=False, left=False, right=False)
+#     plt.xlim(0.10, 0.17)
+#     plt.tight_layout()
+#     # plt.savefig('precision_distribution.pdf', dpi=300, bbox_inches='tight')
+#     plt.show()
+
+def plot_defended_distribution():
+    params = {
+        'legend.fontsize': 13,
+        'legend.title_fontsize': 13,
+    }
+    mpl.rcParams.update(params)
+    filepath = "results/defense/scores.json"
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    data = {}
+    for precision, scores in content.items():
+        data[int(precision)] = [float(x) for x in scores]
+
+    # Plot the scatter plot
+    plt.figure(figsize=(4, 3))
+    linestyles = ['-', '--', '-.', ':']
+    for i, precision in enumerate([1, 2, 5, 17]):
+        sns.kdeplot(data=data[precision], label=f'{precision}', linestyle=linestyles[i])
+    # sns.scatterplot(x=data[17], y=data[1], color='coral', alpha=0.5)
+    plt.xlabel('PRS')
+    plt.ylabel('Count')
+    plt.legend(title='Precision')
+    plt.tight_layout()
+    plt.savefig('precision_distribution.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
+
+
 # def prs_prediction():
 #     filepath = "results/predict/prediction2.json"
 #     data = []
@@ -1300,6 +1367,7 @@ def prepare_for_latex():
         'xtick.labelsize': TICK_SIZE,
         'ytick.labelsize': TICK_SIZE,
         'legend.fontsize': LEGEND_SIZE,
+        'legend.title_fontsize': LEGEND_SIZE,
         'text.usetex': True,
         # 'font.family': 'serif',
         # 'font.serif': 'Computer Modern',
@@ -1314,6 +1382,8 @@ def prepare_for_latex():
 if __name__ == "__main__":
     prepare_for_latex()
     # score_uniqueness()
+    # plot_defense("PGS000869")
+    # plot_defended_distribution()
     # sequential_idv_accuracy()
     # sequential_loci_accuracy()
     # af_hist()

@@ -1,8 +1,9 @@
 package solver
 
 import (
-	"github.com/cockroachdb/apd/v3"
 	"log"
+	
+	"github.com/cockroachdb/apd/v3"
 )
 
 type Rounder struct {
@@ -46,10 +47,9 @@ func (dp *DP) getTargetAndWeightsAsInts() ([]int64, int64, int64) {
 	var roundingError int64 = 0
 	multiplier := apd.New(1, int32(dp.p.WeightPrecision))
 	if dp.p.WeightPrecision > dp.rounder.PrecisionLimit {
-		//roundingError = int64(p.NumVariants) * 5 / 4
 		roundingError = int64(dp.p.NumVariants - len(dp.known))
 		dp.rounder.RoundedMode = true
-		dp.rounder.ScaledWeights = scaleWeights(dp.p.Context, dp.p.Weights, multiplier)
+		dp.rounder.ScaledWeights = ScaleWeights(dp.p.Context, dp.p.Weights, multiplier)
 		//for i := range dp.rounder.ScaledWeights {
 		//	fmt.Printf("%s ", dp.rounder.ScaledWeights[i].String())
 		//}
@@ -96,20 +96,6 @@ func DecimalsToInts(ctx *apd.Context, decimals []*apd.Decimal, multiplier *apd.D
 	return ints
 }
 
-func DecimalsToFloats(decimals []*apd.Decimal, scale float64) []float64 {
-	var err error
-	var flt float64
-	floats := make([]float64, len(decimals))
-	for i, b := range decimals {
-		flt, err = b.Float64()
-		if err != nil {
-			log.Fatalf("Failed to convert decimal to float64: %s", b.String())
-		}
-		floats[i] = float64(int64(flt*scale)) / scale
-	}
-	return floats
-}
-
 func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) *apd.BigInt {
 	var err error
 	tmp := new(apd.Decimal)
@@ -132,7 +118,7 @@ func DecimalToBigInt(ctx *apd.Context, d *apd.Decimal, multiplier *apd.Decimal) 
 	return b
 }
 
-func scaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Decimal) []*apd.BigInt {
+func ScaleWeights(ctx *apd.Context, weights []*apd.Decimal, multiplier *apd.Decimal) []*apd.BigInt {
 	scaled := make([]*apd.BigInt, len(weights))
 	for i := range weights {
 		scaled[i] = DecimalToBigInt(ctx, weights[i], multiplier)

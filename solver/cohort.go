@@ -50,22 +50,36 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 			}
 			c.CalculatePRS(p)
 			c.SaveToDisk(filename)
+			// Save scores separately for the ease of reading
 			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID)); os.IsNotExist(err) {
 				c.SaveScores(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID))
 			}
-			// Save scores separately for the ease of reading
 			return
 		}
 		// Otherwise, load the data from disk
 		c.LoadFromDisk(filename)
 	case tools.UKB:
-		filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)
+		filename = fmt.Sprintf("%s/%s.json", params.UKBiobankInputFolder, p.PgsID)
 		if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
 			err = c.RetrieveGenotypes(p, dataset)
+			if err != nil {
+				log.Fatalf("Error retrieving genotypes: %v", err)
+			}
 			c.CalculatePRS(p)
-			c.SaveScores(filename)
+			c.SaveToDisk(filename)
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID))
+			}
+			return
 		}
-		c.LoadScores(filename, p.Context)
+		c.LoadFromDisk(filename)
+		//filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)
+		//if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
+		//	err = c.RetrieveGenotypes(p, dataset)
+		//	c.CalculatePRS(p)
+		//	c.SaveScores(filename)
+		//}
+		//c.LoadScores(filename, p.Context)
 	default:
 		log.Fatalf("Unknown dataset: %s", dataset)
 	}
@@ -190,7 +204,6 @@ func (c Cohort) CalculatePRS(p *pgs.PGS) {
 	}
 	for idv := range c {
 		tasks <- idv
-		//c[idv].Score = CalculateDecimalScore(p.Context, c[idv].Genotype, p.Weights, p.EffectAlleles)
 	}
 	close(tasks)
 	wg.Wait()
@@ -248,7 +261,6 @@ func (c Cohort) SaveScores(filename string) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	for _, ind := range sortedInd {
-		//writer.Write([]string{ind, fmt.Sprintf(fmt.Sprintf("%%.%df", precision), c[ind].Score)})
 		writer.Write([]string{ind, c[ind].Score.String()})
 	}
 	writer.Flush()
