@@ -156,20 +156,6 @@ idLoop:
 	}
 }
 
-func findMaxAbsoluteWeight(p *pgs.PGS) float64 {
-	maxWeight := 0.0
-	for _, weight := range p.Weights {
-		w, err := weight.Float64()
-		if err != nil {
-			log.Println("Error converting weight to float64:", err)
-		}
-		if math.Abs(w) > maxWeight {
-			maxWeight = math.Abs(w)
-		}
-	}
-	return maxWeight * math.Pow(10, float64(p.WeightPrecision))
-}
-
 func copyFilteredPGSFiles() {
 	file, err := os.Open("results/filtered_pgs.json")
 	if err != nil {

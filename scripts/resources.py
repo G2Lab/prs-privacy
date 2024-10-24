@@ -3,7 +3,7 @@ import subprocess
 import re
 
 # Directory containing log files
-log_dir = "."  # Replace with your log directory
+log_dir = "../analysis"  # Replace with your log directory
 
 # Initialize variables
 total_hours = 0

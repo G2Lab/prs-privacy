@@ -9,6 +9,6 @@
 #SBATCH --mail-user=knikitin@nygenome.org  # Email to which notifications will be sent
 
 module load bcftools/1.20
-module load go/1.20.2
+module load go/1.23.1
 go build -o solve ./eval/
-GOMEMLIMIT=160GiB ./solve -e=sequence $1 $2
+GOMEMLIMIT=160GiB ./solve -e=solve $1 $2
