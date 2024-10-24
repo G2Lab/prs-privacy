@@ -3,17 +3,16 @@ package solver
 import (
 	"bufio"
 	"encoding/csv"
+	"github.com/nikirill/prs/data"
 	"io"
 	"log"
 	"os"
 	"strings"
-
-	"github.com/nikirill/prs/params"
 )
 
 const (
 	GGSamplesFile   = "data/1000genome-samples.csv"
-	UKBBSamplesFile = params.UKBiobankDataFolder + "individuals.txt"
+	UKBBSamplesFile = data.UKBiobankDataFolder + "individuals.txt"
 )
 
 func All1000GenomesSamples() []string {

@@ -1,4 +1,4 @@
-package tools
+package data
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -14,8 +16,8 @@ const (
 	UKB = "UKBiobank"
 )
 
-func GetChromosomeFilepath(chr, dataset string) string {
-	switch dataset {
+func GetChromosomeFilepath(chr, ds string) string {
+	switch ds {
 	case GG:
 		path := "/gpfs/commons/datasets/1000genomes/GRCh37/"
 		return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
@@ -26,7 +28,7 @@ func GetChromosomeFilepath(chr, dataset string) string {
 		path := "/gpfs/commons/datasets/controlled/ukbb-gursoylab/ImputationV3/"
 		return path + "Chr" + chr + "/plink2.vcf.gz"
 	default:
-		log.Fatalln("Unknown dataset:", dataset)
+		log.Fatalln("Unknown dataset:", ds)
 		return ""
 	}
 }
@@ -42,17 +44,6 @@ func IndividualSnpsQuery(c, p, dataset string) (string, []string) {
 	}
 }
 
-func AllSnpsQuery(c, p, dataset string) (string, []string) {
-	return "bcftools", []string{
-		"query",
-		"-f",
-		"%CHROM:%POS-[%GT\t]\n",
-		"-r",
-		fmt.Sprintf("%s:%s-%s", c, p, p),
-		GetChromosomeFilepath(c, dataset),
-	}
-}
-
 func RangeQuery(searchPattern, c, posBegin, posEnd, dataset string) (string, []string) {
 	return "bcftools", []string{
 		"query",
@@ -61,49 +52,6 @@ func RangeQuery(searchPattern, c, posBegin, posEnd, dataset string) (string, []s
 		"-r",
 		fmt.Sprintf("%s:%s-%s", c, posBegin, posEnd),
 		GetChromosomeFilepath(c, dataset),
-	}
-}
-
-func RangeSnpValuesQuery(c, posBegin, posEnd, dataset string) (string, []string) {
-	return RangeQuery("[%GT\t]\n", c, posBegin, posEnd, dataset)
-}
-
-//func RangeGenotypesQuery(c, posBegin, posEnd string) (string, []string) {
-//	return RangeQuery("%CHROM:%POS-[%SAMPLE=%GT\t]\n", c, posBegin, posEnd)
-//}
-//
-//func RangeNumSamplesQuery(c, posBegin, posEnd string) (string, []string) {
-//	return RangeQuery("%NS\n", c, posBegin, posEnd)
-//}
-//
-//func RangeTotalAllelesQuery(c, posBegin, posEnd string) (string, []string) {
-//	return RangeQuery("%AN\n", c, posBegin, posEnd)
-//}
-//
-//func RangePopulationAFQuery(population, c, posBegin, posEnd string) (string, []string) {
-//	return RangeQuery(fmt.Sprintf("%%%s_AF\n", population), c, posBegin, posEnd)
-//}
-
-func AllChrPositionsQuery(c, dataset string) (string, []string) {
-	return "bcftools", []string{
-		"query",
-		"-f",
-		"%POS\t",
-		GetChromosomeFilepath(c, dataset),
-	}
-}
-
-func NormalizeAllele(allele string) (string, error) {
-	switch allele {
-	case "0", "1":
-		return allele, nil
-	// simplify multiallelic cases
-	case "2", "3", "4", "5", "6", "7", "8", "9":
-		return "1", nil
-	case ".":
-		return ".", errors.New("unknown allele")
-	default:
-		return "", errors.New("invalid allele: " + allele)
 	}
 }
 
@@ -183,4 +131,31 @@ func LoadAncestry() map[string]string {
 		fmt.Println("Error decoding populations file:", err)
 	}
 	return data
+}
+
+func ParseLocus(locus string) (int, int, error) {
+	if strings.HasPrefix(locus, "X:") || strings.HasPrefix(locus, "Y:") {
+		return 0, 0, nil
+	}
+	if strings.HasPrefix(locus, "-1") {
+		return 0, 0, nil
+	}
+	chr, err := strconv.Atoi(strings.Split(locus, ":")[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	pos, err := strconv.Atoi(strings.Split(locus, ":")[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return chr, pos, nil
+}
+
+func SplitLocus(locus string) (string, string) {
+	parts := strings.Split(locus, ":")
+	return parts[0], parts[1]
+}
+
+func MergeLocus(chr, pos string) string {
+	return chr + ":" + pos
 }

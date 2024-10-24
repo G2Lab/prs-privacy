@@ -6,9 +6,10 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
 	"github.com/nikirill/prs/pgs"
 )
+
+const HeapSize = 100
 
 type DP struct {
 	target  *apd.Decimal
@@ -206,7 +207,7 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 				continue
 			}
 		}
-		solHeap.addToGenHeap(mtch.likelihood, solution, params.HeapSize)
+		solHeap.addToGenHeap(mtch.likelihood, solution, HeapSize)
 	}
 }
 
@@ -268,8 +269,8 @@ func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[i
 			}
 		}
 		// combine partial solutions
-		dp.combinePartials(0, numSegments, indices, make([]uint8, 0), 0, apd.NewBigInt(0), halfSols, solHeap,
-			params.HeapSize)
+		dp.combinePartials(0, numSegments, indices, make([]uint8, 0), 0, apd.NewBigInt(0), halfSols,
+			solHeap, HeapSize)
 	}
 }
 

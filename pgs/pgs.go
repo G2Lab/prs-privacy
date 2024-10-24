@@ -14,8 +14,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
-	"github.com/nikirill/prs/tools"
+	"github.com/nikirill/prs/data"
 )
 
 var ALL_FIELDS = []string{
@@ -298,13 +297,13 @@ func (p *PGS) GetSortedVariantLoci() ([]string, error) {
 	}
 	for i := 0; i < len(sortedLoc)-1; i++ {
 		minIndex := i
-		minChr, minPos, err := tools.ParseLocus(sortedLoc[minIndex])
+		minChr, minPos, err := data.ParseLocus(sortedLoc[minIndex])
 		if err != nil {
 			log.Printf("Error parsing initial locus %s: %v", sortedLoc[minIndex], err)
 			return nil, err
 		}
 		for j := i + 1; j < len(sortedLoc); j++ {
-			chr, pos, err := tools.ParseLocus(sortedLoc[j])
+			chr, pos, err := data.ParseLocus(sortedLoc[j])
 			if err != nil {
 				log.Printf("Error parsing locus %s: %v", sortedLoc[j], err)
 				return nil, err
@@ -337,12 +336,12 @@ func (p *PGS) LoadStats(dataset string) error {
 func (p *PGS) LoadDatasetStats(dataset string) error {
 	var efalFilename, statFilename string
 	switch dataset {
-	case tools.GG:
-		efalFilename = fmt.Sprintf("%s/%s.efal", params.LocalDataFolder, p.PgsID)
-		statFilename = fmt.Sprintf("%s/%s.stat", params.LocalDataFolder, p.PgsID)
-	case tools.UKB:
-		efalFilename = fmt.Sprintf("%s/%s.efal", params.UKBiobankInputFolder, p.PgsID)
-		statFilename = fmt.Sprintf("%s/%s.stat", params.UKBiobankInputFolder, p.PgsID)
+	case dataset.GG:
+		efalFilename = fmt.Sprintf("%s/%s.efal", dataset.LocalDataFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", dataset.LocalDataFolder, p.PgsID)
+	case dataset.UKB:
+		efalFilename = fmt.Sprintf("%s/%s.efal", dataset.UKBiobankInputFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", dataset.UKBiobankInputFolder, p.PgsID)
 	default:
 		log.Printf("Unknown dataset: %s\n", dataset)
 		return errors.New("unknown dataset")
@@ -371,10 +370,10 @@ func (p *PGS) LoadDatasetStats(dataset string) error {
 
 	if _, err := os.Stat(statFilename); os.IsNotExist(err) {
 		switch dataset {
-		case tools.GG:
+		case dataset.GG:
 			p.extractEAF()
 			p.extractGF()
-		case tools.UKB:
+		case dataset.UKB:
 			p.CalculateEAFAndGF(dataset)
 		default:
 			log.Printf("Unknown dataset: %s\n", dataset)
@@ -403,8 +402,8 @@ func (p *PGS) extractPopulationAlleles(dataset string) error {
 	var missing, alleleSet bool
 	for k, locus := range p.Loci {
 		missing, alleleSet = true, false
-		chr, pos := tools.SplitLocus(locus)
-		query, args := tools.RangeQuery(refAltQ, chr, pos, pos, dataset)
+		chr, pos := dataset.SplitLocus(locus)
+		query, args := dataset.RangeQuery(refAltQ, chr, pos, pos, dataset)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {
@@ -484,8 +483,8 @@ func (p *PGS) extractEAF() {
 	populationsAndAll := append(ANCESTRIES, "ALL")
 	for k, locus := range p.Loci {
 		missing = true
-		chr, pos := tools.SplitLocus(locus)
-		query, args := tools.RangeQuery(populationQ, chr, pos, pos, tools.GG)
+		chr, pos := data.SplitLocus(locus)
+		query, args := data.RangeQuery(populationQ, chr, pos, pos, data.GG)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {
@@ -563,12 +562,12 @@ func (p *PGS) extractGF() {
 	var counts map[string][]int
 	var total map[string]int
 	var positionAndSamples, idvSnps []string
-	ancestries := tools.LoadAncestry()
+	ancestries := data.LoadAncestry()
 	populationsAndAll := append(ANCESTRIES, "ALL")
 	for k, locus := range p.Loci {
 		found = false
-		chr, position = tools.SplitLocus(locus)
-		query, args := tools.IndividualSnpsQuery(chr, position, tools.GG)
+		chr, position = data.SplitLocus(locus)
+		query, args := data.IndividualSnpsQuery(chr, position, data.GG)
 		output, err = exec.Command(query, args...).Output()
 		if err != nil {
 			fmt.Println("Error executing bcftools command:", err)
@@ -592,12 +591,12 @@ func (p *PGS) extractGF() {
 			samples = samples[:len(samples)-1]
 			for _, sample := range samples {
 				idvSnps = strings.Split(sample, "=")
-				snps, err = tools.NormalizeSnp(idvSnps[1])
+				snps, err = data.NormalizeSnp(idvSnps[1])
 				if err != nil {
 					fmt.Printf("Error normalizing %s: %v", snps, err)
 					continue
 				}
-				alleles, err = tools.SnpToPair(snps)
+				alleles, err = data.SnpToPair(snps)
 				if err != nil {
 					fmt.Printf("Error converting SNPs %s to alleles: %v", snps, err)
 					continue
@@ -634,8 +633,8 @@ func (p *PGS) CalculateEAFAndGF(dataset string) {
 	var genotypeCount, alleleCount map[uint8]int
 	for k, locus := range p.Loci {
 		found = false
-		chr, position = tools.SplitLocus(locus)
-		query, args := tools.IndividualSnpsQuery(chr, position, dataset)
+		chr, position = dataset.SplitLocus(locus)
+		query, args := dataset.IndividualSnpsQuery(chr, position, dataset)
 		output, err = exec.Command(query, args...).Output()
 		if err != nil {
 			fmt.Println("Error executing bcftools command:", err)
@@ -654,12 +653,12 @@ func (p *PGS) CalculateEAFAndGF(dataset string) {
 			samples = samples[:len(samples)-1]
 			for _, sample := range samples {
 				idvSnps = strings.Split(sample, "=")
-				snps, err = tools.NormalizeSnp(idvSnps[1])
+				snps, err = dataset.NormalizeSnp(idvSnps[1])
 				if err != nil {
 					fmt.Printf("Error normalizing %s: %v", idvSnps[1], err)
 					continue
 				}
-				pair, err = tools.SnpToPair(snps)
+				pair, err = dataset.SnpToPair(snps)
 				if err != nil {
 					fmt.Printf("Error converting SNPs %s to alleles: %v", snps, err)
 					continue

@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nikirill/prs/data"
 	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 )
 
 func getPGSWithFewerVariants(limit int) {
@@ -68,9 +68,9 @@ idLoop:
 			}
 		}
 		maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(p.WeightPrecision))
-		if float64(p.NumVariants)/tools.Log3(maxw) > 2.5 {
+		if float64(p.NumVariants)/Log3(maxw) > 2.5 {
 			highDensity = append(highDensity, id)
-			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/tools.Log3(maxw))
+			fmt.Printf("N=%d, W=%f, N/log3(W)=%.2f\n", p.NumVariants, maxw, float64(p.NumVariants)/Log3(maxw))
 			continue idLoop
 		}
 		if p.WeightPrecision-p.MinPrecision > 5 && p.MinPrecision > 2 && p.MinPrecision < 10 {
@@ -209,7 +209,7 @@ func validateBases() {
 			log.Println("Error:", err)
 			return
 		}
-		err = p.LoadStats(tools.GG)
+		err = p.LoadStats(data.GG)
 		if err != nil {
 			fmt.Printf("Discarding %s: %v\n", id, err)
 			discarded = append(discarded, p.PgsID)
@@ -542,7 +542,7 @@ func weightPrecisionDistribution() {
 			return
 		}
 		precisions[p.WeightPrecision]++
-		err = p.LoadStats(tools.GG)
+		err = p.LoadStats(data.GG)
 		if err != nil {
 			log.Printf("%s: Error loading stats: %v\n", p.PgsID, err)
 		}
@@ -560,6 +560,103 @@ func weightPrecisionDistribution() {
 	for _, k := range keys {
 		fmt.Printf("%d: %.0f\n", k, float64(precisions[k])*100/float64(total))
 	}
+}
+
+func Log3(x float64) float64 {
+	return math.Log2(x) / math.Log2(3)
+}
+
+func readSamplePopulations() {
+	fileName := "data/igsr_samples.tsv"
+
+	// Open the TSV inputFile
+	inputFile, err := os.Open(fileName)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer inputFile.Close()
+
+	// Create a CSV reader with tab as the delimiter
+	reader := csv.NewReader(inputFile)
+	reader.Comma = '\t'
+
+	// Read the header to get column names
+	header, err := reader.Read()
+	if err != nil {
+		fmt.Println("Error reading header:", err)
+		return
+	}
+
+	sampleIdx := indexOf(header, "Sample name")
+	superPopIdx := indexOf(header, "Superpopulation code")
+
+	if sampleIdx == -1 || superPopIdx == -1 {
+		fmt.Println("Required fields not found in the header.")
+		return
+	}
+
+	fullData := make(map[string]string)
+	var record []string
+	// Read the remaining records and extract fields
+	for {
+		record, err = reader.Read()
+		if err != nil {
+			break // End of inputFile
+		}
+		fullData[record[sampleIdx]] = record[superPopIdx]
+	}
+
+	//// Check that we have all the sample info for the 1000 Genomes dataset
+	//sampleFile, err := os.Open("data/1000genome-samples.csv")
+	//if err != nil {
+	//	fmt.Println("Error:", err)
+	//	return
+	//}
+	//defer sampleFile.Close()
+	//
+	//// Create a CSV reader with tab as the delimiter
+	//reader = csv.NewReader(sampleFile)
+	//
+	//// Read the header to get column names
+	//sampleList, err := reader.Read()
+	//if err != nil {
+	//	fmt.Println("Error reading sample list:", err)
+	//	return
+	//}
+	//reducedData := make(map[string]string)
+	//for _, sample := range sampleList {
+	//	if _, exists := fullData[sample]; !exists {
+	//		fmt.Printf("Sample %s not found in the superpopulation fullData\n", sample)
+	//		continue
+	//	}
+	//	reducedData[sample] = fullData[sample]
+	//}
+
+	// Save the results to a JSON file
+	outputFile, err := os.Create("data/superpopulations.json")
+	if err != nil {
+		fmt.Println("Error creating JSON outputFile:", err)
+		return
+	}
+	defer outputFile.Close()
+
+	// Encode the fullData as JSON and write to the outputFile
+	encoder := json.NewEncoder(outputFile)
+	err = encoder.Encode(fullData)
+	if err != nil {
+		fmt.Println("Error encoding fullData to JSON:", err)
+	}
+}
+
+// indexOf finds the index of a value in a slice, or returns -1 if not found
+func indexOf(slice []string, value string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
 }
 
 func main() {
@@ -580,5 +677,7 @@ func main() {
 		ancestryTrainingDistribution()
 	case "precision":
 		weightPrecisionDistribution()
+	case "populations":
+		readSamplePopulations()
 	}
 }

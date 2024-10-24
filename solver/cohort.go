@@ -11,9 +11,8 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/data"
 	"github.com/nikirill/prs/pgs"
-	"github.com/nikirill/prs/tools"
 )
 
 type Individual struct {
@@ -40,8 +39,8 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 	var err error
 	var filename string
 	switch dataset {
-	case tools.GG:
-		filename = fmt.Sprintf("%s/%s.json", params.LocalDataFolder, p.PgsID)
+	case data.GG:
+		filename = fmt.Sprintf("%s/%s.json", data.LocalDataFolder, p.PgsID)
 		// If the file doesn't exist, calculate the PRS and save it
 		if _, err = os.Stat(filename); os.IsNotExist(err) {
 			err = c.RetrieveGenotypes(p, dataset)
@@ -51,15 +50,15 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 			c.CalculatePRS(p)
 			c.SaveToDisk(filename)
 			// Save scores separately for the ease of reading
-			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID)); os.IsNotExist(err) {
-				c.SaveScores(fmt.Sprintf("%s/%s.scores", params.LocalDataFolder, p.PgsID))
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.LocalDataFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.LocalDataFolder, p.PgsID))
 			}
 			return
 		}
 		// Otherwise, load the data from disk
 		c.LoadFromDisk(filename)
-	case tools.UKB:
-		filename = fmt.Sprintf("%s/%s.json", params.UKBiobankInputFolder, p.PgsID)
+	case data.UKB:
+		filename = fmt.Sprintf("%s/%s.json", data.UKBiobankInputFolder, p.PgsID)
 		if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
 			err = c.RetrieveGenotypes(p, dataset)
 			if err != nil {
@@ -67,8 +66,8 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 			}
 			c.CalculatePRS(p)
 			c.SaveToDisk(filename)
-			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)); os.IsNotExist(err) {
-				c.SaveScores(fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID))
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.UKBiobankInputFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.UKBiobankInputFolder, p.PgsID))
 			}
 			return
 		}
@@ -95,18 +94,18 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 	var found, locusAdded bool
 	var datasets []string
 	switch source {
-	case tools.GG:
-		datasets = []string{tools.GG, tools.RL}
-	case tools.UKB:
-		datasets = []string{tools.UKB}
+	case data.GG:
+		datasets = []string{data.GG, data.RL}
+	case data.UKB:
+		datasets = []string{data.UKB}
 	default:
 		log.Fatalf("Unknown source: %s", source)
 	}
 	for _, locus := range p.Loci {
 		for _, dataset := range datasets {
 			found, locusAdded = false, false
-			chr, position := tools.SplitLocus(locus)
-			query, args := tools.IndividualSnpsQuery(chr, position, dataset)
+			chr, position := data.SplitLocus(locus)
+			query, args := data.IndividualSnpsQuery(chr, position, dataset)
 			cmd := exec.Command(query, args...)
 			output, err = cmd.Output()
 			if err != nil {
@@ -130,12 +129,12 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 					}
 					idv := sampleAlleles[0]
 					snp := sampleAlleles[1]
-					snp, err = tools.NormalizeSnp(snp)
+					snp, err = data.NormalizeSnp(snp)
 					if err != nil {
 						fmt.Printf("Error normalizing %s: %v", snp, err)
 						continue
 					}
-					allele, err = tools.SnpToPair(snp)
+					allele, err = data.SnpToPair(snp)
 					if err != nil {
 						fmt.Printf("Error converting SNP %s to an allele: %v", snp, err)
 						continue
@@ -164,11 +163,11 @@ func (c Cohort) RetrieveGenotypes(p *pgs.PGS, source string) error {
 			if !found {
 				// If there is no data, treat as zeros for all individuals
 				switch dataset {
-				case tools.GG:
+				case data.GG:
 					allSamples = All1000GenomesSamples()
-				case tools.RL:
+				case data.RL:
 					allSamples = AllRelativeSamples()
-				case tools.UKB:
+				case data.UKB:
 					allSamples = AllUKBiobankSamples()
 				default:
 					log.Fatalln("Unknown dataset:", dataset)

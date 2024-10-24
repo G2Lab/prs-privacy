@@ -18,10 +18,9 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/apd/v3"
-	"github.com/nikirill/prs/params"
+	"github.com/nikirill/prs/data"
 	"github.com/nikirill/prs/pgs"
 	"github.com/nikirill/prs/solver"
-	"github.com/nikirill/prs/tools"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -48,9 +47,9 @@ func main() {
 	case "linking":
 		linking()
 	case "uniqueness_gg":
-		uniquenessExperiment(tools.GG)
+		uniquenessExperiment(data.GG)
 	case "uniqueness_uk":
-		uniquenessExperiment(tools.UKB)
+		uniquenessExperiment(data.UKB)
 	case "scores":
 		calculateScoresAndStats()
 	case "rounding":
@@ -95,7 +94,7 @@ func numberSnpsToPossibleScores() {
 	for _, pgsID := range allPgs {
 		fmt.Printf("======== %s (%d) ========\n", pgsID, pgsToNumVariants[pgsID])
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
@@ -140,7 +139,7 @@ func precisionToUniqueness() {
 	//	p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 	//	if p.WeightPrecision >= 17 {
 	//		maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(p.WeightPrecision))
-	//		density := float64(p.NumVariants) / tools.Log3(maxw)
+	//		density := float64(p.NumVariants) / Log3(maxw)
 	//		fmt.Printf("%s (precision %d, variants %d, density %.3f)\n", pgsID, p.WeightPrecision,
 	//			pgsToNumVariants[pgsID], density)
 	//	}
@@ -154,10 +153,10 @@ func precisionToUniqueness() {
 		PercentageUnique       float32
 		MedianAnonymitySetSize int
 	}
-	dataset := tools.UKB
+	dataset := data.UKB
 	pgsID := "PGS000869"
 	p := pgs.NewPGS()
-	err := p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+	err := p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
@@ -205,7 +204,7 @@ func precisionToUniqueness() {
 			}
 			anonsets = append(anonsets, count)
 		}
-		density := float64(p.NumVariants) / tools.Log3(float64(solver.FindMaxAbsoluteBigInt(weights)))
+		density := float64(p.NumVariants) / Log3(float64(solver.FindMaxAbsoluteBigInt(weights)))
 		sort.Ints(anonsets)
 		results = append(results, Result{
 			Precision:              wp,
@@ -350,13 +349,13 @@ func calculateScoresAndStats() {
 	}
 	fmt.Printf("======== %s ========\n", allPgs[pgsNum])
 	p := pgs.NewPGS()
-	err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, allPgs[pgsNum]+"_hmPOS_GRCh37.txt"))
+	err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, allPgs[pgsNum]+"_hmPOS_GRCh37.txt"))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
 	}
-	p.LoadStats(tools.UKB)
-	solver.NewCohort(p, tools.UKB)
+	p.LoadStats(data.UKB)
+	solver.NewCohort(p, data.UKB)
 	fmt.Printf("%s complete\n", allPgs[pgsNum])
 }
 
@@ -423,7 +422,7 @@ func uniquenessExperiment(dataset string) {
 				var sf string
 				var realNumUnique int
 				p := pgs.NewPGS()
-				err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+				err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 				if err != nil {
 					log.Printf("Error loading catalog file: %v\n", err)
 					return
@@ -712,7 +711,7 @@ func chainSolving() {
 		SNPs       map[string]uint8
 	}
 	guesses := make([]*Guess, 0)
-	populations := tools.LoadAncestry()
+	populations := data.LoadAncestry()
 	var pgsID string
 	var individual string
 	for c := chunkNum * chunkSize; c < (chunkNum+1)*chunkSize; c++ {
@@ -753,13 +752,13 @@ func chainSolving() {
 			}
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
-			err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+			err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file: %v\n", err)
 				return
 			}
 			fmt.Printf("======== %s ========\n", p.PgsID)
-			err = p.LoadStats(tools.GG)
+			err = p.LoadStats(data.GG)
 			if err != nil {
 				log.Printf("Error loading stats: %v\n", err)
 				return
@@ -779,7 +778,7 @@ func chainSolving() {
 			fmt.Printf("Total SNPs %d, unknown %d\n", len(p.Loci), len(p.Loci)-len(recoveredSnps))
 			fmt.Printf("Recovered snps: %v\n", recoveredSnps)
 			fmt.Printf("Recovered references: %v\n", recoveredRefs)
-			cohort := solver.NewCohort(p, tools.GG)
+			cohort := solver.NewCohort(p, data.GG)
 			solutions := findSolutions(p, cohort, individual, indPop, recoveredSnps)
 			if len(solutions) == 0 && len(recoveredSnps) > 0 {
 				solutions = selfRepair(p, cohort, individual, indPop, guessedSnps, guessedRefs, guessConfidence,
@@ -879,7 +878,7 @@ func chainSolvingOneAF() {
 		SNPs       map[string]uint8
 	}
 	guesses := make([]*Guess, 0)
-	populations := tools.LoadAncestry()
+	populations := data.LoadAncestry()
 	var pgsID string
 	var individual string
 	for c := 0; c < len(individuals[ppl]); c++ {
@@ -919,13 +918,13 @@ func chainSolvingOneAF() {
 			}
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
-			err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+			err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file: %v\n", err)
 				return
 			}
 			fmt.Printf("======== %s ========\n", p.PgsID)
-			err = p.LoadStats(tools.GG)
+			err = p.LoadStats(data.GG)
 			if err != nil {
 				log.Printf("Error loading stats: %v\n", err)
 				return
@@ -945,7 +944,7 @@ func chainSolvingOneAF() {
 			fmt.Printf("Total SNPs %d, unknown %d\n", len(p.Loci), len(p.Loci)-len(recoveredSnps))
 			fmt.Printf("Recovered snps: %v\n", recoveredSnps)
 			fmt.Printf("Recovered references: %v\n", recoveredRefs)
-			cohort := solver.NewCohort(p, tools.GG)
+			cohort := solver.NewCohort(p, data.GG)
 			solutions := findSolutions(p, cohort, individual, indPop, recoveredSnps)
 			if len(solutions) == 0 && len(recoveredSnps) > 0 {
 				solutions = selfRepair(p, cohort, individual, indPop, guessedSnps, guessedRefs, guessConfidence,
@@ -1136,17 +1135,17 @@ solutionLoop:
 				continue
 			}
 			refp := pgs.NewPGS()
-			err = refp.LoadCatalogFile(path.Join(params.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
+			err = refp.LoadCatalogFile(path.Join(data.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
 			}
-			err = refp.LoadStats(tools.GG)
+			err = refp.LoadStats(data.GG)
 			if err != nil {
 				log.Printf("Error loading stats for %s: %v\n", ref, err)
 				return nil
 			}
-			refCohort := solver.NewCohort(refp, tools.GG)
+			refCohort := solver.NewCohort(refp, data.GG)
 			newSnps := make(map[int]uint8)
 			for i, locus := range p.Loci {
 				if recoveredRefs[i] == ref {
@@ -1175,7 +1174,7 @@ solutionLoop:
 				continue
 			}
 			refp := pgs.NewPGS()
-			err = refp.LoadCatalogFile(path.Join(params.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
+			err = refp.LoadCatalogFile(path.Join(data.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
@@ -1272,9 +1271,9 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 		for i, pos := range positions[chr] {
 			strPos[i] = strconv.Itoa(pos)
 		}
-		retrieved = getIndividualPositionStrings(chr, strPos, mainIndividuals, tools.GG)
+		retrieved = getIndividualPositionStrings(chr, strPos, mainIndividuals, data.GG)
 		transferSnps(trueSNPs, retrieved, chr)
-		retrieved = getIndividualPositionStrings(chr, strPos, relativeIndividuals, tools.RL)
+		retrieved = getIndividualPositionStrings(chr, strPos, relativeIndividuals, data.RL)
 		transferSnps(trueSNPs, retrieved, chr)
 		fmt.Printf("Chr %s: loaded true trueSNPs\n", chr)
 	}
@@ -1421,9 +1420,9 @@ func plinkKing(path string) {
 }
 
 func retrievePositionAlleles(chr, pos string) (string, string) {
-	ref, alt := retrievePositionAllelesDataset(chr, pos, tools.GG)
+	ref, alt := retrievePositionAllelesDataset(chr, pos, data.GG)
 	if ref == "." || alt == "." {
-		ref, alt = retrievePositionAllelesDataset(chr, pos, tools.RL)
+		ref, alt = retrievePositionAllelesDataset(chr, pos, data.RL)
 	}
 	return ref, alt
 }
@@ -1434,7 +1433,7 @@ func retrievePositionAllelesDataset(chr, pos, dataset string) (string, string) {
 		"query",
 		"-f", "%POS\t%REF\t%ALT\n",
 		"-r", fmt.Sprintf("%s:%s-%s", chr, pos, pos),
-		tools.GetChromosomeFilepath(chr, dataset),
+		data.GetChromosomeFilepath(chr, dataset),
 	}
 	output, err := exec.Command(prg, args...).Output()
 	if err != nil {
@@ -1529,18 +1528,18 @@ func recoveryAccuracy(afType string) {
 		for pos = range positionMap {
 			positions = append(positions, pos)
 		}
-		retrieved := getIndividualPositionSNPs(chr, positions, mainSamples, tools.GG)
+		retrieved := getIndividualPositionSNPs(chr, positions, mainSamples, data.GG)
 		for idv = range retrieved {
 			trueSnps[idv][chr] = retrieved[idv]
 		}
-		retrieved = getIndividualPositionSNPs(chr, positions, relatives, tools.RL)
+		retrieved = getIndividualPositionSNPs(chr, positions, relatives, data.RL)
 		for idv = range retrieved {
 			trueSnps[idv][chr] = retrieved[idv]
 		}
 	}
 	//
 	references := getMajorGenotypesForGuessedLoci()
-	ancestries := tools.LoadAncestry()
+	ancestries := data.LoadAncestry()
 	idvResults := make([]*IdvResult, 0)
 	locusResults := make(map[string]*LocusResult)
 	var locus string
@@ -1558,7 +1557,7 @@ func recoveryAccuracy(afType string) {
 				}
 				res.SNPs++
 				// Locus accuracy
-				locus = tools.MergeLocus(chr, pos)
+				locus = data.MergeLocus(chr, pos)
 				if _, ok := locusResults[locus]; !ok {
 					locusResults[locus] = newLocusResult()
 				}
@@ -1609,12 +1608,12 @@ func recoveryAccuracy(afType string) {
 	var ok bool
 	for _, pgsID := range allPgs {
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
 		}
-		err = p.LoadStats(tools.GG)
+		err = p.LoadStats(data.GG)
 		if err != nil {
 			log.Printf("Error loading stats: %v\n", err)
 			return
@@ -1632,7 +1631,7 @@ func recoveryAccuracy(afType string) {
 			locusResults[locus].GWASEAF = float32(p.StudyEAF[i])
 			locusResults[locus].SmallestPGS = pgsToNumVariants[pgsID]
 			locusResults[locus].Density = float32(p.NumVariants) /
-				float32(tools.Log3(p.FindMaxAbsoluteWeight()*math.Pow(10, float64(p.WeightPrecision))))
+				float32(Log3(p.FindMaxAbsoluteWeight()*math.Pow(10, float64(p.WeightPrecision))))
 			weight, err := p.Weights[i].Float64()
 			if err != nil {
 				log.Printf("Error converting weight %s to float64: %v\n", p.Weights[i].String(), err)
@@ -1715,7 +1714,7 @@ func loadGuessedGenotypes(afType string) map[string]map[string]map[string]uint8 
 			for _, g := range guesses {
 				guessed[g.Individual] = make(map[string]map[string]uint8)
 				for locus, snp := range g.SNPs {
-					chr, pos := tools.SplitLocus(locus)
+					chr, pos := data.SplitLocus(locus)
 					if _, ok := guessed[g.Individual][chr]; !ok {
 						guessed[g.Individual][chr] = make(map[string]uint8)
 					}
@@ -1742,7 +1741,7 @@ func calculateGenotypeFrequenciesForGuessed() {
 	var chrStr, pos, idv, anc string
 	var positionMap map[string]struct{}
 	frequencies := make(map[string]map[string]map[string][]float32)
-	ancestries := tools.LoadAncestry()
+	ancestries := data.LoadAncestry()
 	for _, ppl := range pgs.ANCESTRIES {
 		frequencies[ppl] = make(map[string]map[string][]float32)
 		for chr := 1; chr <= 22; chr++ {
@@ -1762,7 +1761,7 @@ func calculateGenotypeFrequenciesForGuessed() {
 		for pos = range positionMap {
 			positions = append(positions, pos)
 		}
-		retrieved := getIndividualPositionSNPs(chrStr, positions, samples, tools.GG)
+		retrieved := getIndividualPositionSNPs(chrStr, positions, samples, data.GG)
 		for idv = range retrieved {
 			anc = pgs.GetIndividualAncestry(idv, ancestries)
 			for pos = range retrieved[idv] {
@@ -1824,7 +1823,7 @@ func getIndividualPositionSNPs(chr string, positions []string, individuals []str
 		"query",
 		"-s", strings.Join(individuals, ","),
 		"-f", "%POS-[%SAMPLE=%GT\t]\n",
-		tools.GetChromosomeFilepath(chr, dataset),
+		data.GetChromosomeFilepath(chr, dataset),
 		"-r", "",
 	}
 	var pos, gt, idv string
@@ -1857,12 +1856,12 @@ func getIndividualPositionSNPs(chr string, positions []string, individuals []str
 				if _, ok = alleles[idv]; !ok {
 					alleles[idv] = make(map[string]uint8)
 				}
-				gt, err = tools.NormalizeSnp(fields[1])
+				gt, err = data.NormalizeSnp(fields[1])
 				if err != nil {
 					log.Printf("Error normalizing SNP: %s -- %v\n", line, err)
 					continue
 				}
-				snp, err = tools.SnpToSum(gt)
+				snp, err = data.SnpToSum(gt)
 				if err != nil {
 					log.Printf("Error converting SNP to sum: %s -- %v\n", line, err)
 				}
@@ -1879,7 +1878,7 @@ func getIndividualPositionStrings(chr string, positions []string, individuals []
 		"query",
 		"-s", strings.Join(individuals, ","),
 		"-f", "%POS-[%SAMPLE=%GT\t]\n",
-		tools.GetChromosomeFilepath(chr, dataset),
+		data.GetChromosomeFilepath(chr, dataset),
 		"-r", "",
 	}
 	var pos, idv string
@@ -1935,4 +1934,8 @@ func getChunkInfo(totalLen int) (int, int) {
 		chunkSize = totalLen
 	}
 	return chunkNum, chunkSize
+}
+
+func Log3(x float64) float64 {
+	return math.Log2(x) / math.Log2(3)
 }
