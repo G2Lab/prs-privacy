@@ -9,8 +9,6 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"runtime"
-	"runtime/pprof"
 	"sort"
 	"strconv"
 	"sync"
@@ -23,9 +21,6 @@ import (
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-var memprofile = flag.String("memprofile", "", "write cpu profile to file")
-
 const (
 	DeterminismLimit       = 34
 	ScratchSolvingSnpLimit = 44
@@ -35,36 +30,19 @@ const (
 func main() {
 	expr := flag.String("e", "", "Experiment type")
 	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		runtime.MemProfileRate = 1
-		defer pprof.WriteHeapProfile(f)
-	}
 	switch *expr {
 	case "sequence":
 		sequenceSolving()
 	case "sequenceaf":
 		sequenceSolvingAF()
 	case "accuracy":
-		guessAccuracy(perAncestryAf)
+		recoveryAccuracy(perAncestryAf)
 	case "gaccuracy":
-		guessAccuracy(globalAf)
+		recoveryAccuracy(globalAf)
 	case "genfreq":
 		calculateGenotypeFrequenciesForGuessed()
-	case "ibd":
-		prepareIBD()
+	case "linking":
+		linking()
 	case "uniqueness_gg":
 		uniquenessExperiment(tools.GG)
 	case "uniqueness_uk":
@@ -73,6 +51,65 @@ func main() {
 		calculateScoresAndStats()
 	case "rounding":
 		precisionToUniqueness()
+	case "snps":
+		numberSnpsToPossibleScores()
+	}
+}
+
+func numberSnpsToPossibleScores() {
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file:", err)
+		return
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var pgsToNumVariants map[string]int
+	err = decoder.Decode(&pgsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids:", err)
+		return
+	}
+	allPgs := make([]string, 0, len(pgsToNumVariants))
+	for id, _ := range pgsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	sort.Slice(allPgs, func(i, j int) bool {
+		if pgsToNumVariants[allPgs[i]] == pgsToNumVariants[allPgs[j]] {
+			return allPgs[i] < allPgs[j]
+		}
+		return pgsToNumVariants[allPgs[i]] < pgsToNumVariants[allPgs[j]]
+	})
+	type Result struct {
+		NumVariants         int
+		TotalPossibleScores uint64
+		Precision           uint32
+	}
+	results := make([]Result, 0)
+	for _, pgsID := range allPgs {
+		fmt.Printf("======== %s (%d) ========\n", pgsID, pgsToNumVariants[pgsID])
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		results = append(results, Result{
+			NumVariants:         len(p.Loci),
+			TotalPossibleScores: calculateNumPossibleScores(p),
+			Precision:           p.WeightPrecision,
+		})
+	}
+	resultFolder := "results/uniqueness"
+	filepath := path.Join(resultFolder, "num_snps.json")
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
 	}
 }
 
@@ -182,8 +219,8 @@ func precisionToUniqueness() {
 			weights[i] = divideAndRound(weights[i], ten)
 		}
 	}
-	resultFolder := "results/defense"
-	filepath := path.Join(resultFolder, fmt.Sprintf("%s.json", pgsID))
+	resultFolder := "results/rounding"
+	filepath := path.Join(resultFolder, fmt.Sprintf("%s_stats.json", pgsID))
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening result file: %v", err)
@@ -193,7 +230,7 @@ func precisionToUniqueness() {
 	if err = encoder.Encode(results); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
-	filepath = path.Join(resultFolder, "scores.json")
+	filepath = path.Join(resultFolder, fmt.Sprintf("%s_scores.json", pgsID))
 	distroFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening result file: %v", err)
@@ -453,6 +490,20 @@ func uniquenessExperiment(dataset string) {
 	fmt.Println("Completed")
 }
 
+func calculateNumPossibleScores(p *pgs.PGS) uint64 {
+	numPossibleSubsets := calculateNumPossibleSubsets(p.Weights)
+	_, _, secondMinDecimal, secondMaxDecimal := p.FindMinAndMaxScores()
+	secondMin, _ := secondMinDecimal.Float64()
+	secondMax, _ := secondMaxDecimal.Float64()
+	step := math.Pow10(-int(p.WeightPrecision))
+	// Adding 2 to account for the minimum and maximum scores
+	numPossiblePrecisionScores := (uint64((secondMax-secondMin)/step) + 1) + 2
+	if numPossibleSubsets < numPossiblePrecisionScores {
+		return numPossibleSubsets
+	}
+	return numPossiblePrecisionScores
+}
+
 func estimateNumUniqueScores(p *pgs.PGS, M int, powerUpperBound int) (float64, int, uint64) {
 	numPossibleSubsets := calculateNumPossibleSubsets(p.Weights)
 	minScoreDecimal, maxScoreDecimal, secondMinDecimal, secondMaxDecimal := p.FindMinAndMaxScores()
@@ -460,8 +511,6 @@ func estimateNumUniqueScores(p *pgs.PGS, M int, powerUpperBound int) (float64, i
 	maxVal, _ := maxScoreDecimal.Float64()
 	secondMin, _ := secondMinDecimal.Float64()
 	secondMax, _ := secondMaxDecimal.Float64()
-	predictedMeans, predictedStds := p.EstimateMeanAndStd()
-	normalDist := distuv.Normal{Mu: predictedMeans["ALL"], Sigma: predictedStds["ALL"]}
 	step := math.Pow10(-int(p.WeightPrecision))
 	// Adding 2 to account for the minimum and maximum scores
 	numPossibleScoresDuePrecision := (uint64((secondMax-secondMin)/step) + 1) + 2
@@ -476,6 +525,9 @@ func estimateNumUniqueScores(p *pgs.PGS, M int, powerUpperBound int) (float64, i
 	if numPossibleScores > uint64(math.Pow10(powerUpperBound)) {
 		return -1, -1, numPossibleScores
 	}
+
+	predictedMeans, predictedStds := p.EstimateMeanAndStd()
+	normalDist := distuv.Normal{Mu: predictedMeans["ALL"], Sigma: predictedStds["ALL"]}
 
 	type result struct {
 		unique float64
@@ -1055,7 +1107,7 @@ func getIndividualsSample() map[string][]string {
 		ReferenceAccuracy float64 `json:"ReferenceAccuracy"`
 	}
 	accuracyInputs := make([]*AccuracyInput, 0)
-	file, err := os.Open("results/guessAccuracy/individuals.json")
+	file, err := os.Open("results/recoveryAccuracy/individuals.json")
 	if err != nil {
 		log.Println("Error opening validated ids file:", err)
 		return nil
@@ -1138,7 +1190,6 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	refs := make([]string, 0)
 	for _, ref := range recoveredRefs {
 		if guessConfidence[ref] > ConfidenceThreshold && highConfidence {
-			//if guessConfidence[ref] > ConfidenceThreshold {
 			fmt.Printf("Already confident about %s\n", ref)
 			continue
 		}

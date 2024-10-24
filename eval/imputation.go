@@ -25,21 +25,24 @@ const (
 	globalAf      = "global"
 )
 
-func prepareIBD() {
+func linking() {
 	guessedSnps := loadGuessedGenotypes(perAncestryAf)
 	guessedIndividuals := make([]string, 0)
 	for idv := range guessedSnps {
 		guessedIndividuals = append(guessedIndividuals, idv)
 	}
 	sort.Strings(guessedIndividuals)
-	preparePlinkInput(guessedIndividuals, guessedSnps)
-	compressVcfFile("ibd/plink.vcf", "ibd/plink.vcf.gz")
-	indexVcfFile("ibd/plink.vcf.gz")
-	plinkGCTA("ibd/plink.vcf.gz")
-	plinkKing("ibd/plink.vcf.gz")
+	vcfFile := "results/linking/plink.vcf"
+	compressedVcfFile := vcfFile + ".gz"
+	preparePlinkInput(guessedIndividuals, guessedSnps, vcfFile)
+	compressVcfFile(vcfFile, compressedVcfFile)
+	indexVcfFile(compressedVcfFile)
+	plinkGCTA(compressedVcfFile)
+	plinkKing(compressedVcfFile)
+	removeFiles(vcfFile, compressedVcfFile)
 }
 
-func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[string]map[string]uint8) {
+func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[string]map[string]uint8, output string) {
 	alleles := make(map[string]map[string][]string)
 	positions := make(map[string][]int)
 	var ref, alt, chr string
@@ -107,18 +110,18 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 		samplesHeader += fmt.Sprintf("\t%s", idv)
 	}
 	samplesHeader += "\n"
-	vcfFile, err := os.OpenFile("ibd/plink.vcf", os.O_CREATE|os.O_WRONLY, 0644)
+	vcfFile, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Cannot create plink ibd file: %v", err)
 	}
 	defer vcfFile.Close()
 	_, err = vcfFile.WriteString(formatHeader)
 	if err != nil {
-		log.Fatalf("Cannot write format header to plink ibd file: %v", err)
+		log.Fatalf("Cannot write format header to the plink file: %v", err)
 	}
 	_, err = vcfFile.WriteString(samplesHeader)
 	if err != nil {
-		log.Fatalf("Cannot write samples header to plink ibd file: %v", err)
+		log.Fatalf("Cannot write samples header to the plink file: %v", err)
 	}
 	var snp uint8
 	for chrId := 1; chrId <= 22; chrId++ {
@@ -225,11 +228,11 @@ func runCommand(prg string, args []string) {
 }
 
 func plinkGCTA(path string) {
-	runCommand("plink", []string{"--vcf", path, "--make-rel", "square", "--out", "ibd/plink"})
+	runCommand("plink", []string{"--vcf", path, "--make-rel", "square", "--out", "results/linking/plink"})
 }
 
 func plinkKing(path string) {
-	runCommand("plink", []string{"--vcf", path, "--make-king", "square", "--out", "ibd/plink"})
+	runCommand("plink", []string{"--vcf", path, "--make-king", "square", "--out", "results/linking/plink"})
 }
 
 func retrievePositionAlleles(chr, pos string) (string, string) {
@@ -265,6 +268,19 @@ func retrievePositionAllelesDataset(chr, pos, dataset string) (string, string) {
 	return ".", "."
 }
 
+func removeFiles(filepaths ...string) {
+	for _, path := range filepaths {
+		path = strings.TrimSpace(path)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		err := os.Remove(path)
+		if err != nil {
+			log.Printf("Error removing file %s: %v\n", path, err)
+		}
+	}
+}
+
 type IdvResult struct {
 	Individual        string
 	Ancestry          string
@@ -291,7 +307,7 @@ func newLocusResult() *LocusResult {
 	}
 }
 
-func guessAccuracy(afType string) {
+func recoveryAccuracy(afType string) {
 	var guessed map[string]map[string]map[string]uint8
 	var idvOutputFilename, lociOutputFilename string
 	switch afType {
@@ -371,7 +387,7 @@ func guessAccuracy(afType string) {
 		res.ReferenceAccuracy /= float32(res.SNPs)
 		idvResults = append(idvResults, &res)
 	}
-	resultFolder := "results/guessAccuracy"
+	resultFolder := "results/recoveryAccuracy"
 	filepath = path.Join(resultFolder, idvOutputFilename)
 	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

@@ -8,71 +8,31 @@ from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import norm
 
 
-def score_distribution(filepath):
-    scores = []
-    with open(filepath, 'r') as file:
-        reader = csv.reader(file)
-        for row in reader:
-            scores.append(float(row[1]))
+FIGURE_FOLDER = 'analysis/figures/'
 
-    print("Median: ", np.median(scores))
-    print("Percentiles: ", np.percentile(scores, range(5, 100, 5)))
-    plt.hist(scores, bins=100)
-    plt.xlabel("Score")
-    plt.ylabel("Frequency")
-    plt.tight_layout()
-    plt.show()
-    # plt.savefig('score_distribution.png', dpi=300)
-
-
-def loci_coverage():
-    with open('loci_pgp_coverage.json', 'r') as file:
-        data = json.load(file)
-    locus_counts = {}
-
-    for location, studies in data.items():
-        locus_counts[location] = len(studies)
-
-    sorted_loci = sorted(locus_counts.keys(), key=lambda x: int(x.split(':')[0]))
-    loci = []
-    counts = []
-    for locus in sorted_loci:
-        loci.append(locus)
-        counts.append(locus_counts[locus])
-
-    # Create a figure and axis
-    fig, ax = plt.subplots(figsize=(15, 5))
-
-    # Plot the bar graph
-    bar_width = 1
-    ax.bar(range(len(counts)), counts, bar_width, align='center')
-
-    current_chr = 1
-    positions = []
-    for locus in loci:
-        chr_num = int(locus.split(':')[0])
-        if chr_num != current_chr:
-            ax.axvline(x=loci.index(locus), color='red', linestyle="dotted", linewidth=0.5)
-            current_chr = chr_num
-            positions.append(loci.index(locus))
-
-    ax.set_xticks(positions)
-    ax.set_xticklabels([l for l in range(2, 23)])
-
-    ax.set_ylabel('Frequency')
-    ax.set_xlabel('Chromosome')
-    ax.set_title('Distribution of Loci per Chromosome')
-
-    plt.tight_layout()
-    fig.savefig('coverage.png', dpi=300, bbox_inches='tight')
-    # plt.show()
+LABEL_SIZE = 15
+TICK_SIZE = 15
+LEGEND_SIZE = 15
+def prepare_for_latex():
+    params = {
+        'axes.labelsize': LABEL_SIZE,
+        'xtick.labelsize': TICK_SIZE,
+        'ytick.labelsize': TICK_SIZE,
+        'legend.fontsize': LEGEND_SIZE,
+        'legend.title_fontsize': LEGEND_SIZE,
+        'text.usetex': True,
+        'font.family': 'sans-serif',
+        'font.serif': 'Helvetica',
+        'savefig.bbox': 'tight',
+        'savefig.format': 'pdf',
+    }
+    mpl.rcParams.update(params)
 
 
 def load_idv_accuracy(filename):
-    directory = "results/guessAccuracy/"
+    directory = "results/recoveryAccuracy/"
     data = []
     filepath = os.path.join(directory, filename)
     with open(filepath, 'r') as f:
@@ -88,7 +48,7 @@ def load_idv_accuracy(filename):
     return pd.DataFrame(data)
 
 
-def sequential_idv_accuracy():
+def solving_idv_accuracy():
     df = load_idv_accuracy("individuals.json")
     df_gaf = load_idv_accuracy("individuals_gaf.json")
 
@@ -136,12 +96,12 @@ def sequential_idv_accuracy():
     plt.ylabel(r'Recovery accuracy, \%')
     plt.tight_layout()
     plt.ylim(64, 100)
-    # fig.savefig('recovery.pdf', dpi=300, bbox_inches='tight')
+    # fig.savefig(FIGURE_FOLDER + 'recovery.pdf', dpi=300, bbox_inches='tight')
     plt.show()
 
 
-def sequential_loci_accuracy():
-    directory = "results/guessAccuracy/"
+def solving_loci_accuracy():
+    directory = "results/recoveryAccuracy/"
     data = []
     filepath = os.path.join(directory, "loci.json")
     with open(filepath, 'r') as f:
@@ -165,32 +125,12 @@ def sequential_loci_accuracy():
     plt.xlabel('Effect Allele Frequency')
     plt.ylabel(r'Recovery accuracy, \%')
     plt.tight_layout()
-    fig1.savefig('accuracy_eaf.pdf', dpi=300, bbox_inches='tight')
+    fig1.savefig(FIGURE_FOLDER + 'accuracy_eaf.pdf', dpi=300, bbox_inches='tight')
 
     fig2, ax2 = plt.subplots(figsize=(4, 3))
-    # df['PGS_bin'] = pd.cut(df['PGS'], bins=20)
-    # pgs_df = df.groupby(['PGS_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
-    # pgs_df['PGS_mid'] = pgs_df['PGS_bin'].apply(lambda x: x.mid)
-    sns.lineplot(x='PGS', y='Accuracy', data=df, ax=ax2, color='coral')
-    plt.xlabel('Size of the smallest PGS with the locus')
-    plt.ylabel(r'Recovery accuracy, \%')
-    plt.tight_layout()
-    fig2.savefig('accuracy_pgs.pdf', dpi=300, bbox_inches='tight')
-
-    fig3, ax3 = plt.subplots(figsize=(4, 3))
-    df['Density_bin'] = pd.cut(df['Density'], bins=30)
-    density_df = df.groupby(['Density_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
-    density_df['Density_mid'] = density_df['Density_bin'].apply(lambda x: x.mid)
-    sns.lineplot(x='Density_mid', y='Accuracy', data=density_df, ax=ax3, color='#79ff50')
-    plt.xlabel('Density of the PGS with the locus')
-    plt.ylabel('Guess accuracy, %')
-    plt.tight_layout()
-    fig3.savefig('accuracy_density.pdf', dpi=300, bbox_inches='tight')
-
-    fig4, ax4 = plt.subplots(figsize=(4, 3))
     gwas_df = df[df['GWAS'] != 0]
-    sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax4, common_norm=False)
-    sns.kdeplot(data=gwas_df, x='GWAS', ax=ax4, linestyle='--', color='black', common_norm=False, label='GWAS')
+    sns.kdeplot(data=df, x='EAF', hue='Ancestry', ax=ax2, common_norm=False)
+    sns.kdeplot(data=gwas_df, x='GWAS', ax=ax2, linestyle='--', color='black', common_norm=False, label='GWAS')
     plt.xlabel('Effect Allele Frequency')
     plt.ylabel('Density')
     plt.xlim(0, 1)
@@ -200,23 +140,11 @@ def sequential_loci_accuracy():
     handles = [Line2D([0, 1], [0, 1], color=color) for color in legend_colors[:-1]]
     gwas_handle = Line2D([0, 1], [0, 1], color='black', linestyle='--')
     handles.append(gwas_handle)
-    ax4.legend(handles, legend_labels, ncol=2, loc="lower left", columnspacing=0.5)
-    # ax4.legend(ncol=2, loc="lower left")
+    ax2.legend(handles, legend_labels, ncol=2, loc="lower left", columnspacing=0.5)
+    # ax2.legend(ncol=2, loc="lower left")
     plt.xticks([0, 0.25, 0.5, 0.75, 1], ['0', '0.25', '0.5', '0.75', '1'])
     plt.tight_layout()
-    fig4.savefig('accuracy_ancestry.pdf', dpi=300, bbox_inches='tight')
-    # plt.show()
-
-    fig5, ax5 = plt.subplots(figsize=(4, 3))
-    df['Weight_bin'] = pd.cut(df['Weight'], bins=40)
-    weight_df = df.groupby(['Weight_bin', 'Ancestry'], observed=False)['Accuracy'].mean().reset_index()
-    weight_df['Weight_mid'] = weight_df['Weight_bin'].apply(lambda x: x.mid)
-    sns.lineplot(data=weight_df, x='Weight_mid', y='Accuracy', ax=ax5)
-    ax5.set_ylim(70, 100)
-    plt.xlabel('Effect Weight')
-    plt.ylabel('Accuracy')
-    plt.tight_layout()
-    fig5.savefig('accuracy_weight.pdf', dpi=300, bbox_inches='tight')
+    fig2.savefig(FIGURE_FOLDER + 'accuracy_ancestry.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
 
 
@@ -244,20 +172,15 @@ def score_uniqueness():
     ukbdf = load_uniqueness_data('UKBiobank')
     df = pd.concat([ggdf, ukbdf])
 
-    # Create bins for powers of 10
-    # bins = [0] + [10**i for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 3)]
     bins = []
     for i in range(1, int(np.log10(df['TotalPossibleScores'].max())) + 2):
         bins.append(10**(i-1))
         bins.append(10**(i-1) * 10**0.5)
     bins.append(10**i)
     df['TotalPossibleScoresBin'] = pd.cut(df['TotalPossibleScores'], bins=bins, right=False)
-    # Group by bins and calculate mean and std for real values
     grouped_real = df.groupby(['TotalPossibleScoresBin', 'Dataset'], observed=True).agg(
-        # RealPercentageUnique_mean=('RealPercentageUnique', 'mean'),
         RealPercentageUnique_median=('RealPercentageUnique', 'median'),
         RealPercentageUnique_std=('RealPercentageUnique', 'std'),
-        # RealAnonSize_mean=('RealAnonSize', 'mean'),
         RealAnonSize_median=('RealAnonSize', 'median'),
         RealAnonSize_std=('RealAnonSize', 'std'),
         TotalPossibleScores_mean=('TotalPossibleScores', 'mean'),
@@ -267,10 +190,8 @@ def score_uniqueness():
     df['PredictedPercentageUnique_filtered'] = df['PredictedPercentageUnique'].where(df['PredictedPercentageUnique'] > 0)
     grouped_predicted = df.groupby([
         'TotalPossibleScoresBin', 'Dataset'], observed=True).agg(
-        # PredictedPercentageUnique_mean=('PredictedPercentageUnique_filtered', 'mean'),
         PredictedPercentageUnique_median=('PredictedPercentageUnique_filtered', 'median'),
         PredictedPercentageUnique_std=('PredictedPercentageUnique_filtered', 'std'),
-        # PredictedAnonSize_mean=('PredictedAnonSize', 'mean'),
         PredictedAnonSize_median=('PredictedAnonSize', 'median'),
         PredictedAnonSize_std=('PredictedAnonSize', 'std'),
         NumVariants_median=('NumVariants', 'median')
@@ -293,7 +214,6 @@ def score_uniqueness():
         except IndexError:
             pass
 
-        # Print the results for each dataset
         print(f"{dataset} - Mean TotalPossibleScores at 95% unique: {num_unique[dataset]}")
         print(f"{dataset} - Mean TotalPossibleScores when RealAnonSize reaches 2: {anon_group[dataset]}")
 
@@ -304,7 +224,6 @@ def score_uniqueness():
     fig1, ax1 = plt.subplots(figsize=(5, 4))
     for dataset, color, label_prefix, marker in [('1000Genomes', first_color, '1000G', first_marker),
                                                  ('UKBiobank', second_color, 'UKBB', second_marker)]:
-        # Plot real values for percentage uniqueness
         subset_real = grouped_real[grouped_real['Dataset'] == dataset]
         x_real = subset_real['TotalPossibleScoresBin'].apply(lambda x: x.mid)
         y_real = subset_real['RealPercentageUnique_median']
@@ -313,7 +232,6 @@ def score_uniqueness():
         ax1.plot(x_real, y_real, color=color, label=f'{label_prefix} {observed}', marker=marker)
         ax1.fill_between(x_real, y_real - y_real_std, y_real + y_real_std, color=color, alpha=0.1)
 
-        # Plot predicted values
         subset_pred = grouped_predicted[grouped_predicted['Dataset'] == dataset]
         if not subset_pred.empty:
             x_pred = subset_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
@@ -322,8 +240,6 @@ def score_uniqueness():
 
     ax1.text(x=0.2, y=93, s='95', va='center', ha='right', color='gray', fontsize=TICK_SIZE)
     ax1.axhline(y=95, color='lightgray', linestyle='--', linewidth=1.5)
-    # for dataset in df['Dataset'].unique():
-    #     ax1.vlines(x=num_unique[dataset], ymin=0.8, ymax=95, color='lightgray', linestyle=':', linewidth=1.5)
     ax1.set_ylim(0, 105)
     ax1.set_xscale('log')
     ax1.set_xlabel('Number of possible scores')
@@ -344,7 +260,6 @@ def score_uniqueness():
         ax2.fill_between(x_anon_real, np.maximum(y_real_anon - y_real_anon_std, 1), y_real_anon + y_real_anon_std,
                          color=color, alpha=0.1)
 
-        # Plot predicted anonymity set size
         subset_anon_pred = grouped_predicted[grouped_predicted['Dataset'] == dataset]
         if not subset_anon_pred.empty:
             x_anon_pred = subset_anon_pred['TotalPossibleScoresBin'].apply(lambda x: x.mid)
@@ -354,8 +269,6 @@ def score_uniqueness():
 
     ax2.text(x=0.2, y=2, s='2', va='center', ha='right', color='gray', fontsize=TICK_SIZE)
     ax2.axhline(y=2, color='lightgray', linestyle='--', linewidth=1.5)
-    # for dataset in df['Dataset'].unique():
-    #     ax2.vlines(x=anon_group[dataset], ymin=0.8, ymax=2, color='lightgray', linestyle=':', linewidth=1.5)
     ax2.set_xlabel('Number of possible scores')
     ax2.set_ylabel('Median anonymity set size')
     ax2.set_xscale('log')
@@ -364,63 +277,8 @@ def score_uniqueness():
     ax2.legend()
     plt.tight_layout()
     # plt.show()
-    fig1.savefig('uniqueness.pdf', dpi=300, bbox_inches='tight')
-    fig2.savefig('anonymity.pdf', dpi=300, bbox_inches='tight')
-
-
-def random_hist():
-    params = {
-        'axes.labelsize': 36,
-        'xtick.labelsize': 36,
-        'ytick.labelsize': 36,
-        'text.usetex': True,
-        'font.family': 'serif'
-              }
-    mpl.rcParams.update(params)
-    data = np.random.beta(0.5, 0.5, 100)
-
-    # Create a histogram using seaborn
-    fig, ax = plt.subplots(figsize=(4, 3))
-    sns.histplot(data, bins=10, kde=False, color='darkorange')
-    plt.xlabel('Population AF', fontweight='bold')
-    plt.ylabel('')
-    plt.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
-    plt.xlim(0, 1)
-    plt.xticks([0, 0.5, 1])
-    # Show the plot
-    fig.savefig('allelefreq.pdf', dpi=300, bbox_inches='tight')
-    # plt.tight_layout()
-    # plt.show()
-
-
-def af_hist():
-    params = {
-        'axes.labelsize': 36,
-        'xtick.labelsize': 36,
-        'ytick.labelsize': 36,
-        'text.usetex': True,
-        'font.family': 'serif'
-    }
-    mpl.rcParams.update(params)
-
-    x = [0, 1, 2]
-    y = [0.6, 0.3, 0.1]
-    fig, ax = plt.subplots(figsize=(4, 3))
-    sns.barplot(x=x, y=y, ax=ax, color='darkorange')
-    ax.set_xticks([0, 1, 2])
-    ax.set_yticks([0, 0.5, 1])
-    plt.ylabel('Frequency')
-    plt.xlabel('Genotype')
-    # plt.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
-    # Show the plot
-    fig.savefig('allelefreq.pdf', dpi=300, bbox_inches='tight')
-
-
-def prepare_data(parsed, keys):
-    data = []
-    for key in keys:
-        data.extend([(key, value) for value in parsed[key]])
-    return pd.DataFrame(data, columns=['Versus', 'Value'])
+    fig1.savefig(FIGURE_FOLDER + 'uniqueness.pdf', dpi=300, bbox_inches='tight')
+    fig2.savefig(FIGURE_FOLDER + 'anonymity.pdf', dpi=300, bbox_inches='tight')
 
 
 def read_related_individuals():
@@ -456,107 +314,6 @@ def read_related_individuals():
         print(f"Error: {e}")
 
     return related
-
-
-def plot_normal_distribution_with_fill(mu=0, sigma=1):
-    params = {
-        'axes.labelsize': 36,
-        'xtick.labelsize': 36,
-        'ytick.labelsize': 36,
-        'text.usetex': True,
-        'font.family': 'serif'
-    }
-    mpl.rcParams.update(params)
-
-    x = np.linspace(mu - 4*sigma, mu + 4*sigma, 1000)
-    y = norm.pdf(x, mu, sigma)
-    plt.figure(figsize=(4, 3))
-    plt.plot(x, y, 'k')  # 'k' for black color
-    # Calculate the cutoff value for the top 10%
-    cutoff = norm.ppf(0.85, mu, sigma)
-
-    x_fill = np.linspace(cutoff, mu + 4*sigma, 1000)
-    y_fill = norm.pdf(x_fill, mu, sigma)
-    plt.fill_between(x_fill, y_fill, color='red', alpha=0.5)
-    plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
-                   labelbottom=False, labelleft=False)
-
-    # Add labels and legend
-    plt.xlabel('Risk score')
-    plt.ylabel('Frequency')
-    plt.savefig('risk_distro.pdf', dpi=300, bbox_inches='tight')
-    # Show the plot
-    # plt.tight_layout()
-    # plt.show()
-
-
-def ibd_accuracy():
-    indf = pd.read_csv("ibd/refined.ibd", sep='\t', index_col=0)
-    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
-    results = []
-    for idv in pruned_df.index:
-        target = idv[1:]
-        if target not in pruned_df.columns:
-            continue
-        kinship = pruned_df.at[idv, target]
-        all_kinship_values = pruned_df[target]
-        rank = all_kinship_values.rank(ascending=False).loc[idv]
-        results.append({'ID': target, 'Kinship': kinship, 'Rank': rank})
-        print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
-
-    df = pd.DataFrame(results)
-    df['Self'] = 'Self'
-    plt.figure(figsize=(4, 3))
-    print(f'Median rank: {df['Rank'].median()}')
-    # sns.boxplot(x='Self', y='Rank', data=df)
-    sns.boxplot(x='Self', y='Kinship', data=df)
-    # plt.xticks(rotation=90)  # Rotate x labels for better readability
-    plt.tight_layout()
-    plt.show()
-
-
-def plink_accuracy():
-    # Load IDs from a separate file
-    # with open("ibd/plink.rel.id", "r") as f:
-    with open("ibd/plink.king.id", "r") as f:
-        ids = [line.strip() for line in f]
-    ids = ids[1:]  # Remove the first line
-
-    # Load the kinship matrix
-    # indf = pd.read_csv("ibd/plink.rel", sep='\t', header=None)
-    indf = pd.read_csv("ibd/plink.king", sep='\t', header=None)
-    print(len(ids), indf.shape)
-
-    # Use the IDs to rename columns and index of the DataFrame
-    indf.columns = ids
-    indf.index = ids
-
-    # Prune the DataFrame to include only rows starting with '$' and columns not starting with '$'
-    pruned_df = indf.loc[indf.index.str.startswith('$'), ~indf.columns.str.startswith('$')]
-
-    results = []
-    for idv in pruned_df.index:
-        target = idv[1:]  # Remove the '$' symbol
-        if target not in pruned_df.columns:
-            continue
-        kinship = pruned_df.at[idv, target]
-        all_kinship_values = pruned_df[target]
-        rank = all_kinship_values.rank(ascending=False).loc[idv]
-        results.append({'ID': target, 'Kinship': kinship, 'Rank': rank})
-        print(f"ID: {target}, Kinship: {kinship}, Rank: {rank}, Top: {all_kinship_values.idxmax()}")
-
-    df = pd.DataFrame(results)
-    df['Self'] = 'Self'
-    plt.figure(figsize=(4, 3))
-    print(f'Median rank: {df["Rank"].median()}, Median kinship: {df["Kinship"].median()}')
-    print(f'Max rank: {df["Rank"].max()}, Max kinship: {df["Kinship"].max()}')
-    print(f'Min rank: {df["Rank"].min()}, Min kinship: {df["Kinship"].min()}')
-    # plt.ylim(0, df['Kinship'].max() + 0.1)
-    sns.boxplot(x='Self', y='Rank', data=df)
-    # sns.boxplot(x='Self', y='Kinship', data=df)
-    # plt.xticks(rotation=90)  # Rotate x labels for better readability
-    plt.tight_layout()
-    plt.show()
 
 
 def load_ancestry_baselines(id_file, data_file, method):
@@ -721,13 +478,10 @@ def deanonymization_accuracy():
     }
     mpl.rcParams.update(params)
 
-    king_df = load_results("ibd/plink.king.id", "ibd/plink.king", 'KING')
-    gcta_df = load_results("ibd/plink.rel.id", "ibd/plink.rel", 'GCTA')
+    king_df = load_results("results/linking/plink.king.id", "results/linking/plink.king", 'KING')
+    gcta_df = load_results("results/linking/plink.rel.id", "results/linking/plink.rel", 'GCTA')
     gcta_df['Kinship'] = gcta_df['Kinship'] / 2 # Relatedness -> Kinship
     gcta_df['Kinship'] = [0.5 if k > 0.5 else k for k in gcta_df['Kinship']]
-    # refined_df = load_results(None, "ibd/refined.ibd", 'Refined IBD')
-    # df = pd.concat([king_df, gcta_df, refined_df])
-
     # Set cutoffs for accuracy levels
     cutoffs = {
         'Self': 0.3535,
@@ -774,7 +528,7 @@ def deanonymization_accuracy():
     ax1.set_ylabel('Kinship')
     ax1.set_xlabel('')
     ax1.legend(title="")
-    fig1.savefig('kinship_score.pdf', dpi=300, bbox_inches='tight')
+    fig1.savefig(FIGURE_FOLDER + 'kinship_joint.pdf', dpi=300, bbox_inches='tight')
 
     categories = ['Self', '1st degree', '2nd degree', 'Unrelated']
     plot_precision_recall(df, 'KING', categories, cutoffs)
@@ -794,7 +548,7 @@ def deanonymization_accuracy():
     ax4.set_xticklabels(['-0.25', '0', '0.25', '0.5'])
     ax4.legend(title='', loc="upper left")
     plt.tight_layout()
-    fig4.savefig('kinship_original.pdf', dpi=300, bbox_inches='tight')
+    fig4.savefig(FIGURE_FOLDER + 'king_original.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
 
 
@@ -825,16 +579,16 @@ def plot_kinship(method, df, cutoffs):
     ax.set_ylabel('Kinship')
     ax.set_xlabel('')
     ax.legend(title="", loc='lower left')
-    fig.savefig(f'kinship_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
+    fig.savefig(FIGURE_FOLDER + f'kinship_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
 
 
 def plot_precision_recall(df_orig, method, categories, cutoffs):
     df = df_orig[df_orig['Method'] == method]
     precision, recall = calculate_precision_and_recall(df, categories, cutoffs)
     if method == 'KING':
-        baselines = load_ancestry_baselines("ibd/plink.king.id", "ibd/plink.king", method)
+        baselines = load_ancestry_baselines("results/linking/plink.king.id", "results/linking/plink.king", method)
     elif method == 'GCTA':
-        baselines = load_ancestry_baselines("ibd/plink.rel.id", "ibd/plink.rel", method)
+        baselines = load_ancestry_baselines("results/linking/plink.rel.id", "results/linking/plink.rel", method)
     else:
         return
     baseline_precision, baseline_recall = calculate_precision_and_recall(baselines, categories, cutoffs)
@@ -873,7 +627,7 @@ def plot_precision_recall(df_orig, method, categories, cutoffs):
     ax2.set_xticklabels(categories)
     ax2.legend(title="", loc='lower right')
     plt.tight_layout()
-    fig2.savefig(f'kinship_precision_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
+    fig2.savefig(FIGURE_FOLDER + f'kinship_precision_{method.lower()}.pdf', dpi=300, bbox_inches='tight')
 
 
 def calculate_precision_and_recall(df, categories, cutoffs):
@@ -907,17 +661,14 @@ def read_ancestry():
     return data
 
 
-def plot_defense(pgs):
+def plot_rounding(pgs):
     params = {
-        # 'axes.labelsize': 12,
-        # 'xtick.labelsize': 12,
-        # 'ytick.labelsize': 12,
         'legend.fontsize': 13,
         'legend.title_fontsize': 13,
     }
     mpl.rcParams.update(params)
-    directory = "results/defense/"
-    filepath = os.path.join(directory, pgs+".json")
+    directory = "results/rounding/"
+    filepath = os.path.join(directory, pgs+"_stats.json")
     with open(filepath, 'r') as f:
         content = json.load(f)
     data = []
@@ -946,9 +697,9 @@ def plot_defense(pgs):
     anonymity_legend = Line2D([0], [0], color='coral', marker='v', linestyle="--", label='Anonymity')
     ax1.legend(handles=[identifiability_legend, anonymity_legend], title='UKBB', loc='center left')
     plt.tight_layout()
-    fig1.savefig('precision_uniqueness.pdf', dpi=300, bbox_inches='tight')
-
-    fig2, ax3 = plt.subplots(figsize=(4, 3))
+    fig1.savefig(FIGURE_FOLDER + 'precision_uniqueness.pdf', dpi=300, bbox_inches='tight')
+    #
+    fig3, ax3 = plt.subplots(figsize=(4, 3))
     sns.lineplot(x='Precision', y='Density', data=df, color='coral', marker='.', ax=ax3, label='UKBB')
     ax3.set_xticks([p for p in range(17, 0, -2)])
     ax3.set_yticks([p for p in range(0, 30, 5)])
@@ -957,64 +708,83 @@ def plot_defense(pgs):
     ax3.legend()
     plt.gca().invert_xaxis()
     plt.tight_layout()
-    fig2.savefig('precision_density.pdf', dpi=300, bbox_inches='tight')
-
-
-def plot_defended_distribution():
-    params = {
-        'legend.fontsize': 13,
-        'legend.title_fontsize': 13,
-    }
-    mpl.rcParams.update(params)
-    filepath = "results/defense/scores.json"
+    fig3.savefig(FIGURE_FOLDER + 'precision_density.pdf', dpi=300, bbox_inches='tight')
+    #
+    filepath = os.path.join(directory, pgs+"_scores.json")
     with open(filepath, 'r') as f:
         content = json.load(f)
     data = {}
     for precision, scores in content.items():
         data[int(precision)] = [float(x) for x in scores]
-
-    # Plot the scatter plot
-    plt.figure(figsize=(4, 3))
+    fig4, ax4 = plt.subplots(figsize=(4, 3))
     linestyles = ['-', '--', '-.', ':']
     for i, precision in enumerate([1, 2, 5, 17]):
         sns.kdeplot(data=data[precision], label=f'{precision}', linestyle=linestyles[i])
-    # sns.scatterplot(x=data[17], y=data[1], color='coral', alpha=0.5)
-    plt.xlabel('PRS')
-    plt.ylabel('Count')
-    plt.legend(title='Precision')
+    ax4.xlabel('PRS')
+    ax4.ylabel('Count')
+    ax4.legend(title='Precision')
     plt.tight_layout()
-    plt.savefig('precision_distribution.pdf', dpi=300, bbox_inches='tight')
+    fig4.savefig(FIGURE_FOLDER + 'precision_distribution.pdf', dpi=300, bbox_inches='tight')
+
+
+def plot_snps_to_scores():
+    filepath = "results/uniqueness/num_snps.json"
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    data = []
+    for row in content:
+        data.append({'NumVariants': int(row['NumVariants']), 'Scores': int(row['TotalPossibleScores']),
+                     'Precision': int(row['Precision'])})
+    df = pd.DataFrame(data)
+    grouped_df = df.groupby('NumVariants', observed=False).agg(
+        Scores_median=('Scores', 'median'),   # Median of Scores for each NumVariants
+        Scores_std=('Scores', 'std')          # Standard deviation of Scores for each NumVariants
+    ).reset_index()
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.lineplot(x='NumVariants', y='Scores_median', data=grouped_df, ax=ax, color='#FFD166')
+    # ax.fill_between(grouped_df['NumVariants'],
+    #                 grouped_df['Scores_median'] - grouped_df['Scores_std'],
+    #                 grouped_df['Scores_median'] + grouped_df['Scores_std'],
+    #                 color='#FFD166', alpha=0.2)
+
+    plt.ylabel('Total possible scores')
+    plt.xlabel('Number of SNPs')
+    ax.set_yscale('log')
+    ax.set_yticks([10**i for i in [3, 7, 11, 15, 19]])
+    ax.set_xticks([i for i in range(5, 50, 10)])
+    plt.tight_layout()
+    fig.savefig(FIGURE_FOLDER + 'snps_to_scores.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
 
 
-LABEL_SIZE = 15
-TICK_SIZE = 15
-LEGEND_SIZE = 15
-def prepare_for_latex():
-    params = {
-        'axes.labelsize': LABEL_SIZE,
-        'xtick.labelsize': TICK_SIZE,
-        'ytick.labelsize': TICK_SIZE,
-        'legend.fontsize': LEGEND_SIZE,
-        'legend.title_fontsize': LEGEND_SIZE,
-        'text.usetex': True,
-        # 'font.family': 'serif',
-        # 'font.serif': 'Computer Modern',
-        'font.family': 'sans-serif',
-        'font.serif': 'Helvetica',
-        'savefig.bbox': 'tight',
-        'savefig.format': 'pdf',
-    }
-    mpl.rcParams.update(params)
+def plot_pgs_distribution():
+    filepath = "results/validated_pgs.json"
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    data = []
+    for pgs, num_snps in content.items():
+        data.append({'SNPs': int(num_snps)})
+    df = pd.DataFrame(data)
+    df['SNPs'] = pd.to_numeric(df['SNPs'])
+
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.histplot(df['SNPs'], bins=47, kde=False, color='#FFD166', ax=ax)
+    plt.ylabel('Number of PGS')
+    plt.xlabel('Number of SNPs')
+    ax.set_xlim(0, 50)
+    ax.set_xticks([2, 10, 20, 30, 40, 50])
+    ax.set_xticklabels([2, 10, 20, 30, 40, 50])
+    plt.tight_layout()
+    fig.savefig(FIGURE_FOLDER + 'pgs_distribution.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
 
 if __name__ == "__main__":
     prepare_for_latex()
     # score_uniqueness()
-    # plot_defense("PGS000869")
-    # plot_defended_distribution()
-    # sequential_idv_accuracy()
-    # sequential_loci_accuracy()
-    # af_hist()
-    # plot_normal_distribution_with_fill()
-    deanonymization_accuracy()
+    # plot_rounding("PGS000869")
+    # solving_idv_accuracy()
+    # solving_loci_accuracy()
+    # deanonymization_accuracy()
+    # plot_snps_to_scores()
+    # plot_pgs_distribution()
