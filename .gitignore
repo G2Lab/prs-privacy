@@ -20,10 +20,9 @@ go.work
 .DS_Store
 .idea
 *.png
-*.txt
-*.csv
-*.json
-*.priors
+#*.txt
+#*.csv
+#*.json
 *.scores
 *.pdf
 env/
