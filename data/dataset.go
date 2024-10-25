@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -16,22 +18,60 @@ const (
 	UKB = "UKBiobank"
 )
 
-const (
-	LocalInputFolder     = "inputs"
-	UKBiobankDataFolder  = "/gpfs/commons/datasets/controlled/ukbb-gursoylab/knikitin/"
-	UKBiobankInputFolder = UKBiobankDataFolder + "inputs/"
+const LocalInputFolder = "inputs"
+
+type Config struct {
+	GenomesMainDataFolder      string `yaml:"1000_genomes_main_data"`
+	GenomesRelativesDataFolder string `yaml:"1000_genomes_relatives_data"`
+	UKBiobankDataFolder        string `yaml:"uk_biobank_data"`
+	UKBiobankWorkingDir        string `yaml:"uk_biobank_wd"`
+}
+
+var (
+	GenomesMainDataFolder      string
+	GenomesRelativesDataFolder string
+	GenomesSamplesFile         string
+	UKBBDataFolder             string
+	UKBBWorkingDir             string
+	UKBBInputFolder            string
+	UKBBSamplesFile            string
 )
+
+func LoadPaths(configFile string) {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		log.Fatalf("Error reading config file: %v", err)
+	}
+
+	var config Config
+	err = yaml.Unmarshal(data, &config)
+	if err != nil {
+		log.Fatalf("Error unmarshalling config file: %v", err)
+	}
+
+	GenomesMainDataFolder = config.GenomesMainDataFolder
+	GenomesRelativesDataFolder = config.GenomesRelativesDataFolder
+	GenomesSamplesFile = "info/1000genome-samples.csv"
+	UKBBDataFolder = config.UKBiobankDataFolder
+	UKBBWorkingDir = config.UKBiobankWorkingDir
+	UKBBInputFolder = UKBBWorkingDir + LocalInputFolder
+	UKBBSamplesFile = UKBBWorkingDir + "individuals.txt"
+}
+
+func init() {
+	LoadPaths("datasets.yaml")
+}
 
 func GetChromosomeFilepath(chr, ds string) string {
 	switch ds {
 	case GG:
-		path := "/gpfs/commons/datasets/1000genomes/GRCh37/"
+		path := GenomesMainDataFolder
 		return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
 	case RL:
-		path := "/gpfs/commons/datasets/1000genomes/release-20130502-supporting/related_samples_vcf/"
+		path := GenomesRelativesDataFolder
 		return path + "ALL.chr" + chr + ".phase3_shapeit2_mvncall_integrated_v5_related_samples.20130502.genotypes.vcf.gz"
 	case UKB:
-		path := "/gpfs/commons/datasets/controlled/ukbb-gursoylab/ImputationV3/"
+		path := UKBBDataFolder
 		return path + "Chr" + chr + "/plink2.vcf.gz"
 	default:
 		log.Fatalln("Unknown dataset:", ds)

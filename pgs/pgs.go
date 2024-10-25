@@ -340,8 +340,8 @@ func (p *PGS) LoadDatasetStats(dataset string) error {
 		efalFilename = fmt.Sprintf("%s/%s.efal", data.LocalInputFolder, p.PgsID)
 		statFilename = fmt.Sprintf("%s/%s.stat", data.LocalInputFolder, p.PgsID)
 	case data.UKB:
-		efalFilename = fmt.Sprintf("%s/%s.efal", data.UKBiobankInputFolder, p.PgsID)
-		statFilename = fmt.Sprintf("%s/%s.stat", data.UKBiobankInputFolder, p.PgsID)
+		efalFilename = fmt.Sprintf("%s/%s.efal", data.UKBBInputFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", data.UKBBInputFolder, p.PgsID)
 	default:
 		log.Printf("Unknown dataset: %s\n", dataset)
 		return errors.New("unknown dataset")

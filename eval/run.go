@@ -36,8 +36,8 @@ func main() {
 	expr := flag.String("e", "", "Experiment type")
 	flag.Parse()
 	switch *expr {
-	case "example":
-		example()
+	case "demo":
+		demo()
 	case "solve":
 		chainSolving()
 	case "solveaf":
@@ -63,7 +63,7 @@ func main() {
 	}
 }
 
-func example() {
+func demo() {
 	idsToNumVariants, lociToPgs, err := loadValidatedPgsAndLoci()
 	if err != nil {
 		log.Println(err)
@@ -177,7 +177,9 @@ func example() {
 		}
 	}
 	accuracy /= float64(len(guessedSnps))
-	fmt.Printf("Recovered %d genotypes with %.2f%% accuracy\n", len(guessedSnps), accuracy*100)
+	fmt.Println("==============================")
+	fmt.Printf("Recovered %d genotypes for %s (%s) with %.1f%% accuracy\n",
+		len(guessedSnps), individual, idvPop, accuracy*100)
 }
 
 func numberSnpsToPossibleScores() {
@@ -1133,7 +1135,8 @@ func getIndividualsSample() map[string][]string {
 func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop string, guessedSnps map[string]uint8,
 	guessedRefs map[string]string, guessConfidence map[string]int,
 	recoveredSnps map[int]uint8, recoveredRefs map[int]string) [][]uint8 {
-	fmt.Println("--- No solutions with all the extra loci")
+	fmt.Println("--- No solutions with all the known genotypes ---")
+	fmt.Println("Running self-repair")
 	highConfidenceSnps := make(map[int]uint8)
 	highConfidenceRefs := make(map[int]string)
 	for i, snp := range recoveredSnps {
@@ -1241,7 +1244,6 @@ solutionLoop:
 			}
 			fmt.Printf("New %s accuracy: %.3f\n", ref, solver.Accuracy(refSols[j][0], refCohort[individual].Genotype))
 		}
-		//fmt.Printf("Solution %d is valid\n", k)
 		// All refs are solvable, updating old loci
 		for j, ref := range refs {
 			if len(refSols[j]) == 0 {

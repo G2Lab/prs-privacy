@@ -3,20 +3,16 @@ package solver
 import (
 	"bufio"
 	"encoding/csv"
-	"github.com/nikirill/prs/data"
 	"io"
 	"log"
 	"os"
 	"strings"
-)
 
-const (
-	GGSamplesFile   = "info/1000genome-samples.csv"
-	UKBBSamplesFile = data.UKBiobankDataFolder + "individuals.txt"
+	"github.com/nikirill/prs/data"
 )
 
 func All1000GenomesSamples() []string {
-	f, err := os.Open(GGSamplesFile)
+	f, err := os.Open(data.GenomesSamplesFile)
 	if err != nil {
 		log.Fatalf("Error opening the samples file: %v", err)
 	}
@@ -43,7 +39,7 @@ func All1000GenomesAndRelativeSamples() []string {
 }
 
 func AllUKBiobankSamples() []string {
-	f, err := os.Open(UKBBSamplesFile)
+	f, err := os.Open(data.UKBBSamplesFile)
 	if err != nil {
 		log.Fatalf("Error opening the UKBB samples file: %v", err)
 	}

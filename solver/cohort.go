@@ -58,7 +58,7 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 		// Otherwise, load the data from disk
 		c.LoadFromDisk(filename)
 	case data.UKB:
-		filename = fmt.Sprintf("%s/%s.json", data.UKBiobankInputFolder, p.PgsID)
+		filename = fmt.Sprintf("%s/%s.json", data.UKBBInputFolder, p.PgsID)
 		if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
 			err = c.RetrieveGenotypes(p, dataset)
 			if err != nil {
@@ -66,13 +66,13 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 			}
 			c.CalculatePRS(p)
 			c.SaveToDisk(filename)
-			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.UKBiobankInputFolder, p.PgsID)); os.IsNotExist(err) {
-				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.UKBiobankInputFolder, p.PgsID))
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.UKBBInputFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.UKBBInputFolder, p.PgsID))
 			}
 			return
 		}
 		c.LoadFromDisk(filename)
-		//filename = fmt.Sprintf("%s/%s.scores", params.UKBiobankInputFolder, p.PgsID)
+		//filename = fmt.Sprintf("%s/%s.scores", params.UKBBInputFolder, p.PgsID)
 		//if info, err := os.Stat(filename); os.IsNotExist(err) || info.Size() == 0 {
 		//	err = c.RetrieveGenotypes(p, dataset)
 		//	c.CalculatePRS(p)
