@@ -83,7 +83,7 @@ func NewDP(score *apd.Decimal, p *pgs.PGS, ppl string, precisionLimit uint32, kn
 }
 
 func (dp *DP) SolveProbabilistic() map[string][]uint8 {
-	fmt.Println("Solving probabilistically")
+	//fmt.Println("Solving probabilistically")
 	numSegments := 2
 	_, target, roundingError := dp.getTargetAndWeightsAsInts()
 
@@ -105,7 +105,7 @@ func (dp *DP) SolveProbabilistic() map[string][]uint8 {
 }
 
 func (dp *DP) SolveDeterministic() map[string][]uint8 {
-	fmt.Println("Solving deterministically")
+	//fmt.Println("Solving deterministically")
 	numSegments := 2
 	weights, target, roundingError := dp.getTargetAndWeightsAsInts()
 	indices := splitIndices(dp.p.Loci, dp.known, numSegments)
@@ -172,21 +172,21 @@ func (dp *DP) BuildProbabilisticState(numSegments int) *ProbabilisticState {
 
 func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas []map[uint8]int64, targets []int64,
 	solHeap *genHeap) {
-	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
-	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
+	//fmt.Printf("Table 0 length: %d\n", len(tables[0]))
+	//fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	matchHeapSize := 1000 * dp.p.NumVariants
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
 	mheap := newMatchHeap()
-	var s int
+	//var s int
 	var ok bool
 	var leftSum int64
 	for leftSum = range tables[0] {
-		if s++; s%step == 0 {
-			fmt.Printf("Progress: %d%%\n", s*10/step)
-		}
+		//if s++; s%step == 0 {
+		//	fmt.Printf("Progress: %d%%\n", s*10/step)
+		//}
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {
 				mheap.addToMatchHeap(tables[0][leftSum].TopLikelihood+tables[1][t-leftSum].TopLikelihood, []int64{leftSum, t - leftSum}, matchHeapSize)
@@ -213,13 +213,14 @@ func (dp *DP) probabilisticMitM(numSegments int, tables []map[int64]*Node, betas
 
 func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[int64][]uint8, betas []map[uint8]int64,
 	targets []int64, solHeap *genHeap) {
-	fmt.Printf("Table 0 length: %d\n", len(tables[0]))
-	fmt.Printf("Table 1 length: %d\n", len(tables[1]))
+	//fmt.Printf("Table 0 length: %d\n", len(tables[0]))
+	//fmt.Printf("Table 1 length: %d\n", len(tables[1]))
 	step := len(tables[0]) / 10
 	if step == 0 {
 		step = 1
 	}
-	var i, s int
+	//var s int
+	var i int
 	var ok bool
 	var leftSum int64
 	tmp := make([][]uint8, 0)
@@ -234,9 +235,9 @@ func (dp *DP) deterministicMitM(numSegments int, indices [][]int, tables []map[i
 	}
 	halfSums[0] = append(halfSums[0], 0)
 	for leftSum = range tables[0] {
-		if s++; s%step == 0 {
-			fmt.Printf("Progress: %d%%\n", s*10/step)
-		}
+		//if s++; s%step == 0 {
+		//	fmt.Printf("Progress: %d%%\n", s*10/step)
+		//}
 		halfSums[1] = halfSums[1][:0]
 		for _, t := range targets {
 			if _, ok = tables[1][t-leftSum]; ok {

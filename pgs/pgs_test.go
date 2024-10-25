@@ -9,7 +9,7 @@ import (
 
 func TestPGSLoad(t *testing.T) {
 	p := NewPGS()
-	err := p.LoadCatalogFile(path.Join(data.LocalDataFolder, "PGS000073_hmPOS_GRCh37.txt"))
+	err := p.LoadCatalogFile(path.Join(data.LocalInputFolder, "PGS000073_hmPOS_GRCh37.txt"))
 	if err != nil {
 		fmt.Println("Error:", err)
 		return

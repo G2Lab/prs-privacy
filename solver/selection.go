@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	GGSamplesFile   = "data/1000genome-samples.csv"
+	GGSamplesFile   = "info/1000genome-samples.csv"
 	UKBBSamplesFile = data.UKBiobankDataFolder + "individuals.txt"
 )
 
@@ -61,7 +61,7 @@ func AllUKBiobankSamples() []string {
 }
 
 func ReadRelatedIndividuals() map[string][]string {
-	file, err := os.Open("data/related_individuals.txt")
+	file, err := os.Open("info/related_individuals.txt")
 	if err != nil {
 		log.Fatalf("Error opening related individuals file: %v", err)
 		return nil

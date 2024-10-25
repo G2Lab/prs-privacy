@@ -40,7 +40,7 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 	var filename string
 	switch dataset {
 	case data.GG:
-		filename = fmt.Sprintf("%s/%s.json", data.LocalDataFolder, p.PgsID)
+		filename = fmt.Sprintf("%s/%s.json", data.LocalInputFolder, p.PgsID)
 		// If the file doesn't exist, calculate the PRS and save it
 		if _, err = os.Stat(filename); os.IsNotExist(err) {
 			err = c.RetrieveGenotypes(p, dataset)
@@ -50,8 +50,8 @@ func (c Cohort) Populate(p *pgs.PGS, dataset string) {
 			c.CalculatePRS(p)
 			c.SaveToDisk(filename)
 			// Save scores separately for the ease of reading
-			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.LocalDataFolder, p.PgsID)); os.IsNotExist(err) {
-				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.LocalDataFolder, p.PgsID))
+			if _, err = os.Stat(fmt.Sprintf("%s/%s.scores", data.LocalInputFolder, p.PgsID)); os.IsNotExist(err) {
+				c.SaveScores(fmt.Sprintf("%s/%s.scores", data.LocalInputFolder, p.PgsID))
 			}
 			return
 		}

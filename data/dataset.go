@@ -16,6 +16,12 @@ const (
 	UKB = "UKBiobank"
 )
 
+const (
+	LocalInputFolder     = "inputs"
+	UKBiobankDataFolder  = "/gpfs/commons/datasets/controlled/ukbb-gursoylab/knikitin/"
+	UKBiobankInputFolder = UKBiobankDataFolder + "inputs/"
+)
+
 func GetChromosomeFilepath(chr, ds string) string {
 	switch ds {
 	case GG:
@@ -120,7 +126,7 @@ func SnpToSum(snp string) (uint8, error) {
 
 func LoadAncestry() map[string]string {
 	data := make(map[string]string)
-	file, err := os.Open("data/superpopulations.json")
+	file, err := os.Open("info/superpopulations.json")
 	if err != nil {
 		fmt.Println("Error opening populations file:", err)
 		return data

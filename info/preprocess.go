@@ -567,7 +567,7 @@ func Log3(x float64) float64 {
 }
 
 func readSamplePopulations() {
-	fileName := "data/igsr_samples.tsv"
+	fileName := "info/igsr_samples.tsv"
 
 	// Open the TSV inputFile
 	inputFile, err := os.Open(fileName)
@@ -607,34 +607,8 @@ func readSamplePopulations() {
 		fullData[record[sampleIdx]] = record[superPopIdx]
 	}
 
-	//// Check that we have all the sample info for the 1000 Genomes dataset
-	//sampleFile, err := os.Open("data/1000genome-samples.csv")
-	//if err != nil {
-	//	fmt.Println("Error:", err)
-	//	return
-	//}
-	//defer sampleFile.Close()
-	//
-	//// Create a CSV reader with tab as the delimiter
-	//reader = csv.NewReader(sampleFile)
-	//
-	//// Read the header to get column names
-	//sampleList, err := reader.Read()
-	//if err != nil {
-	//	fmt.Println("Error reading sample list:", err)
-	//	return
-	//}
-	//reducedData := make(map[string]string)
-	//for _, sample := range sampleList {
-	//	if _, exists := fullData[sample]; !exists {
-	//		fmt.Printf("Sample %s not found in the superpopulation fullData\n", sample)
-	//		continue
-	//	}
-	//	reducedData[sample] = fullData[sample]
-	//}
-
 	// Save the results to a JSON file
-	outputFile, err := os.Create("data/superpopulations.json")
+	outputFile, err := os.Create("info/superpopulations.json")
 	if err != nil {
 		fmt.Println("Error creating JSON outputFile:", err)
 		return

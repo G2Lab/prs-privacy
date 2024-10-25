@@ -36,6 +36,8 @@ func main() {
 	expr := flag.String("e", "", "Experiment type")
 	flag.Parse()
 	switch *expr {
+	case "example":
+		example()
 	case "solve":
 		chainSolving()
 	case "solveaf":
@@ -59,6 +61,123 @@ func main() {
 	case "genfreq":
 		calculateGenotypeFrequenciesForGuessed()
 	}
+}
+
+func example() {
+	idsToNumVariants, lociToPgs, err := loadValidatedPgsAndLoci()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	individuals := solver.All1000GenomesAndRelativeSamples()
+	individual := individuals[rand.Intn(len(individuals))]
+	populations := data.LoadAncestry()
+	idvPop := pgs.GetIndividualAncestry(individual, populations)
+	fmt.Printf("--- Recovering the genotypes of %s (%s) from the 1000 Genomes dataset ---\n", individual, idvPop)
+
+	var pgsID string
+	allPgs := make([]string, 0, len(idsToNumVariants))
+	for id, _ := range idsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	pgsToLoci := make(map[string]map[string]struct{})
+	for locus, pgsIDs := range lociToPgs {
+		for _, pgsID := range pgsIDs {
+			if _, ok := pgsToLoci[pgsID]; !ok {
+				pgsToLoci[pgsID] = make(map[string]struct{})
+			}
+			pgsToLoci[pgsID][locus] = struct{}{}
+		}
+	}
+
+	sort.Slice(allPgs, func(i, j int) bool {
+		if len(pgsToLoci[allPgs[i]]) == len(pgsToLoci[allPgs[j]]) {
+			return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
+		}
+		return len(pgsToLoci[allPgs[i]]) < len(pgsToLoci[allPgs[j]])
+	})
+	guessedSnps := make(map[string]uint8)
+	guessedRefs := make(map[string]string)
+	guessConfidence := make(map[string]int)
+	trueSnps := make(map[string]uint8)
+	for {
+		if len(allPgs) == 0 || idsToNumVariants[allPgs[0]] > 30 {
+			break
+		}
+		pgsID = allPgs[0]
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		fmt.Printf("======== %s ========\n", p.PgsID)
+		err = p.LoadStats(data.GG)
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return
+		}
+		knownSnps := make(map[int]uint8)
+		knownRefs := make(map[int]string)
+		includedRefs := make(map[string]struct{})
+		for l, locus := range p.Loci {
+			if guess, ok := guessedSnps[locus]; ok {
+				knownSnps[l] = guess
+				knownRefs[l] = guessedRefs[locus]
+				if _, ok = includedRefs[guessedRefs[locus]]; !ok {
+					includedRefs[guessedRefs[locus]] = struct{}{}
+				}
+			}
+		}
+		fmt.Printf("Total SNPs %d, unknown %d\n", len(p.Loci), len(p.Loci)-len(knownSnps))
+		cohort := solver.NewCohort(p, data.GG)
+		solutions := findSolutions(p, cohort, individual, idvPop, knownSnps)
+		if len(solutions) == 0 && len(knownSnps) > 0 {
+			solutions = selfRepair(p, cohort, individual, idvPop, guessedSnps, guessedRefs, guessConfidence,
+				knownSnps, knownRefs)
+			knownSnps = nil
+		}
+		if len(solutions) > 0 {
+			for i, locus := range p.Loci {
+				if _, ok := guessedSnps[locus]; ok {
+					continue
+				}
+				guessedSnps[locus] = solutions[0][pgs.Ploidy*i] + solutions[0][pgs.Ploidy*i+1]
+				guessedRefs[locus] = pgsID
+				trueSnps[locus] = cohort[individual].Genotype[pgs.Ploidy*i] + cohort[individual].Genotype[pgs.Ploidy*i+1]
+			}
+			fmt.Printf("Recovered genotypes:\t%s\n", solver.ArrayToString(solutions[0]))
+			fmt.Printf("True genotypes:\t\t%s\n", solver.ArrayToString(cohort[individual].Genotype))
+			fmt.Printf("Accuracy: %.0f%%\n", 100*solver.Accuracy(cohort[individual].Genotype, solutions[0]))
+			//
+			guessConfidence[pgsID] = 1
+			for ref := range includedRefs {
+				guessConfidence[ref]++
+				if len(p.Loci)-len(knownSnps) <= 1 {
+					guessConfidence[ref]++
+				}
+			}
+		}
+		allPgs = allPgs[1:]
+		for _, locus := range p.Loci {
+			for _, id := range lociToPgs[locus] {
+				if id == pgsID {
+					continue
+				}
+				if _, ok := pgsToLoci[id][locus]; ok {
+					delete(pgsToLoci[id], locus)
+				}
+			}
+		}
+	}
+	accuracy := 0.0
+	for locus, guess := range guessedSnps {
+		if guess == trueSnps[locus] {
+			accuracy++
+		}
+	}
+	accuracy /= float64(len(guessedSnps))
+	fmt.Printf("Recovered %d genotypes with %.2f%% accuracy\n", len(guessedSnps), accuracy*100)
 }
 
 func numberSnpsToPossibleScores() {
@@ -94,7 +213,7 @@ func numberSnpsToPossibleScores() {
 	for _, pgsID := range allPgs {
 		fmt.Printf("======== %s (%d) ========\n", pgsID, pgsToNumVariants[pgsID])
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
@@ -136,7 +255,7 @@ func precisionToUniqueness() {
 	//})
 	//for _, pgsID := range allPgs {
 	//	p := pgs.NewPGS()
-	//	p.LoadCatalogFile(path.Join(params.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+	//	p.LoadCatalogFile(path.Join(params.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 	//	if p.WeightPrecision >= 17 {
 	//		maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(p.WeightPrecision))
 	//		density := float64(p.NumVariants) / Log3(maxw)
@@ -156,7 +275,7 @@ func precisionToUniqueness() {
 	dataset := data.UKB
 	pgsID := "PGS000869"
 	p := pgs.NewPGS()
-	err := p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+	err := p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
@@ -349,7 +468,7 @@ func calculateScoresAndStats() {
 	}
 	fmt.Printf("======== %s ========\n", allPgs[pgsNum])
 	p := pgs.NewPGS()
-	err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, allPgs[pgsNum]+"_hmPOS_GRCh37.txt"))
+	err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, allPgs[pgsNum]+"_hmPOS_GRCh37.txt"))
 	if err != nil {
 		log.Printf("Error loading catalog file: %v\n", err)
 		return
@@ -422,7 +541,7 @@ func uniquenessExperiment(dataset string) {
 				var sf string
 				var realNumUnique int
 				p := pgs.NewPGS()
-				err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+				err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 				if err != nil {
 					log.Printf("Error loading catalog file: %v\n", err)
 					return
@@ -667,33 +786,11 @@ func calculateNumPossibleSubsets[T Stringer](weights []T) uint64 {
 
 func chainSolving() {
 	fmt.Printf("Chain solving\n")
-	file, err := os.Open("results/validated_pgs.json")
+	idsToNumVariants, lociToPgs, err := loadValidatedPgsAndLoci()
 	if err != nil {
-		log.Println("Error opening validated ids file:", err)
+		log.Println(err)
 		return
 	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	var idsToNumVariants map[string]int
-	err = decoder.Decode(&idsToNumVariants)
-	if err != nil {
-		log.Println("Error decoding validated ids:", err)
-		return
-	}
-	file, err = os.Open("results/validated_loci.json")
-	if err != nil {
-		log.Println("Error opening validated ids file:", err)
-		return
-	}
-	defer file.Close()
-	decoder = json.NewDecoder(file)
-	var lociToPgs map[string][]string
-	err = decoder.Decode(&lociToPgs)
-	if err != nil {
-		log.Println("Error decoding validated loci:", err)
-		return
-	}
-
 	individuals := solver.All1000GenomesAndRelativeSamples()
 	sort.Strings(individuals)
 
@@ -752,7 +849,7 @@ func chainSolving() {
 			}
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
-			err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+			err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file: %v\n", err)
 				return
@@ -826,7 +923,7 @@ func chainSolving() {
 		guesses = append(guesses, &Guess{Individual: individual, Ancestry: indPop, SNPs: guessedSnps})
 	}
 
-	resultFolder := "results/results/recoveryOutput"
+	resultFolder := "results/recoveryOutput"
 	filepath := path.Join(resultFolder, fmt.Sprintf("guesses%d.json", chunkNum))
 	guessFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -841,33 +938,11 @@ func chainSolving() {
 
 func chainSolvingOneAF() {
 	fmt.Printf("Chain solving\n")
-	file, err := os.Open("results/validated_pgs.json")
+	idsToNumVariants, lociToPgs, err := loadValidatedPgsAndLoci()
 	if err != nil {
-		log.Println("Error opening validated ids file:", err)
+		log.Println(err)
 		return
 	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	var idsToNumVariants map[string]int
-	err = decoder.Decode(&idsToNumVariants)
-	if err != nil {
-		log.Println("Error decoding validated ids:", err)
-		return
-	}
-	file, err = os.Open("results/validated_loci.json")
-	if err != nil {
-		log.Println("Error opening validated ids file:", err)
-		return
-	}
-	defer file.Close()
-	decoder = json.NewDecoder(file)
-	var lociToPgs map[string][]string
-	err = decoder.Decode(&lociToPgs)
-	if err != nil {
-		log.Println("Error decoding validated loci:", err)
-		return
-	}
-
 	individuals := getIndividualsSample()
 	ppl := os.Args[2]
 	//fmt.Printf("%s: %s\n", ppl, individuals[ppl])
@@ -918,7 +993,7 @@ func chainSolvingOneAF() {
 			}
 			pgsID = allPgs[0]
 			p := pgs.NewPGS()
-			err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+			err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file: %v\n", err)
 				return
@@ -993,7 +1068,7 @@ func chainSolvingOneAF() {
 			Ancestry: pgs.GetIndividualAncestry(individual, populations), SNPs: guessedSnps})
 	}
 
-	resultFolder := "results/results/recoveryOutput"
+	resultFolder := "results/recoveryOutput"
 	filepath := path.Join(resultFolder, fmt.Sprintf("af-guesses-%s.json", ppl))
 	guessFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -1058,7 +1133,7 @@ func getIndividualsSample() map[string][]string {
 func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop string, guessedSnps map[string]uint8,
 	guessedRefs map[string]string, guessConfidence map[string]int,
 	recoveredSnps map[int]uint8, recoveredRefs map[int]string) [][]uint8 {
-	fmt.Println("^^^ No solutions with all the extra loci ^^^")
+	fmt.Println("--- No solutions with all the extra loci")
 	highConfidenceSnps := make(map[int]uint8)
 	highConfidenceRefs := make(map[int]string)
 	for i, snp := range recoveredSnps {
@@ -1076,7 +1151,7 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 		fmt.Printf("Ignoring %s, only %d/%d SNPs are known\n", p.PgsID, len(highConfidenceSnps), p.NumVariants)
 		return nil
 	}
-	fmt.Printf("Solving with high-confidence SNPs: %v\n", highConfidenceRefs)
+	//fmt.Printf("Solving with high-confidence SNPs: %v\n", highConfidenceRefs)
 	solutions := findSolutions(p, cohort, individual, indPop, highConfidenceSnps)
 	highConfidence := true
 	if len(solutions) == 0 {
@@ -1090,9 +1165,8 @@ func selfRepair(p *pgs.PGS, cohort solver.Cohort, individual string, indPop stri
 	if len(solutions) == 0 {
 		return nil
 	}
-	fmt.Printf("Top solution with high-confidence snps/from scratch: accuracy %.2f, likelihood %.2f\n",
-		solver.Accuracy(solutions[0], cohort[individual].Genotype),
-		solver.CalculateFullSequenceLikelihood(solutions[0], p.PopulationStats[indPop].AF, p.EffectAlleles))
+	fmt.Printf("Top solution from scratch: accuracy %.2f\n",
+		solver.Accuracy(solutions[0], cohort[individual].Genotype))
 
 	refMap := make(map[string]struct{})
 	refs := make([]string, 0)
@@ -1135,7 +1209,7 @@ solutionLoop:
 				continue
 			}
 			refp := pgs.NewPGS()
-			err = refp.LoadCatalogFile(path.Join(data.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
+			err = refp.LoadCatalogFile(path.Join(data.LocalInputFolder, ref+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
@@ -1167,14 +1241,14 @@ solutionLoop:
 			}
 			fmt.Printf("New %s accuracy: %.3f\n", ref, solver.Accuracy(refSols[j][0], refCohort[individual].Genotype))
 		}
-		fmt.Printf("Solution %d is valid\n", k)
+		//fmt.Printf("Solution %d is valid\n", k)
 		// All refs are solvable, updating old loci
 		for j, ref := range refs {
 			if len(refSols[j]) == 0 {
 				continue
 			}
 			refp := pgs.NewPGS()
-			err = refp.LoadCatalogFile(path.Join(data.LocalDataFolder, ref+"_hmPOS_GRCh37.txt"))
+			err = refp.LoadCatalogFile(path.Join(data.LocalInputFolder, ref+"_hmPOS_GRCh37.txt"))
 			if err != nil {
 				log.Printf("Error loading catalog file %s: %v\n", ref, err)
 				return nil
@@ -1314,7 +1388,6 @@ func preparePlinkInput(guessedIndividuals []string, guessed map[string]map[strin
 		for _, posId := range positions[chr] {
 			pos := strconv.Itoa(posId)
 			if _, ok = alleles[chr]; !ok || alleles[chr][pos][0] == "." || alleles[chr][pos][1] == "." {
-				//if _, ok = alleles[chr]; !ok {
 				continue
 			}
 			if _, ok = alleles[chr][pos]; !ok {
@@ -1608,7 +1681,7 @@ func recoveryAccuracy(afType string) {
 	var ok bool
 	for _, pgsID := range allPgs {
 		p := pgs.NewPGS()
-		err = p.LoadCatalogFile(path.Join(data.LocalDataFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
 		if err != nil {
 			log.Printf("Error loading catalog file: %v\n", err)
 			return
@@ -1681,7 +1754,7 @@ func loadGuessedGenotypes(afType string) map[string]map[string]map[string]uint8 
 	var err error
 	var file *os.File
 	var decoder *json.Decoder
-	folder := "results/results/recoveryOutput"
+	folder := "results/recoveryOutput"
 	dir, err := os.ReadDir(folder)
 	if err != nil {
 		log.Fatalf("Cannot read directory %s: %v", folder, err)
@@ -1731,7 +1804,6 @@ func calculateGenotypeFrequenciesForGuessed() {
 	guessed := loadGuessedGenotypes(perAncestryAf)
 	missingGenotypeFrequencies := []float32{(1 - pgs.MissingEAF) * (1 - pgs.MissingEAF),
 		2 * pgs.MissingEAF * (1 - pgs.MissingEAF), pgs.MissingEAF * pgs.MissingEAF}
-	folder := "data/frequencies"
 	samples := solver.All1000GenomesSamples()
 	var filepath string
 	var outFile *os.File
@@ -1788,7 +1860,7 @@ func calculateGenotypeFrequenciesForGuessed() {
 			}
 		}
 	}
-	filepath = path.Join(folder, "guessed.json")
+	filepath = "info/genotype_frequencies.json"
 	outFile, err = os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening output file: %v", err)
@@ -1802,8 +1874,8 @@ func calculateGenotypeFrequenciesForGuessed() {
 }
 
 func loadGenotypeFrequenciesForGuessed() map[string]map[string]map[string][]float32 {
-	folder := "data/frequencies"
-	filepath := path.Join(folder, "guessed.json")
+	folder := "info"
+	filepath := path.Join(folder, "genotype_frequencies.json")
 	file, err := os.Open(filepath)
 	if err != nil {
 		log.Fatalf("Cannot open file %s: %v", filepath, err)
@@ -1934,6 +2006,36 @@ func getChunkInfo(totalLen int) (int, int) {
 		chunkSize = totalLen
 	}
 	return chunkNum, chunkSize
+}
+
+func loadValidatedPgsAndLoci() (map[string]int, map[string][]string, error) {
+	file, err := os.Open("results/validated_pgs.json")
+	if err != nil {
+		log.Println("Error opening validated ids file")
+		return nil, nil, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var idsToNumVariants map[string]int
+	err = decoder.Decode(&idsToNumVariants)
+	if err != nil {
+		log.Println("Error decoding validated ids")
+		return nil, nil, err
+	}
+	file, err = os.Open("results/validated_loci.json")
+	if err != nil {
+		log.Println("Error opening validated ids file")
+		return nil, nil, err
+	}
+	defer file.Close()
+	decoder = json.NewDecoder(file)
+	var lociToPgs map[string][]string
+	err = decoder.Decode(&lociToPgs)
+	if err != nil {
+		log.Println("Error decoding validated loci")
+		return nil, nil, err
+	}
+	return idsToNumVariants, lociToPgs, nil
 }
 
 func Log3(x float64) float64 {

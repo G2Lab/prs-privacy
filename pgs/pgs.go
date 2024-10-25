@@ -336,12 +336,12 @@ func (p *PGS) LoadStats(dataset string) error {
 func (p *PGS) LoadDatasetStats(dataset string) error {
 	var efalFilename, statFilename string
 	switch dataset {
-	case dataset.GG:
-		efalFilename = fmt.Sprintf("%s/%s.efal", dataset.LocalDataFolder, p.PgsID)
-		statFilename = fmt.Sprintf("%s/%s.stat", dataset.LocalDataFolder, p.PgsID)
-	case dataset.UKB:
-		efalFilename = fmt.Sprintf("%s/%s.efal", dataset.UKBiobankInputFolder, p.PgsID)
-		statFilename = fmt.Sprintf("%s/%s.stat", dataset.UKBiobankInputFolder, p.PgsID)
+	case data.GG:
+		efalFilename = fmt.Sprintf("%s/%s.efal", data.LocalInputFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", data.LocalInputFolder, p.PgsID)
+	case data.UKB:
+		efalFilename = fmt.Sprintf("%s/%s.efal", data.UKBiobankInputFolder, p.PgsID)
+		statFilename = fmt.Sprintf("%s/%s.stat", data.UKBiobankInputFolder, p.PgsID)
 	default:
 		log.Printf("Unknown dataset: %s\n", dataset)
 		return errors.New("unknown dataset")
@@ -370,10 +370,10 @@ func (p *PGS) LoadDatasetStats(dataset string) error {
 
 	if _, err := os.Stat(statFilename); os.IsNotExist(err) {
 		switch dataset {
-		case dataset.GG:
+		case data.GG:
 			p.extractEAF()
 			p.extractGF()
-		case dataset.UKB:
+		case data.UKB:
 			p.CalculateEAFAndGF(dataset)
 		default:
 			log.Printf("Unknown dataset: %s\n", dataset)
@@ -402,8 +402,8 @@ func (p *PGS) extractPopulationAlleles(dataset string) error {
 	var missing, alleleSet bool
 	for k, locus := range p.Loci {
 		missing, alleleSet = true, false
-		chr, pos := dataset.SplitLocus(locus)
-		query, args := dataset.RangeQuery(refAltQ, chr, pos, pos, dataset)
+		chr, pos := data.SplitLocus(locus)
+		query, args := data.RangeQuery(refAltQ, chr, pos, pos, dataset)
 		cmd := exec.Command(query, args...)
 		output, err := cmd.Output()
 		if err != nil {
@@ -633,8 +633,8 @@ func (p *PGS) CalculateEAFAndGF(dataset string) {
 	var genotypeCount, alleleCount map[uint8]int
 	for k, locus := range p.Loci {
 		found = false
-		chr, position = dataset.SplitLocus(locus)
-		query, args := dataset.IndividualSnpsQuery(chr, position, dataset)
+		chr, position = data.SplitLocus(locus)
+		query, args := data.IndividualSnpsQuery(chr, position, dataset)
 		output, err = exec.Command(query, args...).Output()
 		if err != nil {
 			fmt.Println("Error executing bcftools command:", err)
@@ -653,12 +653,12 @@ func (p *PGS) CalculateEAFAndGF(dataset string) {
 			samples = samples[:len(samples)-1]
 			for _, sample := range samples {
 				idvSnps = strings.Split(sample, "=")
-				snps, err = dataset.NormalizeSnp(idvSnps[1])
+				snps, err = data.NormalizeSnp(idvSnps[1])
 				if err != nil {
 					fmt.Printf("Error normalizing %s: %v", idvSnps[1], err)
 					continue
 				}
-				pair, err = dataset.SnpToPair(snps)
+				pair, err = data.SnpToPair(snps)
 				if err != nil {
 					fmt.Printf("Error converting SNPs %s to alleles: %v", snps, err)
 					continue
