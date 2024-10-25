@@ -17,6 +17,8 @@
 # Go workspace file
 go.work
 
+inputs/*
+
 .DS_Store
 .idea
 *.png
