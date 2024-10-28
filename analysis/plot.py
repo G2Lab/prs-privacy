@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import os
@@ -468,12 +469,8 @@ def load_results(id_file, data_file, method):
     return pd.DataFrame(results)
 
 
-def deanonymization_accuracy():
+def linking():
     params = {
-        # 'font.size': 13,
-        # 'axes.labelsize': 13,
-        # 'xtick.labelsize': 13,
-        # 'ytick.labelsize': 13,
         'legend.fontsize': LABEL_SIZE,
     }
     mpl.rcParams.update(params)
@@ -780,11 +777,33 @@ def plot_pgs_distribution():
 
 
 if __name__ == "__main__":
+    # -----------Argument Parser-------------
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-e",
+        "--expr",
+        type=str,
+        help="experiment to plot: recovery, linking, uniqueness, rounding, all",
+        required=True)
+    args = parser.parse_args()
+    EXPR = args.expr
     prepare_for_latex()
-    # score_uniqueness()
-    # plot_rounding("PGS000869")
-    # solving_idv_accuracy()
-    # solving_loci_accuracy()
-    # deanonymization_accuracy()
-    # plot_snps_to_scores()
-    # plot_pgs_distribution()
+    if EXPR == "recovery":
+        solving_idv_accuracy()
+        solving_loci_accuracy()
+    elif EXPR == "linking":
+        linking()
+    elif EXPR == "uniqueness":
+        score_uniqueness()
+        plot_snps_to_scores()
+    elif EXPR == "rounding":
+        plot_rounding("PGS000869")
+    elif EXPR == "all":
+        solving_idv_accuracy()
+        solving_loci_accuracy()
+        linking()
+        score_uniqueness()
+        plot_snps_to_scores()
+        plot_rounding("PGS000869")
+    else:
+        print("Unknown experiment: choose between the available options")
