@@ -529,8 +529,8 @@ func uniquenessExperiment(dataset string) {
 		}
 	}
 
-	precisionEstimationLimit := 15
-	numWorkers := 1
+	precisionEstimationLimit := 13
+	numWorkers := 3
 	tasks := make(chan string, 1)
 	results := make([]*Result, 0)
 	var mutex sync.Mutex
@@ -659,7 +659,7 @@ func estimateNumUniqueScores(p *pgs.PGS, M int, powerUpperBound int) (float64, i
 		unique float64
 		sets   map[uint16]uint16
 	}
-	numWorkers := 21
+	numWorkers := 8
 	segmentSize := (secondMax - secondMin) / float64(numWorkers)
 	results := make(chan result, numWorkers)
 	var wg sync.WaitGroup

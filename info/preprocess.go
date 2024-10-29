@@ -653,5 +653,10 @@ func main() {
 		weightPrecisionDistribution()
 	case "populations":
 		readSamplePopulations()
+	case "pgs-selection":
+		downloadScoreFiles(50)
+		getPGSWithFewerVariants(50)
+		validateBases()
+		makeLociIndex()
 	}
 }
