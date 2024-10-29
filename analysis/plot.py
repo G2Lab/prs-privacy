@@ -717,8 +717,8 @@ def plot_rounding(pgs):
     linestyles = ['-', '--', '-.', ':']
     for i, precision in enumerate([1, 2, 5, 17]):
         sns.kdeplot(data=data[precision], label=f'{precision}', linestyle=linestyles[i])
-    ax4.xlabel('PRS')
-    ax4.ylabel('Count')
+    ax4.set_xlabel('PRS')
+    ax4.set_ylabel('Count')
     ax4.legend(title='Precision')
     plt.tight_layout()
     fig4.savefig(FIGURE_FOLDER + 'precision_distribution.pdf', dpi=300, bbox_inches='tight')
