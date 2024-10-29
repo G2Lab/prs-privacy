@@ -1,6 +1,6 @@
 #!/bin/bash
 
-url="hhttps://github.com/G2Lab/prs-privacy-data/releases/download/results/results.zip"
+url="https://github.com/G2Lab/prs-privacy-data/releases/download/results/results.zip"
 destination_dir="results"
 archived_file="results.zip"
 
