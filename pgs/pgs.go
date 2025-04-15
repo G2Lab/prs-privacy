@@ -41,7 +41,6 @@ const (
 )
 
 var (
-	GENOTYPES     = []uint8{0, 1}
 	ANCESTRIES    = []string{"AFR", "AMR", "EAS", "EUR", "SAS"}
 	ANCESTRIESALL = []string{"AFR", "AMR", "EAS", "EUR", "SAS", "ALL"}
 )
@@ -267,6 +266,122 @@ scannerLoop:
 		return err
 	}
 
+	return nil
+}
+
+func (p *PGS) LoadCatalogFileNoValidation(inputFile string) error {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	headerInProgress := true
+	precisions := make([]uint32, 0)
+	scanner := bufio.NewScanner(file)
+scannerLoop:
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// If it is the header
+		if strings.HasPrefix(line, "#") {
+			fields := strings.SplitN(line[1:], "=", 2)
+			switch strings.ToLower(fields[0]) {
+			case "pgs_id":
+				p.PgsID = fields[1]
+			case "trait_mapped":
+				p.TraitName = fields[1]
+			case "trait_efo":
+				p.TraitEFO = fields[1]
+			case "genome_build":
+				p.GenomeBuild = fields[1]
+			case "weight_type":
+				p.WeightType = fields[1]
+			case "hmpos_build":
+				p.HmPOSBuild = fields[1]
+			case "pgp_id":
+				p.PgpID = fields[1]
+			case "variants_number":
+				if value, err := strconv.Atoi(fields[1]); err == nil {
+					p.NumVariants = value
+				} else {
+					log.Printf("Error parsing variants number %s: %s", fields[1], err)
+				}
+			}
+			continue scannerLoop
+		}
+
+		// Specified variant fields
+		if headerInProgress {
+			p.Fieldnames = strings.Split(line, "\t")
+			headerInProgress = false
+			continue scannerLoop
+		}
+
+		fields := make(map[string]interface{})
+		values := strings.Split(line, "\t")
+		for i, value := range values {
+			if p.Fieldnames[i] == "hm_chr" {
+				if strings.Contains(value, "_") {
+					value = strings.Split(value, "_")[0]
+					if value == "Un" {
+						for j := 0; j < len(p.Fieldnames); j++ {
+							if p.Fieldnames[j] == "chr_name" {
+								value = values[j]
+								break
+							}
+						}
+					}
+				}
+			}
+			fields[p.Fieldnames[i]] = value
+		}
+		precisions = append(precisions, getPrecision(fields["effect_weight"].(string)))
+		variant := NewVariant(fields)
+		p.Variants[variant.GetLocus()] = variant
+		//Break if there are too many variants for high-level analysis
+		//if len(p.Variants) > 1000000 {
+		//	break
+		//}
+	}
+	loci := make([]string, 0, len(p.Variants))
+	for locus := range p.Variants {
+		loci = append(loci, locus)
+	}
+	p.Loci = loci
+
+	sort.Slice(precisions, func(i, j int) bool {
+		return precisions[i] < precisions[j]
+	})
+	var minPrecision uint32
+	maxPrecision := precisions[len(precisions)-1]
+	if len(precisions) > 2 {
+		minPrecision = precisions[2]
+	} else {
+		minPrecision = precisions[0]
+	}
+	p.WeightPrecision = maxPrecision
+	p.MinPrecision = minPrecision
+
+	p.Context = &apd.Context{
+		Precision:   maxPrecision + 3,
+		Rounding:    apd.RoundFloor,
+		MaxExponent: int32(maxPrecision) + 3,
+		MinExponent: -int32(maxPrecision) - 3,
+		Traps:       apd.DefaultTraps,
+	}
+
+	p.Weights = make([]*apd.Decimal, len(p.Loci))
+	for i, loc := range p.Loci {
+		p.Weights[i], err = p.Variants[loc].GetWeight(p.Context)
+		if err != nil {
+			log.Fatalf("Variant %s, %v: %v\n", loc, err, p.Variants[loc].fields["effect_weight"])
+		}
+	}
+
+	if err = scanner.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 

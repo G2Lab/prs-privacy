@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/nikirill/prs/data"
+	"github.com/nikirill/prs/pgs"
 	"io"
 	"log"
 	"math"
@@ -17,9 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/nikirill/prs/data"
-	"github.com/nikirill/prs/pgs"
 )
 
 func getPGSWithFewerVariants(limit int) {
@@ -348,22 +347,26 @@ func downloadScoreFiles(limit int) {
 	var url string
 	for _, id := range ids {
 		fmt.Printf("==== %s ====\n", id)
-		// Create the output file
 		filename := filepath.Join(localFolder, id+"_hmPOS_GRCh37.txt")
+		// Check if the file already exists
+		if _, err := os.Stat(filename); err == nil {
+			fmt.Printf("%s already exists\n", id)
+			continue
+		}
+		// Create the output file
 		out, err = os.Create(filename)
 		if err != nil {
 			log.Println("Error creating output file:", err)
 			return
 		}
-		defer out.Close()
 
+		fmt.Println("Downloading", id)
 		// Send GET request to download the file
 		url = fmt.Sprintf("%s%s%s/ScoringFiles/Harmonized/%s_hmPOS_GRCh37.txt.gz", ftpServer, ftpFolder, id, id)
 		resp, err := http.Get(url)
 		if err != nil {
 			log.Println("Error sending GET request:", err)
 		}
-		defer resp.Body.Close()
 
 		// Check if response status code is OK
 		if resp.StatusCode != http.StatusOK {
@@ -382,6 +385,10 @@ func downloadScoreFiles(limit int) {
 		if err != nil {
 			fmt.Printf("%s: Error writing decompressed data to file %v\n", id, err)
 			continue
+		}
+		resp.Body.Close()
+		if err = out.Close(); err != nil {
+			fmt.Printf("%s: Error closing output file %v\n", id, err)
 		}
 	}
 }
@@ -437,7 +444,7 @@ func fewerVariantsPGS(lowerLimit, upperLimit int) ([]string, error) {
 			return nil, err
 		}
 		if numVariants, err := strconv.Atoi(record[numVariantColumn]); err == nil && lowerLimit < numVariants &&
-			numVariants < upperLimit {
+			numVariants < upperLimit || upperLimit == -1 {
 			ids = append(ids, record[pgsIdColumn])
 		}
 	}
@@ -623,6 +630,63 @@ func readSamplePopulations() {
 	}
 }
 
+func prsProperties() {
+	type Property struct {
+		PgsID       string
+		PgpID       string
+		Trait       string
+		NumVariants int
+		Precision   uint32
+		Density     float64
+	}
+	properties := make([]Property, 0)
+
+	ids, err := fewerVariantsPGS(0, -1)
+	if err != nil {
+		log.Println("Error:", err)
+		return
+	}
+	localFolder := "catalog"
+	for _, id := range ids {
+		fmt.Printf("==== %s ====\n", id)
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFileNoValidation(filepath.Join(localFolder, id+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Println("Error:", err)
+			continue
+		}
+		maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(p.WeightPrecision))
+		density := float64(p.NumVariants) / Log3(maxw)
+		//fmt.Println(maxw, Log3(maxw), density, p.WeightPrecision)
+		if density == math.Inf(1) || density == math.Inf(-1) {
+			density = -1
+		}
+		properties = append(properties, Property{
+			PgsID:       p.PgsID,
+			PgpID:       p.PgpID,
+			Trait:       p.TraitName,
+			NumVariants: p.NumVariants,
+			Precision:   p.WeightPrecision,
+			Density:     density,
+		})
+		_ = p
+	}
+
+	outputFile, err := os.Create("results/catalog_properties.json")
+	if err != nil {
+		fmt.Println("Error creating JSON outputFile:", err)
+		return
+	}
+	defer outputFile.Close()
+
+	// Encode the fullData as JSON and write to the outputFile
+	encoder := json.NewEncoder(outputFile)
+	err = encoder.Encode(properties)
+	if err != nil {
+		fmt.Println("Error encoding properties to JSON:", err)
+	}
+}
+
 // indexOf finds the index of a value in a slice, or returns -1 if not found
 func indexOf(slice []string, value string) int {
 	for i, v := range slice {
@@ -639,6 +703,7 @@ func main() {
 	switch *expr {
 	case "download":
 		downloadScoreFiles(500)
+		//downloadScoreFiles(-1)
 	case "limit":
 		getPGSWithFewerVariants(50)
 	case "copy":
@@ -651,6 +716,8 @@ func main() {
 		ancestryTrainingDistribution()
 	case "precision":
 		weightPrecisionDistribution()
+	case "properties":
+		prsProperties()
 	case "populations":
 		readSamplePopulations()
 	case "pgs-selection":

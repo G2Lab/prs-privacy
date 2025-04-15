@@ -58,6 +58,8 @@ func main() {
 		precisionToUniqueness()
 	case "snps":
 		numberSnpsToPossibleScores()
+	case "percentiles":
+		percentilesToScores()
 	case "genfreq":
 		calculateGenotypeFrequenciesForGuessed()
 	}
@@ -366,6 +368,70 @@ func precisionToUniqueness() {
 	if err = encoder.Encode(allScores); err != nil {
 		log.Fatal("Cannot encode json", err)
 	}
+}
+
+func percentilesToScores() {
+	//type Result struct {
+	//	Precision              uint32
+	//	Density                float64
+	//	TotalPossibleScores    uint64
+	//	PresentScores          int
+	//	PercentageUnique       float32
+	//	MedianAnonymitySetSize int
+	//}
+	dataset := data.UKB
+	pgsID := "PGS000869"
+	p := pgs.NewPGS()
+	err := p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
+	if err != nil {
+		log.Printf("Error loading catalog file: %v\n", err)
+		return
+	}
+	p.LoadStats(dataset)
+	cohort := solver.NewCohort(p, dataset)
+	//results := make([]Result, 0)
+	individuals := solver.AllUKBiobankSamples()
+	scores := make([]*apd.Decimal, 0, len(individuals))
+	for _, idv := range individuals {
+		scores = append(scores, cohort[idv].Score)
+	}
+	// Sort scores in the same order as individuals
+	sort.SliceStable(scores, func(i, j int) bool {
+		return scores[i].Cmp(scores[j]) < 0
+	})
+
+	idvPerPercentile := len(scores) / 100
+	scoresPerPercentile := make(map[int]int, 100)
+	var start, end int
+	var uniqueScoresInPercentile map[string]bool
+	for percentile := 1; percentile <= 100; percentile++ {
+		start = idvPerPercentile * (percentile - 1)
+		end = idvPerPercentile * percentile
+		if percentile == 100 {
+			end = len(scores)
+		}
+		uniqueScoresInPercentile = make(map[string]bool)
+		for i := start; i < end; i++ {
+			uniqueScoresInPercentile[scores[i].String()] = true
+		}
+		scoresPerPercentile[percentile] = len(uniqueScoresInPercentile)
+	}
+
+	for percentile := 1; percentile <= 100; percentile++ {
+		fmt.Printf("Percentile %d: %d\n", percentile, scoresPerPercentile[percentile])
+	}
+
+	//resultFolder := "results/percentiles"
+	//filepath := path.Join(resultFolder, fmt.Sprintf("%s.json", pgsID))
+	//resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	//if err != nil {
+	//	log.Fatalf("Error opening result file: %v", err)
+	//}
+	//defer resFile.Close()
+	//encoder := json.NewEncoder(resFile)
+	//if err = encoder.Encode(results); err != nil {
+	//	log.Fatal("Cannot encode json", err)
+	//}
 }
 
 func divideAndRound(n, divisor *apd.BigInt) *apd.BigInt {
@@ -921,6 +987,7 @@ func chainSolving() {
 					}
 				}
 			}
+			_ = p
 		}
 		guesses = append(guesses, &Guess{Individual: individual, Ancestry: indPop, SNPs: guessedSnps})
 	}

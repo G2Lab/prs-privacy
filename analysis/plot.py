@@ -13,9 +13,9 @@ import seaborn as sns
 
 FIGURE_FOLDER = 'analysis/figures/'
 
-LABEL_SIZE = 15
-TICK_SIZE = 15
-LEGEND_SIZE = 15
+LABEL_SIZE = 13
+TICK_SIZE = 13
+LEGEND_SIZE = 13
 def prepare_for_latex():
     params = {
         'axes.labelsize': LABEL_SIZE,
@@ -283,7 +283,7 @@ def score_uniqueness():
 
 
 def read_related_individuals():
-    file_path = "data/related_individuals.txt"
+    file_path = "info/related_individuals.txt"
     related = {}
 
     try:
@@ -512,7 +512,7 @@ def linking():
                      color=palette[3], linestyle='-')
 
     # Adding the legend for the red lines
-    ax1.plot([], [], color=palette[3], linestyle='-', label='True-genotypes baseline')
+    ax1.plot([], [], color=palette[3], linestyle='-', label='with true genotypes')
 
     ax1.axhline(y=cutoffs['Self'], color='lightgray', linestyle='--', linewidth=1)
     ax1.text(x=ax1.get_xlim()[1] + 0.03, y=cutoffs['Self'], s='Self', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
@@ -563,7 +563,7 @@ def plot_kinship(method, df, cutoffs):
             x_position = category_pos
             ax.plot([x_position - 0.4, x_position + 0.4], [median_value, median_value], color='red',
                     linestyle='-')
-    ax.plot([], [], color='red', linestyle='-', label='True-genotypes baseline')
+    ax.plot([], [], color='red', linestyle='-', label='with true genotypes')
 
     ax.axhline(y=cutoffs['Self'], color='lightgray', linestyle='--', linewidth=1)
     ax.text(x=ax.get_xlim()[1] + 0.03, y=cutoffs['Self'], s='Self', va='center', ha='left', color='black', fontsize=LABEL_SIZE)
@@ -650,7 +650,7 @@ def calculate_precision_and_recall(df, categories, cutoffs):
 
 
 def read_ancestry():
-    with open('data/superpopulations.json', 'r') as file:
+    with open('info/superpopulations.json', 'r') as file:
         data = json.load(file)
     for idv, anc in data.items():
         if "," in anc:
@@ -775,6 +775,45 @@ def plot_pgs_distribution():
     fig.savefig(FIGURE_FOLDER + 'pgs_distribution.pdf', dpi=300, bbox_inches='tight')
     # plt.show()
 
+def plot_catalog_properties():
+    filepath = "results/catalog_properties.json"
+    with open(filepath, 'r') as f:
+        content = json.load(f)
+    data = []
+    for prop in content:
+        data.append({'PgsID': prop['PgsID'], 'PgpID': prop['PgpID'], 'Trait': prop['Trait'],
+                     'NumVariants': int(prop['NumVariants']), 'Precision': int(prop['Precision']),
+                        'Density': float(prop['Density'])})
+    df = pd.DataFrame(data)
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    pd.set_option('display.max_colwidth', 15)
+    dense = df[(df['Density'] < 2.5) & (df['Density'] > 0)]
+    print(dense.loc[dense['NumVariants'].idxmax()])
+    print("Number PGS", df['PgsID'].nunique())
+    print("Number studies", df['PgpID'].nunique())
+    print("Number traits", df['Trait'].nunique())
+    print("Median precision", df['Precision'].median())
+    print("Median number of variants", df['NumVariants'].median())
+    print("Number of dense instances", len(dense))
+    print("Number of less than 50 SNPs", len(df[df['NumVariants'] < 50]))
+
+    print(len(df[(df['Density'] < 100) & (df['Density'] > 0)])/len(df))
+    fig1, ax1 = plt.subplots(figsize=(4, 3))
+    # sns.histplot(df['Density'], bins=100000, kde=False, color='#FFD166', ax=ax1)
+    # plt.ylabel('number of PRS models')
+    # plt.xlabel('density')
+    # ax1.set_xlim(0, 100)
+    sns.histplot(df['Precision'], bins=35, kde=False, color='darkseagreen', ax=ax1)
+    plt.ylabel('\# of PRS models')
+    plt.xlabel('weight precision (\# of decimal places)')
+    ax1.set_xlim(0, 36)
+    ax1.set_xticks([i for i in range(0, 35, 5)])
+    plt.tight_layout()
+    fig1.savefig(FIGURE_FOLDER + 'catalog_precision.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
+
 
 if __name__ == "__main__":
     # -----------Argument Parser-------------
@@ -798,6 +837,8 @@ if __name__ == "__main__":
         plot_snps_to_scores()
     elif EXPR == "rounding":
         plot_rounding("PGS000869")
+    elif EXPR == "properties":
+        plot_catalog_properties()
     elif EXPR == "all":
         solving_idv_accuracy()
         solving_loci_accuracy()
