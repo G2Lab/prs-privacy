@@ -56,6 +56,7 @@ func LoadPaths(configFile string) {
 	UKBBWorkingDir = config.UKBiobankWorkingDir
 	UKBBInputFolder = UKBBWorkingDir + LocalInputFolder
 	UKBBSamplesFile = UKBBWorkingDir + "individuals.txt"
+	// UKBBSamplesFile = UKBBWorkingDir + "individuals-1000.txt"
 }
 
 func init() {
@@ -105,7 +106,7 @@ func NormalizeSnp(snp string) (string, error) {
 	switch snp {
 	case "0|0", "0|1", "1|0", "1|1", "0/0", "0/1", "1/0", "1/1":
 		return snp, nil
-	case "./.":
+	case "./.", ".|.":
 		return "0|0", nil
 	/*
 		rare multi-allelic cases
@@ -153,11 +154,11 @@ func SnpToPair(snp string) ([]uint8, error) {
 
 func SnpToSum(snp string) (uint8, error) {
 	switch snp {
-	case "0|0", "0,0":
+	case "0|0", "0,0", "0/0":
 		return 0, nil
-	case "0|1", "1|0", "0,1", "1,0":
+	case "0|1", "1|0", "0,1", "1,0", "0/1", "1/0":
 		return 1, nil
-	case "1|1", "1,1":
+	case "1|1", "1,1", "1/1":
 		return 2, nil
 	default:
 		return 255, fmt.Errorf("invalid snp value: %s", snp)
