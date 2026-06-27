@@ -287,5 +287,4 @@ func (c Cohort) LoadScores(filename string, ctx *apd.Context) error {
 			return err
 		}
 	}
-	return nil
 }
