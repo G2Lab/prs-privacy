@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
@@ -12,10 +13,13 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/cockroachdb/apd/v3"
 	"github.com/nikirill/prs/data"
@@ -62,6 +66,20 @@ func main() {
 		percentilesToScores()
 	case "genfreq":
 		calculateGenotypeFrequenciesForGuessed()
+	case "density":
+		measureDensityAccuracyEffect()
+	case "resources":
+		measureResources()
+	case "confusion":
+		genotypeConfusionMatrix()
+	case "ukblinking":
+		ukbLinking()
+	case "ukblinkingstats":
+		ukbLinkingStats()
+	case "ukballeles":
+		retrieveUkbAlleles()
+	case "ukbking":
+		ukbKingRelatedness()
 	}
 }
 
@@ -79,7 +97,7 @@ func demo() {
 
 	var pgsID string
 	allPgs := make([]string, 0, len(idsToNumVariants))
-	for id, _ := range idsToNumVariants {
+	for id := range idsToNumVariants {
 		allPgs = append(allPgs, id)
 	}
 	pgsToLoci := make(map[string]map[string]struct{})
@@ -150,7 +168,7 @@ func demo() {
 			}
 			fmt.Printf("Recovered genotypes:\t%s\n", solver.ArrayToString(solutions[0]))
 			fmt.Printf("True genotypes:\t\t%s\n", solver.ArrayToString(cohort[individual].Genotype))
-			fmt.Printf("Accuracy: %.0f%%\n", 100*solver.Accuracy(cohort[individual].Genotype, solutions[0]))
+			fmt.Printf("GuessAccuracy: %.0f%%\n", 100*solver.Accuracy(cohort[individual].Genotype, solutions[0]))
 			//
 			guessConfidence[pgsID] = 1
 			for ref := range includedRefs {
@@ -199,7 +217,7 @@ func numberSnpsToPossibleScores() {
 		return
 	}
 	allPgs := make([]string, 0, len(pgsToNumVariants))
-	for id, _ := range pgsToNumVariants {
+	for id := range pgsToNumVariants {
 		allPgs = append(allPgs, id)
 	}
 	sort.Slice(allPgs, func(i, j int) bool {
@@ -517,7 +535,7 @@ func calculateScoresAndStats() {
 		return
 	}
 	allPgs := make([]string, 0, len(pgsToNumVariants))
-	for id, _ := range pgsToNumVariants {
+	for id := range pgsToNumVariants {
 		allPgs = append(allPgs, id)
 	}
 	sort.Slice(allPgs, func(i, j int) bool {
@@ -573,7 +591,7 @@ func uniquenessExperiment(dataset string) {
 		return
 	}
 	allPgs := make([]string, 0, len(pgsToNumVariants))
-	for id, _ := range pgsToNumVariants {
+	for id := range pgsToNumVariants {
 		allPgs = append(allPgs, id)
 	}
 	sort.Slice(allPgs, func(i, j int) bool {
@@ -887,7 +905,7 @@ func chainSolving() {
 		fmt.Printf("--------- %s --------\n", individual)
 
 		allPgs := make([]string, 0, len(idsToNumVariants))
-		for id, _ := range idsToNumVariants {
+		for id := range idsToNumVariants {
 			allPgs = append(allPgs, id)
 		}
 		pgsToLoci := make(map[string]map[string]struct{})
@@ -1033,7 +1051,7 @@ func chainSolvingOneAF() {
 		fmt.Printf("--------- %s --------\n", individual)
 
 		allPgs := make([]string, 0, len(idsToNumVariants))
-		for id, _ := range idsToNumVariants {
+		for id := range idsToNumVariants {
 			allPgs = append(allPgs, id)
 		}
 		pgsToLoci := make(map[string]map[string]struct{})
@@ -1150,6 +1168,7 @@ func chainSolvingOneAF() {
 	}
 }
 
+// It samples one individual from each decile of accuracy for each ancestry group
 func getIndividualsSample() map[string][]string {
 	type AccuracyInput struct {
 		Individual        string  `json:"Individual"`
@@ -1181,7 +1200,7 @@ func getIndividualsSample() map[string][]string {
 	}
 	individuals := make(map[string][]string)
 	for ancestry, inputs := range ancestryGroups {
-		fmt.Printf("--- %s ---\n", ancestry)
+		//fmt.Printf("--- %s ---\n", ancestry)
 		sort.Slice(inputs, func(i, j int) bool {
 			return inputs[i].GuessAccuracy > inputs[j].GuessAccuracy
 		})
@@ -1193,7 +1212,7 @@ func getIndividualsSample() map[string][]string {
 				index = len(inputs) - 1
 			}
 			individuals[ancestry] = append(individuals[ancestry], inputs[index].Individual)
-			fmt.Printf("%s: %s\n", inputs[index].Individual, strconv.FormatFloat(inputs[index].GuessAccuracy, 'f', 3, 64))
+			//fmt.Printf("%s: %s\n", inputs[index].Individual, strconv.FormatFloat(inputs[index].GuessAccuracy, 'f', 3, 64))
 		}
 	}
 	return individuals
@@ -1608,11 +1627,12 @@ func removeFiles(filepaths ...string) {
 }
 
 type IdvResult struct {
-	Individual        string
-	Ancestry          string
-	SNPs              int
-	GuessAccuracy     float32
-	ReferenceAccuracy float32
+	Individual         string
+	Ancestry           string
+	SNPs               int
+	GuessAccuracy      float32
+	ReferenceAccuracy  float32
+	StochasticAccuracy float32
 }
 
 type LocusResult struct {
@@ -1682,50 +1702,9 @@ func recoveryAccuracy(afType string) {
 	//
 	references := getMajorGenotypesForGuessedLoci()
 	ancestries := data.LoadAncestry()
-	idvResults := make([]*IdvResult, 0)
-	locusResults := make(map[string]*LocusResult)
-	var locus string
-	for idv = range guessed {
-		res := IdvResult{Individual: idv, Ancestry: pgs.GetIndividualAncestry(idv, ancestries),
-			SNPs: 0, GuessAccuracy: 0, ReferenceAccuracy: 0}
-		for chr = range guessed[idv] {
-			for pos = range guessed[idv][chr] {
-				// Individual accuracy
-				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
-					res.GuessAccuracy++
-				}
-				if guessed[idv][chr][pos] == references[res.Ancestry][chr][pos] {
-					res.ReferenceAccuracy++
-				}
-				res.SNPs++
-				// Locus accuracy
-				locus = data.MergeLocus(chr, pos)
-				if _, ok := locusResults[locus]; !ok {
-					locusResults[locus] = newLocusResult()
-				}
-				locusResults[locus].TotalGuesses[res.Ancestry]++
-				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
-					locusResults[locus].CorrectGuesses[res.Ancestry]++
-				}
-			}
-		}
-		res.GuessAccuracy /= float32(res.SNPs)
-		res.ReferenceAccuracy /= float32(res.SNPs)
-		idvResults = append(idvResults, &res)
-	}
-	resultFolder := "results/recoveryAccuracy"
-	filepath = path.Join(resultFolder, idvOutputFilename)
-	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Error opening result file: %v", err)
-	}
-	defer resFile.Close()
-	encoder := json.NewEncoder(resFile)
-	if err = encoder.Encode(idvResults); err != nil {
-		log.Fatal("Cannot encode json", err)
-	}
-	fmt.Println("Saved accuracy results")
-	//
+
+	// Per-locus AAF map for stochastic prediction (the probability of 1)
+	locusAAF := make(map[string]map[string]float32) // locus -> ancestry -> AAF
 	pgsFile, err := os.Open("results/validated_pgs.json")
 	if err != nil {
 		log.Println("Error opening validated ids file:", err)
@@ -1748,6 +1727,97 @@ func recoveryAccuracy(afType string) {
 	})
 	observedLoci := make(map[string]struct{})
 	var ok bool
+	for _, pgsID := range allPgs {
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			return
+		}
+		err = p.LoadStats(data.GG)
+		if err != nil {
+			log.Printf("Error loading stats: %v\n", err)
+			return
+		}
+		for i, locus := range p.Loci {
+			if _, ok = observedLoci[locus]; ok {
+				continue
+			}
+			observedLoci[locus] = struct{}{}
+			locusAAF[locus] = make(map[string]float32)
+			for ppl := range p.PopulationStats {
+				locusAAF[locus][ppl] = p.PopulationStats[ppl].AF[i][1]
+			}
+		}
+	}
+
+	rng := rand.New(rand.NewSource(int64('p')<<16 | int64('r')<<8 | int64('s')))
+	idvResults := make([]*IdvResult, 0)
+	locusResults := make(map[string]*LocusResult)
+	var locus string
+	for idv = range guessed {
+		res := IdvResult{Individual: idv, Ancestry: pgs.GetIndividualAncestry(idv, ancestries),
+			SNPs: 0, GuessAccuracy: 0, ReferenceAccuracy: 0, StochasticAccuracy: 0}
+		for chr = range guessed[idv] {
+			for pos = range guessed[idv][chr] {
+				// Individual accuracy
+				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
+					res.GuessAccuracy++
+				}
+				if guessed[idv][chr][pos] == references[res.Ancestry][chr][pos] {
+					res.ReferenceAccuracy++
+				}
+				// Stochastic prediction
+				locus = data.MergeLocus(chr, pos)
+				if aafMap, aafOk := locusAAF[locus]; aafOk {
+					pAlt := float64(aafMap[res.Ancestry])
+					if pAlt <= 0 {
+						pAlt = 0.001
+					} else if pAlt >= 1 {
+						pAlt = 0.999
+					}
+					// Two independent allele draws, each 1 with probability pAlt
+					var predicted uint8
+					if rng.Float64() < pAlt {
+						predicted++
+					}
+					if rng.Float64() < pAlt {
+						predicted++
+					}
+					if predicted == trueSnps[idv][chr][pos] {
+						res.StochasticAccuracy++
+					}
+				}
+				res.SNPs++
+				// Locus accuracy
+				if _, ok := locusResults[locus]; !ok {
+					locusResults[locus] = newLocusResult()
+				}
+				locusResults[locus].TotalGuesses[res.Ancestry]++
+				if guessed[idv][chr][pos] == trueSnps[idv][chr][pos] {
+					locusResults[locus].CorrectGuesses[res.Ancestry]++
+				}
+			}
+		}
+		res.GuessAccuracy /= float32(res.SNPs)
+		res.ReferenceAccuracy /= float32(res.SNPs)
+		res.StochasticAccuracy /= float32(res.SNPs)
+		idvResults = append(idvResults, &res)
+	}
+	resultFolder := "results/recoveryAccuracy"
+	filepath = path.Join(resultFolder, idvOutputFilename)
+	resFile, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(idvResults); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Println("Saved accuracy results")
+
+	observedLoci = make(map[string]struct{})
 	for _, pgsID := range allPgs {
 		p := pgs.NewPGS()
 		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
@@ -1960,12 +2030,23 @@ func loadGenotypeFrequenciesForGuessed() map[string]map[string]map[string][]floa
 
 func getIndividualPositionSNPs(chr string, positions []string, individuals []string, dataset string) map[string]map[string]uint8 {
 	prg := "bcftools"
-	args := []string{
-		"query",
-		"-s", strings.Join(individuals, ","),
-		"-f", "%POS-[%SAMPLE=%GT\t]\n",
-		data.GetChromosomeFilepath(chr, dataset),
-		"-r", "",
+	var args []string
+	if dataset == data.UKB {
+		args = []string{
+			"query",
+			"-S", data.UKBBSamplesFile,
+			"-f", "%POS~[%SAMPLE=%GT\t]\n",
+			data.GetChromosomeFilepath(chr, dataset),
+			"-r", "",
+		}
+	} else {
+		args = []string{
+			"query",
+			"-s", strings.Join(individuals, ","),
+			"-f", "%POS~[%SAMPLE=%GT\t]\n",
+			data.GetChromosomeFilepath(chr, dataset),
+			"-r", "",
+		}
 	}
 	var pos, gt, idv string
 	var ok bool
@@ -1980,7 +2061,7 @@ func getIndividualPositionSNPs(chr string, positions []string, individuals []str
 		lines := strings.Split(string(output), "\n")
 		lines = lines[:len(lines)-1]
 		for _, line := range lines {
-			fields := strings.Split(line, "-")
+			fields := strings.SplitN(line, "~", 2)
 			if len(fields) < 2 {
 				log.Printf("Not enough fields in line: %s\n", line)
 				continue
@@ -2013,14 +2094,94 @@ func getIndividualPositionSNPs(chr string, positions []string, individuals []str
 	return alleles
 }
 
+func getIndividualPositionSNPsBatched(chr string, positions []string, dataset string) map[string]map[string]uint8 {
+	// Build comma-separated regions for a single bcftools call
+	regions := make([]string, len(positions))
+	for i, pos := range positions {
+		regions[i] = fmt.Sprintf("%s:%s-%s", chr, pos, pos)
+	}
+	prg := "bcftools"
+	var args []string
+	if dataset == data.UKB {
+		args = []string{
+			"query",
+			"-S", data.UKBBSamplesFile,
+			"-f", "%POS~[%SAMPLE=%GT\t]\n",
+			"-r", strings.Join(regions, ","),
+			data.GetChromosomeFilepath(chr, dataset),
+		}
+	} else {
+		log.Fatalf("getIndividualPositionSNPsBatched only supports UKB dataset")
+	}
+
+	posSet := make(map[string]struct{}, len(positions))
+	for _, pos := range positions {
+		posSet[pos] = struct{}{}
+	}
+
+	output, err := exec.Command(prg, args...).Output()
+	if err != nil {
+		log.Fatalf("Error executing bcftools command for chr %s: %v", chr, err)
+	}
+
+	var pos, gt, idv string
+	var ok bool
+	var snp uint8
+	alleles := make(map[string]map[string]uint8)
+	lines := strings.Split(string(output), "\n")
+	fmt.Printf("  Chr %s: %d lines in output\n", chr, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "~", 2)
+		if len(fields) < 2 {
+			log.Printf("Not enough fields in line: %s\n", line)
+			continue
+		}
+		pos = fields[0]
+		if _, ok = posSet[pos]; !ok {
+			continue
+		}
+		samples := strings.Split(fields[1], "\t")
+		samples = samples[:len(samples)-1]
+		for _, sample := range samples {
+			fields = strings.Split(sample, "=")
+			idv = fields[0]
+			if _, ok = alleles[idv]; !ok {
+				alleles[idv] = make(map[string]uint8)
+			}
+			gt, err = data.NormalizeSnp(fields[1])
+			if err != nil {
+				continue
+			}
+			snp, err = data.SnpToSum(gt)
+			alleles[idv][pos] = snp
+		}
+	}
+	fmt.Printf("  Chr %s: %d unique individuals\n", chr, len(alleles))
+	return alleles
+}
+
 func getIndividualPositionStrings(chr string, positions []string, individuals []string, dataset string) map[string]map[string]string {
 	prg := "bcftools"
-	args := []string{
-		"query",
-		"-s", strings.Join(individuals, ","),
-		"-f", "%POS-[%SAMPLE=%GT\t]\n",
-		data.GetChromosomeFilepath(chr, dataset),
-		"-r", "",
+	var args []string
+	if dataset == data.UKB {
+		args = []string{
+			"query",
+			"-S", data.UKBBSamplesFile,
+			"-f", "%POS~[%SAMPLE=%GT\t]\n",
+			data.GetChromosomeFilepath(chr, dataset),
+			"-r", "",
+		}
+	} else {
+		args = []string{
+			"query",
+			"-s", strings.Join(individuals, ","),
+			"-f", "%POS~[%SAMPLE=%GT\t]\n",
+			data.GetChromosomeFilepath(chr, dataset),
+			"-r", "",
+		}
 	}
 	var pos, idv string
 	var ok bool
@@ -2034,7 +2195,7 @@ func getIndividualPositionStrings(chr string, positions []string, individuals []
 		lines := strings.Split(string(output), "\n")
 		lines = lines[:len(lines)-1]
 		for _, line := range lines {
-			fields := strings.Split(line, "-")
+			fields := strings.SplitN(line, "~", 2)
 			if len(fields) < 2 {
 				log.Printf("Not enough fields in line: %s\n", line)
 				continue
@@ -2109,4 +2270,1592 @@ func loadValidatedPgsAndLoci() (map[string]int, map[string][]string, error) {
 
 func Log3(x float64) float64 {
 	return math.Log2(x) / math.Log2(3)
+}
+
+func measureDensityAccuracyEffect() {
+	densityThreshold := 4.0
+	variantThreshold := 30
+	idsToNumVariants, _, err := loadValidatedPgsAndLoci()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	individuals := getIndividualsSample()
+	anc := os.Args[2]
+	id, err := strconv.Atoi(os.Args[3])
+	if err != nil || id < 0 || id >= len(individuals[anc]) {
+		log.Printf("Invalid individual index: %s", os.Args[3])
+	}
+	idv := individuals[anc][id]
+	fmt.Printf("=== Ancestry: %s, Idv: %d (%s) ===\n", anc, id, individuals[anc][id])
+
+	type Result struct {
+		PgsID            string
+		NumVariants      int
+		Individual       string
+		Ancestry         string
+		Precision        uint32
+		Density          float64
+		GuessAccuracy    float32
+		BaselineAccuracy float32
+		Latency          float64
+		CPUTime          float64
+		MemoryPeak       uint64
+	}
+	results := make([]Result, 0)
+
+	allPgs := make([]string, 0, len(idsToNumVariants))
+	for id := range idsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	// sort by number of variants
+	sort.Slice(allPgs, func(i, j int) bool {
+		return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
+	})
+
+	for _, pgsID := range allPgs {
+		if idsToNumVariants[pgsID] > variantThreshold {
+			break
+		}
+		fmt.Printf("Processing %s: %d variants\n", pgsID, idsToNumVariants[pgsID])
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			continue
+		}
+		p.LoadStats(data.GG)
+		cohort := solver.NewCohort(p, data.GG)
+		var precisionLimit uint32 = 9
+		if len(p.Loci) >= DeterminismLimit {
+			precisionLimit = 8
+		}
+
+		originalWeightPrecision := p.WeightPrecision
+		originalWeights := make([]*apd.Decimal, len(p.Weights))
+		for i, w := range p.Weights {
+			originalWeights[i] = new(apd.Decimal).Set(w)
+			fmt.Printf("%s\t", p.Weights[i].String())
+		}
+		fmt.Println()
+
+		roundingCtx := apd.BaseContext.WithPrecision(p.Context.Precision)
+		roundingCtx.Rounding = apd.RoundHalfUp
+		// Vary density by gradually rounding weights and recalculating the target scores
+		for prec := originalWeightPrecision; prec > 0; prec-- {
+			// Calculate density based on the reduced precision
+			maxw := p.FindMaxAbsoluteWeight() * math.Pow(10, float64(prec))
+			density := float64(p.NumVariants) / Log3(maxw)
+			if density > densityThreshold || density <= 0 {
+				break
+			}
+
+			if prec < p.WeightPrecision {
+				for i := range p.Weights {
+					_, err = roundingCtx.Quantize(p.Weights[i], originalWeights[i], -int32(prec))
+					if err != nil {
+						log.Printf("Error rounding weight: %v\n", err)
+					}
+				}
+				p.WeightPrecision = prec
+			}
+			fmt.Printf("%d: %.2f\t", prec, density)
+
+			idvScore := solver.CalculateDecimalScore(p.Context, cohort[idv].Genotype, p.Weights, p.EffectAlleles)
+			slv := solver.NewDP(idvScore, p, anc, precisionLimit, make(map[int]uint8))
+
+			var usage syscall.Rusage
+			// Memory measurement setup
+			var maxMem uint64
+			done := make(chan struct{})
+			var wgMem sync.WaitGroup
+
+			// Force GC to get a clean baseline
+			runtime.GC()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			maxMem = m.HeapAlloc
+
+			wgMem.Add(1)
+			go func() {
+				defer wgMem.Done()
+				ticker := time.NewTicker(time.Millisecond)
+				defer ticker.Stop()
+				var m runtime.MemStats
+				for {
+					select {
+					case <-done:
+						return
+					case <-ticker.C:
+						runtime.ReadMemStats(&m)
+						if m.HeapAlloc > maxMem {
+							maxMem = m.HeapAlloc
+						}
+					}
+				}
+			}()
+
+			start := time.Now()
+			syscall.Getrusage(syscall.RUSAGE_SELF, &usage)
+			cpuStart := float64(usage.Utime.Sec) + float64(usage.Utime.Usec)/1e6 + float64(usage.Stime.Sec) + float64(usage.Stime.Usec)/1e6
+
+			var solutions [][]uint8
+			if p.NumVariants < DeterminismLimit {
+				sm := slv.SolveDeterministic()
+				solutions = solver.SortByLikelihood(sm, p.PopulationStats[anc], p.EffectAlleles)
+			} else {
+				sm := slv.SolveProbabilistic()
+				solutions = solver.SortByLikelihood(sm, p.PopulationStats[anc], p.EffectAlleles)
+			}
+			clockElapsed := time.Since(start).Seconds()
+			syscall.Getrusage(syscall.RUSAGE_SELF, &usage)
+			cpuEnd := float64(usage.Utime.Sec) + float64(usage.Utime.Usec)/1e6 + float64(usage.Stime.Sec) + float64(usage.Stime.Usec)/1e6
+			cpuElapsed := cpuEnd - cpuStart
+
+			close(done)
+			wgMem.Wait()
+
+			acc := float32(0.0)
+			if len(solutions) > 0 {
+				acc = solver.Accuracy(solutions[0], cohort[idv].Genotype)
+			}
+
+			// Calculate major genotype accuracy
+			majorAcc := float32(0.0)
+			for i := 0; i < len(p.Loci); i++ {
+				majorG := uint8(0)
+				maxFreq := float32(-1.0)
+
+				// Check frequency of 0, 1, 2
+				for g := 0; g <= 2; g++ {
+					if p.PopulationStats[anc].GF[i][g] > maxFreq {
+						maxFreq = p.PopulationStats[anc].GF[i][g]
+						majorG = uint8(g)
+					}
+				}
+
+				// Compare with true genotype
+				trueG := cohort[idv].Genotype[pgs.Ploidy*i] + cohort[idv].Genotype[pgs.Ploidy*i+1]
+				if majorG == trueG {
+					majorAcc++
+				}
+			}
+			majorAcc /= float32(len(p.Loci))
+
+			results = append(results, Result{
+				PgsID:            pgsID,
+				NumVariants:      idsToNumVariants[pgsID],
+				Individual:       idv,
+				Ancestry:         anc,
+				Precision:        prec,
+				Density:          density,
+				GuessAccuracy:    acc,
+				BaselineAccuracy: majorAcc,
+				Latency:          clockElapsed,
+				CPUTime:          cpuElapsed,
+				MemoryPeak:       maxMem,
+			})
+		}
+		fmt.Println()
+	}
+
+	filepath := path.Join("results/density/",
+		fmt.Sprintf("%d_density_accuracy_%s_%d.json", int(densityThreshold), anc, id))
+	resFile, err := os.Create(filepath)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Println("Density accuracy measurement completed.")
+}
+
+func measureResources() {
+	idsToNumVariants, _, err := loadValidatedPgsAndLoci()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	individuals := getIndividualsSample()
+	anc := os.Args[2]
+	id, err := strconv.Atoi(os.Args[3])
+	if err != nil || id < 0 || id >= len(individuals[anc]) {
+		log.Printf("Invalid individual index: %s", os.Args[3])
+	}
+	fmt.Printf("=== Ancestry: %s, Idv: %d (%s) ===\n", anc, id, individuals[anc][id])
+
+	type Result struct {
+		PgsID         string
+		NumVariants   int
+		Individual    string
+		Ancestry      string
+		GuessAccuracy float32
+		WallTime      float64
+		CPUTime       float64
+		MemoryPeak    uint64
+	}
+	results := make([]Result, 0)
+
+	allPgs := make([]string, 0, len(idsToNumVariants))
+	for id := range idsToNumVariants {
+		allPgs = append(allPgs, id)
+	}
+	// sort by number of variants
+	sort.Slice(allPgs, func(i, j int) bool {
+		return idsToNumVariants[allPgs[i]] < idsToNumVariants[allPgs[j]]
+	})
+
+	for _, pgsID := range allPgs {
+		fmt.Printf("Processing %s: %d variants\n", pgsID, idsToNumVariants[pgsID])
+		p := pgs.NewPGS()
+		err = p.LoadCatalogFile(path.Join(data.LocalInputFolder, pgsID+"_hmPOS_GRCh37.txt"))
+		if err != nil {
+			log.Printf("Error loading catalog file: %v\n", err)
+			continue
+		}
+		p.LoadStats(data.GG)
+		cohort := solver.NewCohort(p, data.GG)
+		var precisionLimit uint32 = 9
+		if len(p.Loci) >= DeterminismLimit {
+			precisionLimit = 8
+		}
+		idv := individuals[anc][id]
+
+		// Force GC to get a clean baseline
+		runtime.GC()
+		// Memory measurement setup
+		var maxMem uint64
+		done := make(chan struct{})
+		var wgMem sync.WaitGroup
+		var usage syscall.Rusage
+
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		maxMem = m.HeapAlloc
+		start := time.Now()
+		syscall.Getrusage(syscall.RUSAGE_SELF, &usage)
+		cpuStart := float64(usage.Utime.Sec) + float64(usage.Utime.Usec)/1e6 + float64(usage.Stime.Sec) + float64(usage.Stime.Usec)/1e6
+
+		wgMem.Add(1)
+		go func() {
+			defer wgMem.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
+			var m runtime.MemStats
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					runtime.ReadMemStats(&m)
+					if m.HeapAlloc > maxMem {
+						maxMem = m.HeapAlloc
+					}
+				}
+			}
+		}()
+
+		var solutions [][]uint8
+		slv := solver.NewDP(cohort[idv].Score, p, anc, precisionLimit, make(map[int]uint8))
+		if p.NumVariants < DeterminismLimit {
+			sm := slv.SolveDeterministic()
+			solutions = solver.SortByLikelihood(sm, p.PopulationStats[anc], p.EffectAlleles)
+		} else {
+			sm := slv.SolveProbabilistic()
+			solutions = solver.SortByLikelihood(sm, p.PopulationStats[anc], p.EffectAlleles)
+		}
+		clockElapsed := time.Since(start).Seconds()
+		syscall.Getrusage(syscall.RUSAGE_SELF, &usage)
+		cpuEnd := float64(usage.Utime.Sec) + float64(usage.Utime.Usec)/1e6 + float64(usage.Stime.Sec) + float64(usage.Stime.Usec)/1e6
+		cpuElapsed := cpuEnd - cpuStart
+
+		close(done)
+		wgMem.Wait()
+
+		acc := float32(0.0)
+		if len(solutions) > 0 {
+			acc = solver.Accuracy(solutions[0], cohort[idv].Genotype)
+		}
+
+		results = append(results, Result{
+			PgsID:         pgsID,
+			NumVariants:   idsToNumVariants[pgsID],
+			Individual:    idv,
+			Ancestry:      anc,
+			GuessAccuracy: acc,
+			WallTime:      clockElapsed,
+			CPUTime:       cpuElapsed,
+			MemoryPeak:    maxMem,
+		})
+	}
+
+	os.MkdirAll("results/resources/", 0755)
+	filepath := path.Join("results/resources/",
+		fmt.Sprintf("resources_%s_%d.json", anc, id))
+	resFile, err := os.Create(filepath)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	if err = encoder.Encode(results); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Println("Resources measurement completed.")
+}
+
+func genotypeConfusionMatrix() {
+	fmt.Println("--- Computing genotype confusion matrix ---")
+
+	guessed := loadGuessedGenotypes(perAncestryAf)
+
+	positionsPerChr := make(map[string]map[string]struct{})
+	for _, chrMap := range guessed {
+		for chr, posMap := range chrMap {
+			if _, ok := positionsPerChr[chr]; !ok {
+				positionsPerChr[chr] = make(map[string]struct{})
+			}
+			for pos := range posMap {
+				positionsPerChr[chr][pos] = struct{}{}
+			}
+		}
+	}
+
+	mainSamples := solver.All1000GenomesSamples()
+	relatives := solver.AllRelativeSamples()
+	trueSnps := make(map[string]map[string]map[string]uint8) // individual -> chr -> pos -> genotype
+	for _, idv := range solver.All1000GenomesAndRelativeSamples() {
+		trueSnps[idv] = make(map[string]map[string]uint8)
+	}
+	for chrID := 1; chrID <= 22; chrID++ {
+		chr := strconv.Itoa(chrID)
+		posMap, ok := positionsPerChr[chr]
+		if !ok {
+			continue
+		}
+		positions := make([]string, 0, len(posMap))
+		for pos := range posMap {
+			positions = append(positions, pos)
+		}
+		fmt.Printf("Chromosome %s: %d positions\n", chr, len(positions))
+		retrieved := getIndividualPositionSNPs(chr, positions, mainSamples, data.GG)
+		for idv := range retrieved {
+			trueSnps[idv][chr] = retrieved[idv]
+		}
+		retrieved = getIndividualPositionSNPs(chr, positions, relatives, data.RL)
+		for idv := range retrieved {
+			trueSnps[idv][chr] = retrieved[idv]
+		}
+	}
+
+	// counts[locus][trueGenotype][guessedGenotype] = count
+	type ErrorLikelihood struct {
+		Counts        [3][3]int     `json:"counts"`
+		Probabilities [3][3]float64 `json:"probabilities"`
+	}
+	locusErrors := make(map[string]*ErrorLikelihood)
+
+	for idv, chrMap := range guessed {
+		if _, ok := trueSnps[idv]; !ok {
+			continue
+		}
+		for chr, posMap := range chrMap {
+			for pos, guessedGtp := range posMap {
+				trueGtp, ok := trueSnps[idv][chr][pos]
+				if !ok {
+					continue
+				}
+				if guessedGtp > 2 || trueGtp > 2 {
+					continue
+				}
+				locus := data.MergeLocus(chr, pos)
+				if _, exists := locusErrors[locus]; !exists {
+					locusErrors[locus] = &ErrorLikelihood{}
+				}
+				locusErrors[locus].Counts[trueGtp][guessedGtp]++
+			}
+		}
+	}
+
+	// Normalize each row to get probabilities
+	for _, el := range locusErrors {
+		for trueGtp := 0; trueGtp <= 2; trueGtp++ {
+			rowSum := 0
+			for guessedGtp := 0; guessedGtp <= 2; guessedGtp++ {
+				rowSum += el.Counts[trueGtp][guessedGtp]
+			}
+			if rowSum > 0 {
+				for guessedGtp := 0; guessedGtp <= 2; guessedGtp++ {
+					el.Probabilities[trueGtp][guessedGtp] = float64(el.Counts[trueGtp][guessedGtp]) / float64(rowSum)
+				}
+			}
+		}
+	}
+
+	resultFolder := "results"
+	outPath := path.Join(resultFolder, "confusion_matrix.json")
+	resFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Error opening result file: %v", err)
+	}
+	defer resFile.Close()
+	encoder := json.NewEncoder(resFile)
+	encoder.SetIndent("", "  ")
+	if err = encoder.Encode(locusErrors); err != nil {
+		log.Fatal("Cannot encode json", err)
+	}
+	fmt.Printf("Saved confusion matrix for %d loci to %s\n", len(locusErrors), outPath)
+}
+
+func ukbLinking() {
+	fmt.Println("--- UKB perturbed genotype linking ---")
+
+	type ConfusionEntry struct {
+		Counts        [3][3]int     `json:"counts"`
+		Probabilities [3][3]float64 `json:"probabilities"`
+	}
+	cmFile, err := os.Open("results/confusion_matrix.json")
+	if err != nil {
+		log.Fatalf("Error opening confusion matrix: %v", err)
+	}
+	defer cmFile.Close()
+	var confusionMatrix map[string]*ConfusionEntry
+	if err = json.NewDecoder(cmFile).Decode(&confusionMatrix); err != nil {
+		log.Fatalf("Error decoding confusion matrix: %v", err)
+	}
+	fmt.Printf("Loaded confusion matrix for %d loci\n", len(confusionMatrix))
+
+	// Clamp probabilities: replace 0 with 0.01, 1 with 0.99, then normalize each row
+	for _, entry := range confusionMatrix {
+		for row := 0; row < 3; row++ {
+			for col := 0; col < 3; col++ {
+				if entry.Probabilities[row][col] == 0 {
+					entry.Probabilities[row][col] = 0.01
+				} else if entry.Probabilities[row][col] == 1 {
+					entry.Probabilities[row][col] = 0.99
+				}
+			}
+			// Normalize the row
+			rowSum := 0.0
+			for col := 0; col < 3; col++ {
+				rowSum += entry.Probabilities[row][col]
+			}
+			if rowSum > 0 {
+				for col := 0; col < 3; col++ {
+					entry.Probabilities[row][col] /= rowSum
+				}
+			}
+		}
+	}
+
+	// Group loci by chromosome
+	positionsPerChr := make(map[string][]string)
+	locusList := make([]string, 0, len(confusionMatrix))
+	for locus := range confusionMatrix {
+		locusList = append(locusList, locus)
+		chr, pos := data.SplitLocus(locus)
+		positionsPerChr[chr] = append(positionsPerChr[chr], pos)
+	}
+	// Sort positions within each chromosome
+	for chr := range positionsPerChr {
+		sort.Strings(positionsPerChr[chr])
+	}
+
+	// Retrieve true genotypes for all UK Biobank individuals
+	individuals := solver.AllUKBiobankSamples()
+	sort.Strings(individuals)
+	fmt.Printf("Number of UKB individuals: %d\n", len(individuals))
+
+	numWorkers := 12
+
+	// trueGenotypes: individual -> locus -> genotype (0, 1, or 2)
+	trueGenotypes := make(map[string]map[string]uint8)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	chrChan := make(chan int, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chrID := range chrChan {
+				chr := strconv.Itoa(chrID)
+				positions, ok := positionsPerChr[chr]
+				if !ok || len(positions) == 0 {
+					continue
+				}
+				fmt.Printf("Chromosome %s: retrieving %d positions\n", chr, len(positions))
+				retrieved := getIndividualPositionSNPsBatched(chr, positions, data.UKB)
+				mu.Lock()
+				for idv, posMap := range retrieved {
+					if _, exists := trueGenotypes[idv]; !exists {
+						trueGenotypes[idv] = make(map[string]uint8)
+					}
+					for pos, gtp := range posMap {
+						locus := data.MergeLocus(chr, pos)
+						trueGenotypes[idv][locus] = gtp
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for chrID := 1; chrID <= 22; chrID++ {
+		chrChan <- chrID
+	}
+	close(chrChan)
+	wg.Wait()
+	fmt.Printf("Retrieved genotypes for %d individuals\n", len(trueGenotypes))
+
+	// Apply genotype errors across individuals
+	perturbedGenotypes := make(map[string]map[string]uint8, len(trueGenotypes))
+	for idv, locusMap := range trueGenotypes {
+		copied := make(map[string]uint8, len(locusMap))
+		for locus, gtp := range locusMap {
+			copied[locus] = gtp
+		}
+		perturbedGenotypes[idv] = copied
+	}
+	idvChan := make(chan string, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			localRng := rand.New(rand.NewSource(rand.Int63()))
+			for idv := range idvChan {
+				perturbed := perturbedGenotypes[idv]
+				for locus, trueGtp := range perturbed {
+					entry, ok := confusionMatrix[locus]
+					if !ok || trueGtp > 2 {
+						continue
+					}
+					// Sample from the confusion matrix row
+					r := localRng.Float64()
+					cumulative := 0.0
+					newGtp := uint8(2) // default to last column
+					for col := 0; col < 3; col++ {
+						cumulative += entry.Probabilities[trueGtp][col]
+						if r < cumulative {
+							newGtp = uint8(col)
+							break
+						}
+					}
+					if newGtp != trueGtp {
+						perturbed[locus] = newGtp
+					}
+				}
+			}
+		}()
+	}
+	for idv := range perturbedGenotypes {
+		idvChan <- idv
+	}
+	close(idvChan)
+	wg.Wait()
+	fmt.Printf("Applied genotype errors to %d individuals\n", len(perturbedGenotypes))
+
+	// Load REF/ALT alleles from pre-computed file
+	allelesFile := "results/ukb_alleles.json"
+	af, err := os.Open(allelesFile)
+	if err != nil {
+		log.Fatalf("Error opening alleles file %s: %v. Run with -e=ukballeles first.", allelesFile, err)
+	}
+	var alleles map[string][]string
+	if err = json.NewDecoder(af).Decode(&alleles); err != nil {
+		log.Fatalf("Error decoding alleles file: %v", err)
+	}
+	af.Close()
+	fmt.Printf("Loaded REF/ALT alleles for %d loci from %s\n", len(alleles), allelesFile)
+
+	// Sort loci by chromosome and position for VCF output
+	sort.Slice(locusList, func(i, j int) bool {
+		chrI, posI := data.SplitLocus(locusList[i])
+		chrJ, posJ := data.SplitLocus(locusList[j])
+		chrIInt, _ := strconv.Atoi(chrI)
+		chrJInt, _ := strconv.Atoi(chrJ)
+		if chrIInt != chrJInt {
+			return chrIInt < chrJInt
+		}
+		posIInt, _ := strconv.Atoi(posI)
+		posJInt, _ := strconv.Atoi(posJ)
+		return posIInt < posJInt
+	})
+
+	resultDir := "results/ukb_linking"
+	if err = os.MkdirAll(resultDir, 0755); err != nil {
+		log.Fatalf("Error creating result directory: %v", err)
+	}
+
+	vcfPath := path.Join(resultDir, "plink.vcf")
+	vcfFile, err := os.OpenFile(vcfPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Cannot create VCF file: %v", err)
+	}
+	defer vcfFile.Close()
+
+	// Write VCF header
+	writer := bufio.NewWriterSize(vcfFile, 64*1024*1024) // 64MB buffer
+	fmt.Fprint(writer, "##fileformat=VCFv4.1\n")
+	fmt.Fprint(writer, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
+
+	// Samples header: perturbed ($idv) then truth (idv)
+	fmt.Fprint(writer, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT")
+	for _, idv := range individuals {
+		fmt.Fprintf(writer, "\t$%s", idv)
+	}
+	for _, idv := range individuals {
+		fmt.Fprintf(writer, "\t%s", idv)
+	}
+	fmt.Fprint(writer, "\n")
+	writer.Flush()
+	fmt.Printf("Saved the sample IDs into the VCF file\n")
+
+	// Write genotype lines
+	genotypeStr := func(gtp uint8) string {
+		switch gtp {
+		case 0:
+			return "0|0"
+		case 1:
+			return "1/0"
+		case 2:
+			return "1|1"
+		default:
+			return ".|."
+		}
+	}
+
+	for _, locus := range locusList {
+		if alleles[locus][0] == "." || alleles[locus][1] == "." {
+			continue
+		}
+		chr, pos := data.SplitLocus(locus)
+		fmt.Fprintf(writer, "%s\t%s\t.\t%s\t%s\t100\tPASS\t.\tGT", chr, pos, alleles[locus][0], alleles[locus][1])
+
+		// Perturbed genotypes
+		for _, idv := range individuals {
+			if gtp, ok := perturbedGenotypes[idv][locus]; ok {
+				fmt.Fprintf(writer, "\t%s", genotypeStr(gtp))
+			} else {
+				fmt.Fprint(writer, "\t0|0")
+			}
+		}
+
+		// Truth genotypes
+		for _, idv := range individuals {
+			if gtp, ok := trueGenotypes[idv][locus]; ok {
+				fmt.Fprintf(writer, "\t%s", genotypeStr(gtp))
+			} else {
+				fmt.Fprint(writer, "\t0|0")
+			}
+		}
+
+		fmt.Fprint(writer, "\n")
+	}
+	writer.Flush()
+	vcfFile.Close()
+	fmt.Printf("VCF written to %s\n", vcfPath)
+
+	// Free large data structures before running plink
+	trueGenotypes = nil
+	perturbedGenotypes = nil
+	alleles = nil
+	runtime.GC()
+	fmt.Println("Memory released")
+	// Compress, index, and run KING
+	compressedVcfPath := vcfPath + ".gz"
+	compressVcfFile(vcfPath, compressedVcfPath)
+	indexVcfFile(compressedVcfPath)
+
+	runCommand("plink", []string{
+		"--vcf", compressedVcfPath,
+		"--make-king", "triangle",
+		"--out", path.Join(resultDir, "plink"),
+	})
+	fmt.Printf("KING relatedness matrix saved to %s.king\n", path.Join(resultDir, "plink"))
+
+	// Cleanup intermediate files
+	removeFiles(vcfPath, compressedVcfPath, compressedVcfPath+".csi")
+	fmt.Println("Done.")
+}
+
+func retrieveUkbAlleles() {
+	fmt.Println("--- Retrieving UKB REF/ALT alleles ---")
+
+	// Load confusion matrix to get the loci
+	cmFile, err := os.Open("results/confusion_matrix.json")
+	if err != nil {
+		log.Fatalf("Error opening confusion matrix: %v", err)
+	}
+	var confusionMatrix map[string]json.RawMessage
+	if err = json.NewDecoder(cmFile).Decode(&confusionMatrix); err != nil {
+		log.Fatalf("Error decoding confusion matrix: %v", err)
+	}
+	cmFile.Close()
+
+	// Group positions by chromosome
+	positionsPerChr := make(map[string][]string)
+	for locus := range confusionMatrix {
+		chr, pos := data.SplitLocus(locus)
+		positionsPerChr[chr] = append(positionsPerChr[chr], pos)
+	}
+	for chr := range positionsPerChr {
+		sort.Strings(positionsPerChr[chr])
+	}
+
+	numWorkers := 4
+	alleles := make(map[string][]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	chrChan := make(chan int, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chrID := range chrChan {
+				chr := strconv.Itoa(chrID)
+				positions, ok := positionsPerChr[chr]
+				if !ok || len(positions) == 0 {
+					continue
+				}
+				fmt.Printf("Chromosome %s: retrieving alleles for %d positions\n", chr, len(positions))
+				regions := make([]string, len(positions))
+				for i, pos := range positions {
+					regions[i] = fmt.Sprintf("%s:%s-%s", chr, pos, pos)
+				}
+				args := []string{
+					"query",
+					"-f", "%POS\t%REF\t%ALT\n",
+					"-r", strings.Join(regions, ","),
+					data.GetChromosomeFilepath(chr, data.UKB),
+				}
+				output, err := exec.Command("bcftools", args...).Output()
+				if err != nil {
+					log.Fatalf("Error executing bcftools for chr %s: %v", chr, err)
+				}
+				posSet := make(map[string]struct{}, len(positions))
+				for _, pos := range positions {
+					posSet[pos] = struct{}{}
+				}
+				lines := strings.Split(string(output), "\n")
+				localAlleles := make(map[string][]string)
+				for _, line := range lines {
+					if line == "" {
+						continue
+					}
+					fields := strings.Split(line, "\t")
+					if len(fields) < 3 {
+						continue
+					}
+					pos := fields[0]
+					if _, ok := posSet[pos]; !ok {
+						continue
+					}
+					locus := data.MergeLocus(chr, pos)
+					if _, exists := localAlleles[locus]; !exists {
+						localAlleles[locus] = []string{fields[1], fields[2]}
+					}
+				}
+				for _, pos := range positions {
+					locus := data.MergeLocus(chr, pos)
+					if _, exists := localAlleles[locus]; !exists {
+						localAlleles[locus] = []string{".", "."}
+					}
+				}
+				mu.Lock()
+				for locus, al := range localAlleles {
+					alleles[locus] = al
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for chrID := 1; chrID <= 22; chrID++ {
+		chrChan <- chrID
+	}
+	close(chrChan)
+	wg.Wait()
+	fmt.Printf("Retrieved alleles for %d loci\n", len(alleles))
+
+	outPath := "results/ukb_alleles.json"
+	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Error creating output file: %v", err)
+	}
+	defer outFile.Close()
+	encoder := json.NewEncoder(outFile)
+	encoder.SetIndent("", "  ")
+	if err = encoder.Encode(alleles); err != nil {
+		log.Fatalf("Error encoding alleles: %v", err)
+	}
+	fmt.Printf("Saved alleles to %s\n", outPath)
+}
+
+func ukbKingRelatedness() {
+	fmt.Println("--- UKB KING relatedness ground truth ---")
+
+	if len(os.Args) < 4 {
+		log.Fatalf("Usage: %s -e=ukbking <bed_prefix> <snp_ids_file>\n"+
+			"  bed_prefix:    path prefix for .bed/.bim/.fam files\n"+
+			"  snp_ids_file:  file with one SNP ID per line to extract", os.Args[0])
+	}
+	bedPrefix := os.Args[2]
+	snpFile := os.Args[3]
+
+	resultDir := "results/ukb_king"
+	if err := os.MkdirAll(resultDir, 0755); err != nil {
+		log.Fatalf("Error creating result directory: %v", err)
+	}
+	outPrefix := path.Join(resultDir, "king")
+
+	// Full square kinship matrix
+	fmt.Println("Computing KING kinship matrix...")
+	runCommand("plink", []string{
+		"--bfile", bedPrefix,
+		"--extract", snpFile,
+		"--memory", "100000",
+		"--make-king", "square",
+		"--out", outPrefix,
+	})
+	fmt.Printf("KING matrix saved to %s.king\n", outPrefix)
+
+	// Relationship table: twins, 1st and 2nd degree (kinship >= 0.0884)
+	fmt.Println("Computing KING relationship table...")
+	runCommand("plink", []string{
+		"--bfile", bedPrefix,
+		"--extract", snpFile,
+		"--memory", "100000",
+		"--make-king-table",
+		"--king-table-filter", "0.0884",
+		"--out", outPrefix,
+	})
+
+	// Post-process: classify relationships by degree
+	kinFile := outPrefix + ".kin0"
+	kinData, err := os.ReadFile(kinFile)
+	if err != nil {
+		log.Fatalf("Error reading relationship table %s: %v", kinFile, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(kinData)), "\n")
+	if len(lines) < 2 {
+		fmt.Println("No related pairs found.")
+		fmt.Println("Done.")
+		return
+	}
+
+	annotatedFile := outPrefix + "_relationships.tsv"
+	out, err := os.Create(annotatedFile)
+	if err != nil {
+		log.Fatalf("Error creating annotated file: %v", err)
+	}
+	defer out.Close()
+
+	// Write header with added Degree column
+	fmt.Fprintf(out, "%s\tDegree\n", lines[0])
+
+	twinCount, firstCount, secondCount := 0, 0, 0
+	for _, line := range lines[1:] {
+		fields := strings.Split(line, "\t")
+		// KINSHIP is the last column in plink2 .kin0 output
+		kinship, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			log.Printf("Error parsing kinship value: %s", fields[len(fields)-1])
+			continue
+		}
+		var degree string
+		switch {
+		case kinship > 0.354:
+			degree = "Twin"
+			twinCount++
+		case kinship > 0.177:
+			degree = "1st"
+			firstCount++
+		default:
+			degree = "2nd"
+			secondCount++
+		}
+		fmt.Fprintf(out, "%s\t%s\n", line, degree)
+	}
+	fmt.Printf("Relationships: %d twin/duplicate, %d 1st-degree, %d 2nd-degree\n",
+		twinCount, firstCount, secondCount)
+	fmt.Printf("Annotated relationship table saved to %s\n", annotatedFile)
+
+	fmt.Println("Done.")
+}
+
+// ============================================================
+// UKB Linking Statistics — streaming KING triangle matrix reader
+// ============================================================
+
+// BoxPlotStats holds pre-computed boxplot statistics for one category.
+type BoxPlotStats struct {
+	Label  string    `json:"label"`
+	Method string    `json:"method"`
+	N      int64     `json:"n"`
+	Mean   float64   `json:"mean"`
+	Median float64   `json:"median"`
+	Q1     float64   `json:"q1"`
+	Q3     float64   `json:"q3"`
+	WhisLo float64   `json:"whislo"`
+	WhisHi float64   `json:"whishi"`
+	Fliers []float64 `json:"fliers"`
+}
+
+// streamingHistogram estimates quantiles from a stream of bounded values
+// using a fixed-width histogram. KING kinship values lie in [-1, 1].
+const (
+	sqNumBins = 20000
+	sqMin     = -1.0
+	sqMax     = 1.0
+)
+
+type streamingHistogram struct {
+	bins  []int64
+	count int64
+	sum   float64
+}
+
+func newStreamingHistogram() *streamingHistogram {
+	return &streamingHistogram{bins: make([]int64, sqNumBins)}
+}
+
+func (sh *streamingHistogram) add(val float64) {
+	sh.count++
+	sh.sum += val
+	bin := int((val - sqMin) / ((sqMax - sqMin) / float64(sqNumBins)))
+	if bin < 0 {
+		bin = 0
+	}
+	if bin >= sqNumBins {
+		bin = sqNumBins - 1
+	}
+	sh.bins[bin]++
+}
+
+func (sh *streamingHistogram) merge(other *streamingHistogram) {
+	for i := range sh.bins {
+		sh.bins[i] += other.bins[i]
+	}
+	sh.count += other.count
+	sh.sum += other.sum
+}
+
+func (sh *streamingHistogram) histPercentile(p float64) float64 {
+	target := int64(math.Ceil(p / 100.0 * float64(sh.count)))
+	if target <= 0 {
+		target = 1
+	}
+	binWidth := (sqMax - sqMin) / float64(sqNumBins)
+	cumulative := int64(0)
+	for i, c := range sh.bins {
+		cumulative += c
+		if cumulative >= target {
+			return sqMin + (float64(i)+0.5)*binWidth
+		}
+	}
+	return sqMax
+}
+
+func (sh *streamingHistogram) computeBoxPlotStats(label, method string) *BoxPlotStats {
+	if sh.count == 0 {
+		return nil
+	}
+	binWidth := (sqMax - sqMin) / float64(sqNumBins)
+	q1 := sh.histPercentile(25)
+	med := sh.histPercentile(50)
+	q3 := sh.histPercentile(75)
+	iqr := q3 - q1
+	whisLo := q1 - 1.5*iqr
+	whisHi := q3 + 1.5*iqr
+
+	// Find actual whisker endpoints and collect fliers from bins
+	actualWhisLo, actualWhisHi := sqMin, sqMax
+	whisLoFound, whisHiFound := false, false
+	fliers := make([]float64, 0)
+
+	for i := 0; i < sqNumBins; i++ {
+		if sh.bins[i] == 0 {
+			continue
+		}
+		binCenter := sqMin + (float64(i)+0.5)*binWidth
+		if binCenter >= whisLo && !whisLoFound {
+			actualWhisLo = binCenter
+			whisLoFound = true
+		} else if binCenter < whisLo {
+			// Lower fliers
+			for j := int64(0); j < sh.bins[i] && len(fliers) < 500; j++ {
+				fliers = append(fliers, binCenter)
+			}
+		}
+	}
+	for i := sqNumBins - 1; i >= 0; i-- {
+		if sh.bins[i] == 0 {
+			continue
+		}
+		binCenter := sqMin + (float64(i)+0.5)*binWidth
+		if binCenter <= whisHi && !whisHiFound {
+			actualWhisHi = binCenter
+			whisHiFound = true
+		} else if binCenter > whisHi {
+			// Upper fliers
+			for j := int64(0); j < sh.bins[i] && len(fliers) < 500; j++ {
+				fliers = append(fliers, binCenter)
+			}
+		}
+	}
+
+	return &BoxPlotStats{
+		Label:  label,
+		Method: method,
+		N:      sh.count,
+		Mean:   sh.sum / float64(sh.count),
+		Median: med,
+		Q1:     q1,
+		Q3:     q3,
+		WhisLo: actualWhisLo,
+		WhisHi: actualWhisHi,
+		Fliers: fliers,
+	}
+}
+
+// statsAccumulator collects values for a single (category, method) key.
+// Small categories store all values; large ones use a streaming histogram.
+type statsAccumulator struct {
+	label     string
+	method    string
+	values    []float64           // exact storage for small categories
+	streaming *streamingHistogram // histogram-based streaming stats for large categories
+}
+
+func newExactAccumulator(label, method string) *statsAccumulator {
+	return &statsAccumulator{label: label, method: method, values: make([]float64, 0, 1024)}
+}
+
+func newStreamingAccumulator(label, method string) *statsAccumulator {
+	return &statsAccumulator{label: label, method: method, streaming: newStreamingHistogram()}
+}
+
+func (sa *statsAccumulator) add(val float64) {
+	if sa.streaming != nil {
+		sa.streaming.add(val)
+	} else {
+		sa.values = append(sa.values, val)
+	}
+}
+
+func (sa *statsAccumulator) count() int64 {
+	if sa.streaming != nil {
+		return sa.streaming.count
+	}
+	return int64(len(sa.values))
+}
+
+func (sa *statsAccumulator) computeStats() *BoxPlotStats {
+	if sa.streaming != nil {
+		return sa.streaming.computeBoxPlotStats(sa.label, sa.method)
+	}
+	data := sa.values
+	if len(data) == 0 {
+		return nil
+	}
+	sort.Float64s(data)
+	n := len(data)
+	q1 := percentile(data, 25)
+	med := percentile(data, 50)
+	q3 := percentile(data, 75)
+	iqr := q3 - q1
+	whisLo := q1 - 1.5*iqr
+	whisHi := q3 + 1.5*iqr
+	actualWhisLo := data[0]
+	for _, v := range data {
+		if v >= whisLo {
+			actualWhisLo = v
+			break
+		}
+	}
+	actualWhisHi := data[n-1]
+	for i := n - 1; i >= 0; i-- {
+		if data[i] <= whisHi {
+			actualWhisHi = data[i]
+			break
+		}
+	}
+	fliers := make([]float64, 0)
+	for _, v := range data {
+		if v < actualWhisLo || v > actualWhisHi {
+			fliers = append(fliers, v)
+			if len(fliers) >= 500 {
+				break
+			}
+		}
+	}
+	s := 0.0
+	for _, v := range data {
+		s += v
+	}
+	return &BoxPlotStats{
+		Label:  sa.label,
+		Method: sa.method,
+		N:      int64(len(data)),
+		Mean:   s / float64(len(data)),
+		Median: med,
+		Q1:     q1,
+		Q3:     q3,
+		WhisLo: actualWhisLo,
+		WhisHi: actualWhisHi,
+		Fliers: fliers,
+	}
+}
+
+func percentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	k := (p / 100) * float64(len(sorted)-1)
+	f := math.Floor(k)
+	c := math.Ceil(k)
+	if f == c {
+		return sorted[int(k)]
+	}
+	return sorted[int(f)]*(c-k) + sorted[int(c)]*(k-f)
+}
+
+func getBaseID(fullID string) string {
+	clean := fullID
+	if strings.HasPrefix(clean, "$") {
+		clean = clean[1:]
+	}
+	parts := strings.SplitN(clean, "_", 2)
+	if len(parts) == 2 && parts[0] == parts[1] {
+		return parts[0]
+	}
+	return clean
+}
+
+func readKingIDs(filePath string) []string {
+	f, err := os.Open(filePath)
+	if err != nil {
+		log.Fatalf("Cannot open KING ID file %s: %v", filePath, err)
+	}
+	defer f.Close()
+	var ids []string
+	scanner := bufio.NewScanner(f)
+	first := true
+	for scanner.Scan() {
+		if first {
+			first = false // skip header
+			continue
+		}
+		ids = append(ids, strings.TrimSpace(scanner.Text()))
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error reading KING ID file: %v", err)
+	}
+	return ids
+}
+
+type ukbRelationship struct {
+	relBaseID string
+	degree    string // "Twin", "1", "2"
+}
+
+func readUKBRelatedIndividualsGo(filePath string) map[string][]ukbRelationship {
+	f, err := os.Open(filePath)
+	if err != nil {
+		log.Fatalf("Cannot open relationship file %s: %v", filePath, err)
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	headerLine, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatalf("Cannot read relationship header: %v", err)
+	}
+	header := strings.Split(strings.TrimSpace(headerLine), "\t")
+	iid1Col, iid2Col, degreeCol := -1, -1, -1
+	for i, h := range header {
+		switch h {
+		case "#IID1", "IID1":
+			iid1Col = i
+		case "IID2":
+			iid2Col = i
+		case "Degree":
+			degreeCol = i
+		}
+	}
+	if iid1Col < 0 || iid2Col < 0 || degreeCol < 0 {
+		log.Fatalf("Missing columns in relationship file: IID1=%d IID2=%d Degree=%d", iid1Col, iid2Col, degreeCol)
+	}
+	related := make(map[string][]ukbRelationship)
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) <= degreeCol {
+			continue
+		}
+		id1, id2, deg := fields[iid1Col], fields[iid2Col], fields[degreeCol]
+		if deg != "Twin" && deg != "1st" && deg != "2nd" {
+			continue
+		}
+		related[id1] = append(related[id1], ukbRelationship{relBaseID: id2, degree: deg})
+		related[id2] = append(related[id2], ukbRelationship{relBaseID: id1, degree: deg})
+	}
+	return related
+}
+
+// workerResult holds per-category accumulated values from one worker.
+type workerResult struct {
+	// Small categories: key = "category|method" → values
+	small map[string][]float64
+	// Unrelated streaming histograms
+	unrelKING     *streamingHistogram
+	unrelTrueKING *streamingHistogram
+}
+
+func processTriangleRows(
+	dataFile string,
+	rowOffsets []struct {
+		sampleIdx int
+		offset    int64
+	},
+	numPerturbed int,
+	relatedOf [][]struct {
+		localIdx int
+		degree   string
+	},
+	workerID int,
+) *workerResult {
+	res := &workerResult{
+		small:         make(map[string][]float64),
+		unrelKING:     newStreamingHistogram(),
+		unrelTrueKING: newStreamingHistogram(),
+	}
+
+	f, err := os.Open(dataFile)
+	if err != nil {
+		log.Fatalf("Worker %d: cannot open data file: %v", workerID, err)
+	}
+	defer f.Close()
+
+	for ri, ro := range rowOffsets {
+		si := ro.sampleIdx
+		k := si - numPerturbed // local truth index
+
+		if _, err := f.Seek(ro.offset, 0); err != nil {
+			log.Fatalf("Worker %d: seek error: %v", workerID, err)
+		}
+
+		// Read line
+		reader := bufio.NewReaderSize(f, 32*1024*1024)
+		line, err := reader.ReadBytes('\n')
+		if err != nil && len(line) == 0 {
+			log.Fatalf("Worker %d: read error at row %d: %v", workerID, si, err)
+		}
+		line = bytes.TrimRight(line, "\n\r")
+
+		// Build related lookup for this truth sample
+		perturbedRelated := make(map[int]string) // perturbed localIdx → degree
+		truthRelated := make(map[int]string)     // truth localIdx → degree
+		for _, r := range relatedOf[k] {
+			perturbedRelated[r.localIdx] = r.degree
+			truthRelated[r.localIdx] = r.degree
+		}
+
+		// Parse fields and process
+		fieldIdx := 0
+		start := 0
+		for i := 0; i <= len(line); i++ {
+			if i == len(line) || line[i] == '\t' {
+				if fieldIdx < si { // si columns expected (0..si-1)
+					val, perr := strconv.ParseFloat(string(line[start:i]), 64)
+					if perr != nil {
+						start = i + 1
+						fieldIdx++
+						continue
+					}
+					if fieldIdx < numPerturbed {
+						// Perturbed column
+						if fieldIdx == k {
+							// Self pair: perturbed[k] vs truth[k]
+							key := "Self|KING"
+							res.small[key] = append(res.small[key], val)
+						} else if deg, ok := perturbedRelated[fieldIdx]; ok {
+							key := degreeToCategory(deg) + "|KING"
+							res.small[key] = append(res.small[key], val)
+						} else {
+							// Unrelated
+							res.unrelKING.add(val)
+						}
+					} else {
+						// Truth column (fieldIdx >= numPerturbed, fieldIdx < si)
+						truthLocalIdx := fieldIdx - numPerturbed
+						if deg, ok := truthRelated[truthLocalIdx]; ok {
+							key := degreeToCategory(deg) + "|TrueKING"
+							res.small[key] = append(res.small[key], val)
+						} else {
+							// TrueKING unrelated
+							res.unrelTrueKING.add(val)
+						}
+					}
+				}
+				start = i + 1
+				fieldIdx++
+			}
+		}
+
+		if ri > 0 && ri%5000 == 0 {
+			fmt.Printf("  Worker %d: processed %d/%d rows\n", workerID, ri, len(rowOffsets))
+		}
+	}
+	return res
+}
+
+func degreeToCategory(deg string) string {
+	switch deg {
+	case "Twin":
+		return "Twin"
+	case "1st":
+		return "1st degree"
+	case "2nd":
+		return "2nd degree"
+	}
+	return deg
+}
+
+func ukbLinkingStats() {
+	fmt.Println("--- UKB Linking Statistics (streaming) ---")
+
+	resultDir := "results/ukb_linking"
+	idFile := path.Join(resultDir, "plink.king.id")
+	dataFile := path.Join(resultDir, "plink.king")
+	relFile := "results/ukb_king/king_relationships.tsv"
+
+	// 1. Read sample IDs
+	ids := readKingIDs(idFile)
+	n := len(ids)
+	fmt.Printf("Total samples: %d\n", n)
+
+	// Separate perturbed and truth IDs
+	var perturbedIDs, truthIDs []string
+	for _, sid := range ids {
+		if strings.HasPrefix(sid, "$") {
+			perturbedIDs = append(perturbedIDs, sid)
+		} else {
+			truthIDs = append(truthIDs, sid)
+		}
+	}
+	numPerturbed := len(perturbedIDs)
+	numTruth := len(truthIDs)
+	fmt.Printf("Perturbed: %d, Truth: %d\n", numPerturbed, numTruth)
+
+	// 2. Read ground-truth relationships (keyed by base IDs like "-100")
+	related := readUKBRelatedIndividualsGo(relFile)
+	fmt.Printf("Loaded relationships for %d individuals\n", len(related))
+
+	// 3. Build baseID → truth local index mapping
+	baseToLocalIdx := make(map[string]int, numTruth)
+	for k, sid := range truthIDs {
+		baseToLocalIdx[getBaseID(sid)] = k
+	}
+
+	// Pre-compute per-truth-sample related info
+	type relInfo struct {
+		localIdx int
+		degree   string
+	}
+	relatedOf := make([][]relInfo, numTruth)
+	for k := 0; k < numTruth; k++ {
+		baseID := getBaseID(truthIDs[k])
+		rels := related[baseID]
+		relatedOf[k] = make([]relInfo, 0, len(rels))
+		for _, r := range rels {
+			rIdx, ok := baseToLocalIdx[r.relBaseID]
+			if !ok {
+				continue
+			}
+			relatedOf[k] = append(relatedOf[k], relInfo{localIdx: rIdx, degree: r.degree})
+		}
+	}
+
+	// 4. Index byte offsets for truth-sample rows in the triangle file
+	// Triangle format: file line f (0-indexed) → sample index f+1, with f+1 columns.
+	// Truth samples have global indices [numPerturbed, n-1], so file lines [numPerturbed-1, n-2].
+	fmt.Println("Indexing byte offsets for truth-sample rows...")
+	type rowOffset struct {
+		sampleIdx int
+		offset    int64
+	}
+	truthRowOffsets := make([]rowOffset, 0, numTruth)
+	func() {
+		f, err := os.Open(dataFile)
+		if err != nil {
+			log.Fatalf("Cannot open KING data file: %v", err)
+		}
+		defer f.Close()
+		reader := bufio.NewReaderSize(f, 32*1024*1024)
+		fileLine := 0
+		firstTruthLine := numPerturbed - 1 // file line for first truth sample (index numPerturbed)
+		lastTruthLine := n - 2             // file line for last truth sample (index n-1)
+		byteOffset := int64(0)
+		for fileLine <= lastTruthLine {
+			if fileLine >= firstTruthLine {
+				sampleIdx := fileLine + 1
+				truthRowOffsets = append(truthRowOffsets, rowOffset{sampleIdx: sampleIdx, offset: byteOffset})
+			}
+			line, err := reader.ReadBytes('\n')
+			byteOffset += int64(len(line))
+			if err != nil {
+				break
+			}
+			fileLine++
+			if fileLine%100000 == 0 {
+				fmt.Printf("  Scanned %d/%d file lines, found %d truth rows\n", fileLine, n-1, len(truthRowOffsets))
+			}
+		}
+	}()
+	fmt.Printf("Indexed %d truth-sample rows\n", len(truthRowOffsets))
+
+	// 5. Parallel processing
+	numWorkers := runtime.NumCPU()
+	if numWorkers > 12 {
+		numWorkers = 12
+	}
+	fmt.Printf("Using %d workers\n", numWorkers)
+
+	// Convert relatedOf to the type expected by processTriangleRows
+	type relInfoExport struct {
+		localIdx int
+		degree   string
+	}
+	relatedOfExport := make([][]struct {
+		localIdx int
+		degree   string
+	}, numTruth)
+	for k := 0; k < numTruth; k++ {
+		relatedOfExport[k] = make([]struct {
+			localIdx int
+			degree   string
+		}, len(relatedOf[k]))
+		for j, r := range relatedOf[k] {
+			relatedOfExport[k][j] = struct {
+				localIdx int
+				degree   string
+			}{r.localIdx, r.degree}
+		}
+	}
+
+	chunkSize := (len(truthRowOffsets) + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+	results := make([]*workerResult, numWorkers)
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if start >= len(truthRowOffsets) {
+			break
+		}
+		if end > len(truthRowOffsets) {
+			end = len(truthRowOffsets)
+		}
+		wg.Add(1)
+		go func(workerID, s, e int) {
+			defer wg.Done()
+			workerRows := make([]struct {
+				sampleIdx int
+				offset    int64
+			}, e-s)
+			for i, ro := range truthRowOffsets[s:e] {
+				workerRows[i] = struct {
+					sampleIdx int
+					offset    int64
+				}{ro.sampleIdx, ro.offset}
+			}
+			results[workerID] = processTriangleRows(
+				dataFile, workerRows, numPerturbed, relatedOfExport, workerID,
+			)
+			fmt.Printf("  Worker %d finished (%d rows)\n", workerID, e-s)
+		}(w, start, end)
+	}
+	wg.Wait()
+	fmt.Println("All workers finished")
+
+	// 6. Merge results
+	categories := []string{"Self", "Twin", "1st degree", "2nd degree"}
+	methods := []string{"KING", "TrueKING"}
+
+	accumulators := make(map[string]*statsAccumulator)
+	for _, cat := range categories {
+		for _, m := range methods {
+			key := cat + "|" + m
+			accumulators[key] = newExactAccumulator(cat, m)
+		}
+	}
+	accumulators["Unrelated|KING"] = newStreamingAccumulator("Unrelated", "KING")
+	accumulators["Unrelated|TrueKING"] = newStreamingAccumulator("Unrelated", "TrueKING")
+	// TrueSelf is always 0.5
+	accumulators["Self|TrueKING"] = newExactAccumulator("Self", "TrueKING")
+
+	for _, wr := range results {
+		if wr == nil {
+			continue
+		}
+		// Merge small category values
+		for key, vals := range wr.small {
+			acc, ok := accumulators[key]
+			if !ok {
+				parts := strings.SplitN(key, "|", 2)
+				accumulators[key] = newExactAccumulator(parts[0], parts[1])
+				acc = accumulators[key]
+			}
+			for _, v := range vals {
+				acc.add(v)
+			}
+		}
+		// Merge unrelated histograms
+		accumulators["Unrelated|KING"].streaming.merge(wr.unrelKING)
+		accumulators["Unrelated|TrueKING"].streaming.merge(wr.unrelTrueKING)
+	}
+
+	// Add TrueSelf values (diagonal = 0.5, not stored in triangle matrix)
+	for i := 0; i < numTruth; i++ {
+		accumulators["Self|TrueKING"].add(0.5)
+	}
+
+	// 7. Compute and output boxplot stats
+	var allStats []*BoxPlotStats
+	outputOrder := []string{
+		"Self|KING", "Self|TrueKING",
+		"Twin|KING", "Twin|TrueKING",
+		"1st degree|KING", "1st degree|TrueKING",
+		"2nd degree|KING", "2nd degree|TrueKING",
+		"Unrelated|KING", "Unrelated|TrueKING",
+	}
+	for _, key := range outputOrder {
+		acc, ok := accumulators[key]
+		if !ok || acc.count() == 0 {
+			continue
+		}
+		stats := acc.computeStats()
+		if stats != nil {
+			allStats = append(allStats, stats)
+			fmt.Printf("  %s (%s): n=%d, median=%.4f, Q1=%.4f, Q3=%.4f, mean=%.4f\n",
+				stats.Label, stats.Method, stats.N, stats.Median, stats.Q1, stats.Q3, stats.Mean)
+		}
+	}
+
+	outPath := path.Join(resultDir, "kinship_stats.json")
+	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Cannot create output file: %v", err)
+	}
+	defer outFile.Close()
+	enc := json.NewEncoder(outFile)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(allStats); err != nil {
+		log.Fatalf("Cannot encode stats: %v", err)
+	}
+	fmt.Printf("Stats written to %s\n", outPath)
+	fmt.Println("Done.")
 }
